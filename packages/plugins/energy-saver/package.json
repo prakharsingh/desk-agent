@@ -1,0 +1,12 @@
+{
+  "name": "@desk-agent/plugin-energy-saver",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": { "build": "tsc -p tsconfig.json" },
+  "dependencies": {
+    "@desk-agent/plugin-sdk": "workspace:*",
+    "@desk-agent/protocol": "workspace:*"
+  }
+}

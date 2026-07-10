@@ -16,6 +16,18 @@ build/
 out/
 *.egg-info/
 node_modules/
+*.tsbuildinfo
+
+# Android (React Native native project)
+app/android/.gradle/
+app/android/local.properties
+app/android/**/.cxx/
+app/android/.kotlin/
+*.keystore
+!debug.keystore
+
+# Core agent runtime config (copy config.example.json to config.json)
+config.json
 
 # OS files
 .DS_Store

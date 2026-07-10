@@ -1,0 +1,61 @@
+import { describe, it, expect } from 'vitest';
+import { parseFrame, parseWidget, createFrame, PROTOCOL_VERSION } from './index.js';
+
+describe('parseFrame', () => {
+  it('accepts a valid hello frame', () => {
+    const raw = { v: 1, type: 'hello', id: 'abc', ts: 123, payload: { clientVersion: '1.0.0' } };
+    const result = parseFrame(raw);
+    expect(result.ok).toBe(true);
+  });
+
+  it('accepts a valid widget.update frame with a widgets array', () => {
+    const raw = {
+      v: 1,
+      type: 'widget.update',
+      id: 'abc',
+      ts: 123,
+      payload: { widgets: [{ widgetId: 'system-stats', widget: { type: 'system-stats', props: { cpu: 12 } } }] },
+    };
+    expect(parseFrame(raw).ok).toBe(true);
+  });
+
+  it('accepts a widget.update frame with an empty widgets array', () => {
+    const raw = { v: 1, type: 'widget.update', id: 'abc', ts: 123, payload: { widgets: [] } };
+    expect(parseFrame(raw).ok).toBe(true);
+  });
+
+  it('rejects a malformed frame missing required fields', () => {
+    const result = parseFrame({ type: 'hello' });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toEqual(expect.any(String));
+  });
+
+  it('rejects a frame with an unknown type', () => {
+    const result = parseFrame({ v: 1, type: 'bogus', id: 'a', ts: 1, payload: {} });
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects a version mismatch', () => {
+    const result = parseFrame({ v: 2, type: 'heartbeat', id: 'a', ts: 1, payload: {} });
+    expect(result.ok).toBe(false);
+  });
+});
+
+describe('parseWidget', () => {
+  it('accepts a valid widget', () => {
+    expect(parseWidget({ type: 'weather', props: { tempF: 70 } }).ok).toBe(true);
+  });
+
+  it('rejects a widget missing type', () => {
+    expect(parseWidget({ props: {} }).ok).toBe(false);
+  });
+});
+
+describe('createFrame', () => {
+  it('stamps the current protocol version and a non-empty id', () => {
+    const frame = createFrame('heartbeat', {});
+    expect(frame.v).toBe(PROTOCOL_VERSION);
+    expect(frame.id.length).toBeGreaterThan(0);
+    expect(frame.type).toBe('heartbeat');
+  });
+});

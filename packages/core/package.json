@@ -1,0 +1,20 @@
+{
+  "name": "@desk-agent/core",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": { "build": "tsc -p tsconfig.json" },
+  "dependencies": {
+    "@desk-agent/protocol": "workspace:*",
+    "@desk-agent/plugin-sdk": "workspace:*",
+    "@desk-agent/plugin-system-stats": "workspace:*",
+    "@desk-agent/plugin-weather": "workspace:*",
+    "@desk-agent/plugin-energy-saver": "workspace:*",
+    "ws": "^8.18.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.0"
+  }
+}
