@@ -1,0 +1,49 @@
+# Caches and virtual environments
+.venv/
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+*.pyc
+.audit-cache/
+
+# IDE settings
+.idea/
+.vscode/
+
+# Build and packaging
+dist/
+build/
+out/
+*.egg-info/
+node_modules/
+
+# OS files
+.DS_Store
+
+# Agent files and local settings
+.agent/
+.agents/
+.claude/
+.gemini/
+.superpowers/
+docs/**/plans
+docs/**/specs
+docs/**/enhancements
+AGENTS.md
+gemini.md
+CLAUDE.md
+ANTIGRAVITY.md
+opencode.json
+
+
+# Local execution outputs / configs
+e2e_manual_output/
+results.sarif
+github_conf/
+
+# Generated scan / report artifacts (never commit these)
+audit-packs.sarif
+oscal.json
+coverage.md
+coverage.html
+*.vsix
