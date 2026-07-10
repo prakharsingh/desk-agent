@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "brain": {
+      "type": "stdio",
+      "command": "brain",
+      "args": ["serve", "--mcp"],
+      "env": {}
+    }
+  }
+}

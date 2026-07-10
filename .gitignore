@@ -33,11 +33,17 @@ config.json
 .DS_Store
 
 # Agent files and local settings
-.agent/
+# .agent/ is ignored except memory/team/ — the one subtree meant to be
+# committed and shared with every teammate who clones the repo. The rest
+# of that folder holds local, per-machine state and stays out of git.
+.agent/*
+!.agent/memory/
+.agent/memory/*
+!.agent/memory/team/
 .agents/
 .claude/
 .gemini/
-.superpowers/
+.direnv-bin/
 docs/**/plans
 docs/**/specs
 docs/**/enhancements
