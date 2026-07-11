@@ -8,3 +8,4 @@ export * from './tunnelSupervisor.js';
 export * from './adbRunner.js';
 export * from './entrypoint.js';
 export * from './watchdog.js';
+export * from './presenceEngine.js';

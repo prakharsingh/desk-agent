@@ -23,4 +23,22 @@ describe('loadConfig', () => {
   it('throws with a descriptive message when weather config is missing', () => {
     expect(() => loadConfig({})).toThrow();
   });
+
+  it('applies sane defaults for the presence block when omitted', () => {
+    const config = loadConfig({ weather: { apiKey: 'k', location: 'Seattle' } });
+    expect(config.presence).toEqual({
+      absenceTimeoutMs: 300000,
+      gazeIsKeepAwake: true,
+      bootConfirmationTimeoutMs: 300000,
+    });
+  });
+
+  it('accepts a fully specified presence block', () => {
+    const config = loadConfig({
+      weather: { apiKey: 'k', location: 'Seattle' },
+      presence: { absenceTimeoutMs: 60000, gazeIsKeepAwake: false, bootConfirmationTimeoutMs: 60000 },
+    });
+    expect(config.presence.absenceTimeoutMs).toBe(60000);
+    expect(config.presence.gazeIsKeepAwake).toBe(false);
+  });
 });

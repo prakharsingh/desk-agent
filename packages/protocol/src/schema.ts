@@ -38,6 +38,48 @@ export const EventPublishPayloadSchema = z.object({
 });
 export type EventPublishPayload = z.infer<typeof EventPublishPayloadSchema>;
 
+export const FaceVisiblePayloadSchema = z.object({ visible: z.boolean() });
+export type FaceVisiblePayload = z.infer<typeof FaceVisiblePayloadSchema>;
+
+export const GazeAtScreenPayloadSchema = z.object({ gazing: z.boolean() });
+export type GazeAtScreenPayload = z.infer<typeof GazeAtScreenPayloadSchema>;
+
+export const MotionPayloadSchema = z.object({ active: z.boolean() });
+export type MotionPayload = z.infer<typeof MotionPayloadSchema>;
+
+export const CameraStatePayloadSchema = z.object({
+  state: z.enum(['active', 'released', 'error']),
+  reason: z.string().optional(),
+});
+export type CameraStatePayload = z.infer<typeof CameraStatePayloadSchema>;
+
+export type SensorEventName =
+  | 'sensor.face_visible'
+  | 'sensor.gaze_at_screen'
+  | 'sensor.motion'
+  | 'sensor.camera_state';
+
+export type SensorEvent =
+  | { eventName: 'sensor.face_visible'; data: FaceVisiblePayload }
+  | { eventName: 'sensor.gaze_at_screen'; data: GazeAtScreenPayload }
+  | { eventName: 'sensor.motion'; data: MotionPayload }
+  | { eventName: 'sensor.camera_state'; data: CameraStatePayload };
+
+const SENSOR_SCHEMAS: Record<SensorEventName, z.ZodTypeAny> = {
+  'sensor.face_visible': FaceVisiblePayloadSchema,
+  'sensor.gaze_at_screen': GazeAtScreenPayloadSchema,
+  'sensor.motion': MotionPayloadSchema,
+  'sensor.camera_state': CameraStatePayloadSchema,
+};
+
+export function parseSensorEvent(eventName: string, data: unknown): ParseResult<SensorEvent> {
+  const schema = SENSOR_SCHEMAS[eventName as SensorEventName];
+  if (!schema) return { ok: false, error: `unknown sensor eventName: ${eventName}` };
+  const result = schema.safeParse(data);
+  if (!result.success) return { ok: false, error: result.error.message };
+  return { ok: true, value: { eventName, data: result.data } as SensorEvent };
+}
+
 const versionLiteral = z.literal(PROTOCOL_VERSION);
 
 export const FrameSchema = z.discriminatedUnion('type', [

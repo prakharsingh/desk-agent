@@ -2,9 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { loadConfig } from './configLoader.js';
-import { buildPluginSpecs, buildAutomationRules, boot, type PluginRegistryEntry } from './entrypoint.js';
+import { buildPluginSpecs, buildAutomationRules, buildPresenceEngineConfig, boot, type PluginRegistryEntry } from './entrypoint.js';
 import { EventBus } from './eventBus.js';
 import { AutomationEngine } from './automationEngine.js';
+import { PresenceEngine } from './presenceEngine.js';
 import { WorkerHost } from './workerHost.js';
 import { WsGateway } from './wsGateway.js';
 import { TunnelSupervisor } from './tunnelSupervisor.js';
@@ -13,11 +14,13 @@ import { Watchdog } from './watchdog.js';
 
 const require = createRequire(import.meta.url);
 
-// The phone only sends sporadic frames (a `hello` once on connect, and
-// `event.publish` on manual toggle taps) — there's no periodic client-side
-// ping today. 30s tolerates that sporadic cadence without false-flagging a
-// live-but-idle phone. Full heartbeat-driven fidelity would need a
-// client-side ping the app doesn't send yet; out of scope for this fix.
+// The phone now acks every server heartbeat (WsGateway broadcasts one every
+// `heartbeatMs` = 5000ms; see app/src/wsClient.ts's onmessage handler),
+// independent of sensor-edge activity -- this is what makes the watchdog
+// safe to use as a genuine link-liveness signal even during a real, quiet
+// absence (edge-only sensor emission legitimately produces zero traffic
+// once a signal has settled). 30s gives a comfortable ~6x margin over that
+// 5s ack cadence before concluding the link is actually dead.
 const WATCHDOG_TIMEOUT_MS = 30000;
 
 function resolvePluginRegistry(): Record<string, PluginRegistryEntry> {
@@ -40,6 +43,12 @@ export function run() {
     invoke: (pluginId, action, args) => workerHost.invokeAction(pluginId, action, args),
   }, (level, message) => log('automation', level, message));
 
+  const presenceEngine = new PresenceEngine(
+    buildPresenceEngineConfig(config),
+    (present) => eventBus.publish({ eventName: 'person_present', data: { present } }),
+    (level, message) => log('presence', level, message),
+  );
+
   const workerHost = new WorkerHost(specs, {
     maxOldGenerationSizeMb: 128,
     maxRestarts: 5,
@@ -49,7 +58,10 @@ export function run() {
     onWidgetPublish: (widgetId, widget) => gateway.broadcastWidgetUpdate(widgetId, widget as any),
   });
 
-  const watchdog = new Watchdog(WATCHDOG_TIMEOUT_MS, () => log('watchdog', 'error', 'phone appears to have stopped sending heartbeats'));
+  const watchdog = new Watchdog(WATCHDOG_TIMEOUT_MS, () => {
+    log('watchdog', 'error', 'phone appears to have stopped sending heartbeats');
+    presenceEngine.onCameraState('error', 'watchdog-timeout');
+  });
 
   const gateway = new WsGateway({
     port: config.wsPort,
@@ -62,12 +74,24 @@ export function run() {
       return entries.flat();
     },
     onEventPublish: (raw) => eventBus.publish(raw),
-    onClientMessage: () => watchdog.pulse(),
+    onClientMessage: () => {
+      watchdog.pulse();
+      // Any fresh client traffic proves the link is alive again, healing a
+      // watchdog-triggered fail-to-present without waiting for the phone to
+      // fully reconnect and re-announce camera_state('active') (see
+      // presenceEngine.ts's onLinkResumed doc comment for why that wait was
+      // a bug: a phone that merely paused sending, then resumed over the
+      // SAME still-open socket, never re-announces).
+      presenceEngine.onLinkResumed();
+    },
   });
 
   const tunnelSupervisor = new TunnelSupervisor(createRealAdbRunner(), config.wsPort, (level, message) => log('tunnel', level, message));
 
-  workerHost.start().then(() => boot({ workerHost, gateway, tunnelSupervisor, eventBus, automationEngine, watchdog }));
+  workerHost.start().then(() => boot({
+    workerHost, gateway, tunnelSupervisor, eventBus, automationEngine, watchdog, presenceEngine,
+    onLog: (level, message) => log('core', level, message),
+  }));
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

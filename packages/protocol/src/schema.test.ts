@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseFrame, parseWidget, createFrame, PROTOCOL_VERSION } from './index.js';
+import { parseFrame, parseWidget, createFrame, PROTOCOL_VERSION, parseSensorEvent } from './index.js';
 
 describe('parseFrame', () => {
   it('accepts a valid hello frame', () => {
@@ -57,5 +57,43 @@ describe('createFrame', () => {
     expect(frame.v).toBe(PROTOCOL_VERSION);
     expect(frame.id.length).toBeGreaterThan(0);
     expect(frame.type).toBe('heartbeat');
+  });
+});
+
+describe('parseSensorEvent', () => {
+  it('accepts a valid sensor.face_visible event', () => {
+    expect(parseSensorEvent('sensor.face_visible', { visible: true }).ok).toBe(true);
+  });
+
+  it('accepts a valid sensor.gaze_at_screen event', () => {
+    expect(parseSensorEvent('sensor.gaze_at_screen', { gazing: false }).ok).toBe(true);
+  });
+
+  it('accepts a valid sensor.motion event', () => {
+    expect(parseSensorEvent('sensor.motion', { active: true }).ok).toBe(true);
+  });
+
+  it('accepts a valid sensor.camera_state event with an optional reason', () => {
+    expect(parseSensorEvent('sensor.camera_state', { state: 'error', reason: 'permission-denied' }).ok).toBe(true);
+    expect(parseSensorEvent('sensor.camera_state', { state: 'active' }).ok).toBe(true);
+  });
+
+  it('rejects an unknown eventName', () => {
+    expect(parseSensorEvent('sensor.bogus', {}).ok).toBe(false);
+  });
+
+  it('rejects a camera_state with an invalid state enum value', () => {
+    expect(parseSensorEvent('sensor.camera_state', { state: 'sleeping' }).ok).toBe(false);
+  });
+
+  it('rejects malformed data for a known eventName', () => {
+    expect(parseSensorEvent('sensor.motion', { active: 'yes' }).ok).toBe(false);
+  });
+});
+
+describe('parseFrame with sensor eventNames', () => {
+  it('accepts an event.publish frame carrying a sensor eventName (no schema change needed for the envelope)', () => {
+    const raw = { v: 1, type: 'event.publish', id: 'a', ts: 1, payload: { eventName: 'sensor.motion', data: { active: true } } };
+    expect(parseFrame(raw).ok).toBe(true);
   });
 });

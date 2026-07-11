@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 import {
   EventBus, AutomationEngine, WorkerHost, WsGateway, TunnelSupervisor,
-  buildAutomationRules, boot,
+  buildAutomationRules, boot, PresenceEngine, buildPresenceEngineConfig,
 } from './index.js';
 import type { WorkerLike, WsClientLike, WsServerLike, AdbRunner, PluginSpec, Config } from './index.js';
 
@@ -92,7 +92,7 @@ describe('full integration loop', () => {
     });
 
     const invokedActions: Array<{ pluginId: string; action: string }> = [];
-    const config: Config = { enabledPlugins: [], weather: { apiKey: 'k', location: 'x' }, presenceDebounceMs: 1000, wsPort: 8787 };
+    const config: Config = { enabledPlugins: [], weather: { apiKey: 'k', location: 'x' }, presenceDebounceMs: 1000, wsPort: 8787, presence: { absenceTimeoutMs: 300000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 300000 } };
     const automationEngine = new AutomationEngine(buildAutomationRules(config), {
       invoke: (pluginId, action) => { invokedActions.push({ pluginId, action }); workerHost.invokeAction(pluginId, action); },
     }, vi.fn());
@@ -179,5 +179,89 @@ describe('full integration loop', () => {
     handler?.({ type: 'detach', serial: 'p1' });
     handler?.({ type: 'attach', serial: 'p1' });
     expect(adb.reverse).toHaveBeenCalledTimes(2);
+  });
+
+  it('drives sleep-display through sensor events -> PresenceEngine -> automation (Slice 1b path)', async () => {
+    const spec: PluginSpec = { id: 'energy-saver', modulePath: '/fake', permissions: ['sys:control-display'] };
+    let fakeWorker!: FakeWorker;
+    let eventBus!: EventBus;
+    const workerHost = new WorkerHost([spec], {
+      maxOldGenerationSizeMb: 64, maxRestarts: 5, callTimeoutMs: 2000,
+      onLog: vi.fn(), onEventPublish: (raw) => eventBus.publish(raw), onWidgetPublish: vi.fn(),
+      createWorker: () => { fakeWorker = new FakeWorker(); return fakeWorker; },
+    });
+    await workerHost.start();
+    fakeWorker.emit('message', { kind: 'ready' });
+
+    const invokedActions: Array<{ pluginId: string; action: string }> = [];
+    const config: Config = {
+      enabledPlugins: [], weather: { apiKey: 'k', location: 'x' }, presenceDebounceMs: 1000, wsPort: 8787,
+      presence: { absenceTimeoutMs: 2000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 2000 },
+    };
+    const automationEngine = new AutomationEngine(buildAutomationRules(config), {
+      invoke: (pluginId, action) => { invokedActions.push({ pluginId, action }); workerHost.invokeAction(pluginId, action); },
+    }, vi.fn());
+
+    eventBus = new EventBus();
+    const presenceEngine = new PresenceEngine(
+      buildPresenceEngineConfig(config),
+      (present) => eventBus.publish({ eventName: 'person_present', data: { present } }),
+      vi.fn(),
+    );
+
+    const tunnelSupervisor = { start: vi.fn() } as any;
+    const gateway = { start: vi.fn(), broadcastWidgetUpdate: vi.fn() } as any;
+    boot({ workerHost, gateway, tunnelSupervisor, eventBus, automationEngine, presenceEngine });
+
+    eventBus.publish({ eventName: 'sensor.camera_state', data: { state: 'active' } });
+    eventBus.publish({ eventName: 'sensor.face_visible', data: { visible: false } });
+    eventBus.publish({ eventName: 'sensor.motion', data: { active: false } });
+
+    // absenceTimeoutMs (2000) then presenceDebounceMs (1000) = 3000ms total.
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(invokedActions).toEqual([{ pluginId: 'energy-saver', action: 'sleep-display' }]);
+  });
+
+  it('never invokes sleep-display when the camera reports an error mid-window (fail-to-present)', async () => {
+    const spec: PluginSpec = { id: 'energy-saver', modulePath: '/fake', permissions: ['sys:control-display'] };
+    let fakeWorker!: FakeWorker;
+    let eventBus!: EventBus;
+    const workerHost = new WorkerHost([spec], {
+      maxOldGenerationSizeMb: 64, maxRestarts: 5, callTimeoutMs: 2000,
+      onLog: vi.fn(), onEventPublish: (raw) => eventBus.publish(raw), onWidgetPublish: vi.fn(),
+      createWorker: () => { fakeWorker = new FakeWorker(); return fakeWorker; },
+    });
+    await workerHost.start();
+    fakeWorker.emit('message', { kind: 'ready' });
+
+    const invokedActions: Array<{ pluginId: string; action: string }> = [];
+    const config: Config = {
+      enabledPlugins: [], weather: { apiKey: 'k', location: 'x' }, presenceDebounceMs: 1000, wsPort: 8787,
+      presence: { absenceTimeoutMs: 2000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 2000 },
+    };
+    const automationEngine = new AutomationEngine(buildAutomationRules(config), {
+      invoke: (pluginId, action) => { invokedActions.push({ pluginId, action }); workerHost.invokeAction(pluginId, action); },
+    }, vi.fn());
+
+    eventBus = new EventBus();
+    const presenceEngine = new PresenceEngine(
+      buildPresenceEngineConfig(config),
+      (present) => eventBus.publish({ eventName: 'person_present', data: { present } }),
+      vi.fn(),
+    );
+
+    const tunnelSupervisor = { start: vi.fn() } as any;
+    const gateway = { start: vi.fn(), broadcastWidgetUpdate: vi.fn() } as any;
+    boot({ workerHost, gateway, tunnelSupervisor, eventBus, automationEngine, presenceEngine });
+
+    eventBus.publish({ eventName: 'sensor.camera_state', data: { state: 'active' } });
+    eventBus.publish({ eventName: 'sensor.face_visible', data: { visible: false } });
+    eventBus.publish({ eventName: 'sensor.motion', data: { active: false } });
+    await vi.advanceTimersByTimeAsync(1000);
+
+    // Simulates main.ts's Watchdog.onMissed -> presenceEngine.onCameraState wiring (Task A6).
+    eventBus.publish({ eventName: 'sensor.camera_state', data: { state: 'error', reason: 'watchdog-timeout' } });
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(invokedActions).toEqual([]);
   });
 });

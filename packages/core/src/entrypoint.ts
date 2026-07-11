@@ -1,4 +1,5 @@
 import type { Permission } from '@desk-agent/plugin-sdk';
+import { parseSensorEvent, type SensorEventName } from '@desk-agent/protocol';
 import type { Config } from './configLoader.js';
 import type { PluginSpec } from './workerHost.js';
 import type { AutomationRule } from './automationEngine.js';
@@ -8,6 +9,7 @@ import type { TunnelSupervisor } from './tunnelSupervisor.js';
 import type { EventBus } from './eventBus.js';
 import type { AutomationEngine } from './automationEngine.js';
 import type { Watchdog } from './watchdog.js';
+import type { PresenceEngine, PresenceEngineConfig } from './presenceEngine.js';
 
 export interface PluginRegistryEntry {
   modulePath: string;
@@ -43,6 +45,14 @@ export function buildAutomationRules(config: Config): AutomationRule[] {
   ];
 }
 
+export function buildPresenceEngineConfig(config: Config): PresenceEngineConfig {
+  return {
+    absenceTimeoutMs: config.presence.absenceTimeoutMs,
+    gazeIsKeepAwake: config.presence.gazeIsKeepAwake,
+    bootConfirmationTimeoutMs: config.presence.bootConfirmationTimeoutMs,
+  };
+}
+
 export interface BootDeps {
   workerHost: WorkerHost;
   gateway: WsGateway;
@@ -50,11 +60,31 @@ export interface BootDeps {
   eventBus: EventBus;
   automationEngine: AutomationEngine;
   watchdog?: Watchdog;
+  presenceEngine?: PresenceEngine;
+  onLog?: (level: string, message: string) => void;
 }
 
 export function boot(deps: BootDeps) {
+  const onLog = deps.onLog ?? (() => {});
   deps.eventBus.subscribe('person_present', (payload) => deps.automationEngine.handleEvent(payload.eventName, payload.data));
   deps.eventBus.subscribe('automation.override', (payload) => deps.automationEngine.setEnabled(Boolean(payload.data.enabled)));
+  if (deps.presenceEngine) {
+    const engine = deps.presenceEngine;
+    const subscribeSensor = (eventName: SensorEventName, handle: (data: any) => void) => {
+      deps.eventBus.subscribe(eventName, (payload) => {
+        const result = parseSensorEvent(eventName, payload.data);
+        if (!result.ok) {
+          onLog('error', `dropped malformed ${eventName} payload: ${result.error}`);
+          return;
+        }
+        handle(result.value.data);
+      });
+    };
+    subscribeSensor('sensor.face_visible', (data) => engine.onFaceVisible(data.visible));
+    subscribeSensor('sensor.gaze_at_screen', (data) => engine.onGaze(data.gazing));
+    subscribeSensor('sensor.motion', (data) => engine.onMotion(data.active));
+    subscribeSensor('sensor.camera_state', (data) => engine.onCameraState(data.state, data.reason));
+  }
   deps.tunnelSupervisor.start();
   deps.gateway.start();
   deps.watchdog?.start();

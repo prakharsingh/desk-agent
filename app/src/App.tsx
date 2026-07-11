@@ -1,8 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Animated } from 'react-native';
 import type { Frame, Widget } from '@desk-agent/protocol';
 import { computePixelShiftOffset } from './oledMitigation.js';
-import { PresenceToggle } from './PresenceToggle.js';
+import { CameraPrivacySwitch } from './CameraPrivacySwitch.js';
+import { CameraPresence } from './presence/CameraPresence.js';
+import { CameraIndicator } from './presence/CameraIndicator.js';
 import { WsClient } from './wsClient.js';
 import { resolveWidgetKind } from './widgets/renderWidget.js';
 import { SystemStatsWidget } from './widgets/SystemStatsWidget.js';
@@ -18,13 +20,17 @@ export default function App() {
   const translate = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const [startedAt] = useState(() => Date.now());
   const [widgets, setWidgets] = useState<Record<string, Widget>>({});
+  const [cameraEnabled, setCameraEnabled] = useState(false);
+  const [connectionEpoch, setConnectionEpoch] = useState(0);
 
   const client = useMemo(
     () =>
       new WsClient({
         url: WS_URL,
         heartbeatTimeoutMs: HEARTBEAT_TIMEOUT_MS,
-        onStateChange: () => {},
+        onStateChange: (state) => {
+          if (state === 'connected') setConnectionEpoch((n) => n + 1);
+        },
         onFrame: (frame: Frame) => {
           if (frame.type !== 'widget.update') return;
           setWidgets((prev: Record<string, Widget>) => {
@@ -41,6 +47,15 @@ export default function App() {
     client.connect();
     return () => client.disconnect();
   }, [client]);
+
+  // Stable identity across renders: `CameraPresence`'s lifecycle effect
+  // lists `send` in its dependency array so it can re-announce camera_state
+  // on a real reconnect (`connectionEpoch` change). An unmemoized inline
+  // arrow here would get a fresh identity on every App re-render (e.g. every
+  // widget.update), re-running that effect and re-announcing camera_state on
+  // every unrelated render instead of only on genuine lifecycle/reconnect
+  // transitions.
+  const sendFrame = useCallback((json: string) => client.send(json), [client]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -59,7 +74,9 @@ export default function App() {
           if (kind === 'weather') return <WeatherWidget key={widgetId} widget={widget} />;
           return <BrokenWidget key={widgetId} widget={widget} />;
         })}
-        <PresenceToggle send={(json) => client.send(json)} />
+        <CameraIndicator cameraEnabled={cameraEnabled} />
+        <CameraPrivacySwitch cameraEnabled={cameraEnabled} onCameraEnabledChange={setCameraEnabled} send={sendFrame} />
+        <CameraPresence enabled={cameraEnabled} send={sendFrame} connectionEpoch={connectionEpoch} />
       </View>
     </Animated.View>
   );

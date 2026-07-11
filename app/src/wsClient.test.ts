@@ -7,7 +7,16 @@ class FakeSocket {
   onmessage: ((event: { data: string }) => void) | null = null;
   onclose: ((event: { code: number }) => void) | null = null;
   onerror: (() => void) | null = null;
-  send = vi.fn();
+  readyState = 0; // WebSocket.CONNECTING
+  send = vi.fn((_data: string) => {
+    // A real browser/RN WebSocket throws INVALID_STATE_ERR synchronously if
+    // send() is called while the socket is not yet OPEN. This double
+    // reproduces that so wsClient.test.ts can catch regressions the old,
+    // always-succeeding FakeSocket.send stub could not.
+    if (this.readyState !== 1) {
+      throw new Error('INVALID_STATE_ERR: WebSocket is not open');
+    }
+  });
   close = vi.fn();
 }
 
@@ -32,6 +41,7 @@ describe('WsClient', () => {
       socketFactory: () => { socket = new FakeSocket(); return socket; },
     });
     client.connect();
+    socket.readyState = 1; // WebSocket.OPEN
     socket.onopen?.();
     expect(onStateChange).toHaveBeenCalledWith('connected');
     socket.onmessage?.({ data: JSON.stringify(createFrame('heartbeat', {})) });
@@ -46,6 +56,7 @@ describe('WsClient', () => {
     });
     client.connect();
     expect(socket.send).not.toHaveBeenCalled();
+    socket.readyState = 1; // WebSocket.OPEN
     socket.onopen?.();
     expect(socket.send).toHaveBeenCalledTimes(1);
     const sent = JSON.parse(socket.send.mock.calls[0][0]);
@@ -76,6 +87,7 @@ describe('WsClient', () => {
       socketFactory: () => { socket = new FakeSocket(); return socket; },
     });
     client.connect();
+    socket.readyState = 1; // WebSocket.OPEN
     socket.onopen?.();
     socket.onclose?.({ code: 1006 });
     expect(onStateChange).toHaveBeenCalledWith('server-down');
@@ -89,6 +101,7 @@ describe('WsClient', () => {
       socketFactory: () => { socket = new FakeSocket(); return socket; },
     });
     client.connect();
+    socket.readyState = 1; // WebSocket.OPEN
     socket.onopen?.();
     vi.advanceTimersByTime(5000);
     expect(onStateChange).toHaveBeenCalledWith('server-down');
@@ -103,6 +116,7 @@ describe('WsClient', () => {
       socketFactory: () => { socketCount++; socket = new FakeSocket(); return socket; },
     });
     client.connect();
+    socket.readyState = 1; // WebSocket.OPEN
     socket.onopen?.();
     client.disconnect();
 
@@ -126,11 +140,46 @@ describe('WsClient', () => {
       socketFactory: () => { socket = new FakeSocket(); return socket; },
     });
     client.connect();
+    socket.readyState = 1; // WebSocket.OPEN
     socket.onopen?.();
     client.disconnect();
 
     socket.onmessage?.({ data: JSON.stringify(createFrame('heartbeat', {})) });
     expect(onFrame).not.toHaveBeenCalled();
+  });
+
+  it('acks the server\'s heartbeat with a heartbeat frame of its own, so the Mac watchdog sees liveness traffic even during a quiet, edge-free period', () => {
+    let socket!: FakeSocket;
+    const client = new WsClient({
+      url: 'ws://localhost:8787', onFrame: vi.fn(), onStateChange: vi.fn(), heartbeatTimeoutMs: 10000,
+      socketFactory: () => { socket = new FakeSocket(); return socket; },
+    });
+    client.connect();
+    socket.readyState = 1; // WebSocket.OPEN
+    socket.onopen?.();
+    socket.send.mockClear(); // drop the initial `hello` send from this count
+
+    socket.onmessage?.({ data: JSON.stringify(createFrame('heartbeat', {})) });
+
+    expect(socket.send).toHaveBeenCalledTimes(1);
+    const acked = JSON.parse(socket.send.mock.calls[0][0]);
+    expect(acked.type).toBe('heartbeat');
+  });
+
+  it('does not ack non-heartbeat frames (e.g. widget.update)', () => {
+    let socket!: FakeSocket;
+    const client = new WsClient({
+      url: 'ws://localhost:8787', onFrame: vi.fn(), onStateChange: vi.fn(), heartbeatTimeoutMs: 10000,
+      socketFactory: () => { socket = new FakeSocket(); return socket; },
+    });
+    client.connect();
+    socket.readyState = 1; // WebSocket.OPEN
+    socket.onopen?.();
+    socket.send.mockClear();
+
+    socket.onmessage?.({ data: JSON.stringify(createFrame('widget.update', { widgets: [] })) });
+
+    expect(socket.send).not.toHaveBeenCalled();
   });
 
   it('send() forwards the raw JSON string to the underlying socket once connected', () => {
@@ -140,6 +189,7 @@ describe('WsClient', () => {
       socketFactory: () => { socket = new FakeSocket(); return socket; },
     });
     client.connect();
+    socket.readyState = 1; // WebSocket.OPEN
     socket.onopen?.();
     client.send('{"foo":"bar"}');
     expect(socket.send).toHaveBeenCalledWith('{"foo":"bar"}');
@@ -152,6 +202,24 @@ describe('WsClient', () => {
     expect(() => client.send('{"foo":"bar"}')).not.toThrow();
   });
 
+  it('send() does not throw when called while the socket is still CONNECTING (not yet OPEN)', () => {
+    // Regression test for the OnePlus 6T cold-launch crash: a real browser/RN
+    // WebSocket.send() throws INVALID_STATE_ERR synchronously if called while
+    // readyState is CONNECTING. CameraPresence's mount-time effect calls
+    // send() immediately, racing ahead of the socket's actual open -- this
+    // reproduces that race directly against WsClient.
+    let socket!: FakeSocket;
+    const client = new WsClient({
+      url: 'ws://localhost:8787', onFrame: vi.fn(), onStateChange: vi.fn(), heartbeatTimeoutMs: 10000,
+      socketFactory: () => { socket = new FakeSocket(); return socket; },
+    });
+    client.connect();
+    // socket.readyState is still 0 (CONNECTING) -- onopen has NOT fired yet.
+    expect(() => client.send(JSON.stringify({ type: 'sensor.camera_state', payload: { state: 'released' } }))).not.toThrow();
+    // The dropped frame must not have reached the underlying socket's send().
+    expect(socket.send).not.toHaveBeenCalled();
+  });
+
   it('send() does not throw when called after disconnect()', () => {
     let socket!: FakeSocket;
     const client = new WsClient({
@@ -159,6 +227,7 @@ describe('WsClient', () => {
       socketFactory: () => { socket = new FakeSocket(); return socket; },
     });
     client.connect();
+    socket.readyState = 1; // WebSocket.OPEN
     socket.onopen?.();
     client.disconnect();
     expect(() => client.send('{"foo":"bar"}')).not.toThrow();
