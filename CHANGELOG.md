@@ -8,6 +8,39 @@ version for the whole monorepo, not per-package — see
 
 ## [Unreleased]
 
+### Added — Slice 1c: programmatic wake-from-sleep (code-complete)
+
+- **Wake-on-return** (100% Mac-side; no `app/` or protocol changes): when the
+  presence engine sees a genuine, sensor-driven `absent → present` edge, a new
+  purely-additive `onGenuineReturn` callback publishes a Mac-internal
+  `presence.returned` event, which a zero-debounce automation rule turns into
+  `energy-saver.wake-display` (`caffeinate -u -t 2`). The fail-safe
+  forced-present path (camera error, watchdog timeout, boot default) can
+  never trigger a wake.
+- New `presence.wakeEnabled` config field (default `true`) so wake-on-return
+  can be disabled independently of auto-sleep.
+- 17 new/modified vitest tests, including end-to-end proofs that the wake
+  fires on a real return and never on a fail-safe transition.
+- **Status: code-complete, not feature-complete.** Every test mocks the
+  shell-exec boundary; whether `caffeinate -u -t 2` wakes the real target
+  monitor from DPMS sleep is unverified — see SETUP.md's wake-on-return
+  checklist for the required hardware spike.
+
+### Fixed
+
+- Core no longer dies with an uncaught exception when `adb` is missing from
+  `PATH` (`spawn` error now logged; tunnel degrades, everything else runs).
+- Missing or malformed `config.json` now fails with an error naming the
+  resolved path and the fix, instead of a raw ENOENT/SyntaxError stack.
+- The WebSocket gateway attaches its `connection` handler at construction
+  (clients connecting during the worker-startup window are served instead of
+  silently ignored until heartbeat timeout) and logs server errors such as
+  `EADDRINUSE` instead of crashing uncaught.
+- Worker-host startup failures are caught, logged, and exit non-zero instead
+  of surfacing as an unhandled promise rejection.
+
+### Changed
+
 - Public documentation overhaul: README, AGENTS.md, SETUP.md, CONTRIBUTING.md,
   this changelog, and a GitHub wiki.
 

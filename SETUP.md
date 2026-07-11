@@ -23,7 +23,7 @@ git clone https://github.com/prakharsingh/desk-agent.git
 cd desk-agent
 pnpm install
 pnpm build       # runs tsc across protocol, plugin-sdk, plugins, core
-pnpm test          # 152 tests, all packages (watch mode: `pnpm vitest`)
+pnpm test          # 175 tests, all packages (watch mode: `pnpm vitest`)
 ```
 
 If `pnpm test` fails on a fresh clone, run `pnpm build` first — Vitest
@@ -42,7 +42,10 @@ degrades to a `stale` last-known-value state on any API failure, so a bad key
 won't crash the agent, just leave that widget stale). See
 `packages/core/src/configLoader.ts` for the full schema, defaults, and the
 `presence` block Slice 1b added (`absenceTimeoutMs`, `gazeIsKeepAwake`,
-`bootConfirmationTimeoutMs`).
+`bootConfirmationTimeoutMs`) plus Slice 1c's `presence.wakeEnabled`
+(default `true`) — set it to `false` to keep auto-sleep while disabling
+programmatic wake-on-return, e.g. if `caffeinate -u` proves unreliable on
+your hardware.
 
 `config.json` is gitignored — never commit real API keys.
 
@@ -116,7 +119,7 @@ background-kill behavior, and real thermal/timing behavior.
       green camera-use dot is on.
 - [ ] Leave the desk → after the hysteresis window (`absenceTimeoutMs`, plus
       `presenceDebounceMs`) the Mac display sleeps via `pmset`. Return and
-      press a key → wakes (physical only — programmatic wake is Slice 1c).
+      press a key → wakes (physical wake works regardless of Slice 1c).
 - [ ] **False-absent test:** sit and read at the desk for 5 minutes → display
       must NOT sleep, even with minimal motion.
 - [ ] Flip the camera privacy switch OFF → camera releases (green dot off);
@@ -126,6 +129,23 @@ background-kill behavior, and real thermal/timing behavior.
       emitting a `camera_state` event. Confirm the Mac-side watchdog fires
       within `WATCHDOG_TIMEOUT_MS`, the engine goes fail-to-present, and the
       display does NOT sleep purely from the resulting silence.
+
+**Wake-on-return (Slice 1c) — REQUIRED before calling 1c done.** Slice 1c is
+code-complete but every automated test mocks the shell-exec boundary; nothing
+has physically observed a real wake yet. This checklist *is* the missing
+hardware spike:
+- [ ] **The spike:** with the display asleep (real DPMS sleep via the
+      auto-sleep path, not the lid), run `caffeinate -u -t 2` by hand on the
+      target Mac + external HDMI monitor → confirm the monitor actually wakes.
+      If it doesn't, set `presence.wakeEnabled: false` and keep auto-sleep.
+- [ ] Let the display auto-sleep, then walk back to the desk → display wakes
+      within a few seconds of the camera seeing you, no keypress.
+- [ ] **Fail-safe test:** while absent (display asleep), force-kill the app so
+      the watchdog fires → the engine goes fail-to-present but the display
+      must NOT wake (forced-present must never trigger a wake; only a genuine
+      absent→present edge may).
+- [ ] Set `presence.wakeEnabled: false`, restart the core, return from a real
+      absence → display stays asleep until a keypress (auto-sleep unaffected).
 
 ## Troubleshooting
 

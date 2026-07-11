@@ -1,6 +1,6 @@
 # Desk Agent OS
 
-**v0.2.0** · 152 tests passing · [Changelog](CHANGELOG.md)
+**v0.2.0** · 175 tests passing · [Changelog](CHANGELOG.md)
 
 An old Android phone, docked next to a Mac, becomes a live desk dashboard and
 an honest presence sensor. A Mac-side Node "brain" drives what the phone shows
@@ -33,7 +33,7 @@ failing safe toward "present" the instant the camera or link looks unhealthy
 |---|---|---|
 | **1a** | ✅ shipped | Live dashboard (System Stats, Weather) + stubbed presence toggle proving the phone↔Mac spine |
 | **1b** | ✅ shipped | Real camera presence detection, hysteresis-guarded auto-sleep, honest `sensor.*` protocol |
-| **1c** | planned | Programmatic wake of the external HDMI monitor when presence returns (no physical keypress) |
+| **1c** | 🟡 code-complete | Programmatic wake of the external HDMI monitor when presence returns (no physical keypress). On main and fully tested against a mocked shell-exec boundary, but the on-device wake spike (does `caffeinate -u -t 2` really wake this monitor?) hasn't been run — see the SETUP.md wake checklist. `presence.wakeEnabled: false` disables it independently of auto-sleep. |
 
 See [CHANGELOG.md](CHANGELOG.md) for what shipped in each slice.
 
