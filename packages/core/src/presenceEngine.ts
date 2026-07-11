@@ -49,6 +49,7 @@ export class PresenceEngine {
     private config: PresenceEngineConfig,
     private onPresenceChange: (present: boolean) => void,
     private log: (level: string, message: string) => void,
+    private onGenuineReturn?: () => void,
   ) {
     this.bootTimer = setTimeout(() => {
       if (!this.cameraHealthy) {
@@ -137,6 +138,7 @@ export class PresenceEngine {
     if (this.state !== 'present') {
       this.state = 'present';
       this.onPresenceChange(true);
+      this.onGenuineReturn?.();
     }
   }
 

@@ -372,4 +372,100 @@ describe('PresenceEngine', () => {
       expect(onPresenceChange).toHaveBeenCalledWith(false);
     });
   });
+
+  describe('onGenuineReturn (Slice 1c wake trigger)', () => {
+    it('does NOT fire on construction (boot-default present, no edge occurred)', () => {
+      const onGenuineReturn = vi.fn();
+      new PresenceEngine(baseConfig, vi.fn(), vi.fn(), onGenuineReturn);
+      expect(onGenuineReturn).not.toHaveBeenCalled();
+    });
+
+    it('fires when a face-visible edge brings the engine back from absent to present', () => {
+      const onGenuineReturn = vi.fn();
+      const engine = new PresenceEngine(baseConfig, vi.fn(), vi.fn(), onGenuineReturn);
+      engine.onCameraState('active');
+      engine.onFaceVisible(false);
+      engine.onMotion(false);
+      vi.advanceTimersByTime(baseConfig.absenceTimeoutMs);
+      expect(engine.getState()).toBe('absent');
+      onGenuineReturn.mockClear();
+
+      engine.onFaceVisible(true);
+      expect(onGenuineReturn).toHaveBeenCalledTimes(1);
+    });
+
+    it('fires when a motion edge brings the engine back from absent to present', () => {
+      const onGenuineReturn = vi.fn();
+      const engine = new PresenceEngine(baseConfig, vi.fn(), vi.fn(), onGenuineReturn);
+      engine.onCameraState('active');
+      engine.onFaceVisible(false);
+      engine.onMotion(false);
+      vi.advanceTimersByTime(baseConfig.absenceTimeoutMs);
+      expect(engine.getState()).toBe('absent');
+      onGenuineReturn.mockClear();
+
+      engine.onMotion(true);
+      expect(onGenuineReturn).toHaveBeenCalledTimes(1);
+    });
+
+    // Gaze cannot be tested as an independent trigger: onGaze() only calls
+    // refreshKeepAwake() when this.lastFaceVisible is already true (see
+    // presenceEngine.ts's onGaze), and lastFaceVisible only ever becomes
+    // true via onFaceVisible(true), which itself already calls
+    // refreshKeepAwake() through the face_visible path. There is no reachable
+    // sequence where gaze is the exclusive cause of an absent->present edge.
+
+    it('does NOT fire when a camera error forces present from maybe-absent (fail-safe, not a genuine return)', () => {
+      const onGenuineReturn = vi.fn();
+      const engine = new PresenceEngine(baseConfig, vi.fn(), vi.fn(), onGenuineReturn);
+      engine.onCameraState('active');
+      engine.onFaceVisible(false);
+      engine.onMotion(false);
+      vi.advanceTimersByTime(baseConfig.absenceTimeoutMs - 1000); // still maybe-absent
+      onGenuineReturn.mockClear();
+
+      engine.onCameraState('error', 'permission-denied'); // forces present via forceFailToPresent
+      expect(onGenuineReturn).not.toHaveBeenCalled();
+    });
+
+    it('does NOT fire when a watchdog-timeout forces present from maybe-absent (fail-safe, not a genuine return)', () => {
+      const onGenuineReturn = vi.fn();
+      const engine = new PresenceEngine(baseConfig, vi.fn(), vi.fn(), onGenuineReturn);
+      engine.onCameraState('active');
+      engine.onFaceVisible(false);
+      engine.onMotion(false);
+      vi.advanceTimersByTime(baseConfig.absenceTimeoutMs - 1000); // still maybe-absent
+      onGenuineReturn.mockClear();
+
+      engine.onCameraState('error', 'watchdog-timeout'); // forces present via forceFailToPresent
+      expect(onGenuineReturn).not.toHaveBeenCalled();
+    });
+
+    it('does NOT fire when the boot-confirmation timer elapses with no camera_state ever received', () => {
+      // The engine starts in 'present' by default and cannot arm absence
+      // before boot confirmation (maybeArmAbsence's cameraHealthy guard), so
+      // forceFailToPresent('no-boot-confirmation') fires with wasPresent
+      // already true -- neither onPresenceChange nor onGenuineReturn are
+      // called in this specific path. Asserted here for documentation and
+      // regression coverage, not because it's a live risk.
+      const onPresenceChange = vi.fn();
+      const onGenuineReturn = vi.fn();
+      const config = { ...baseConfig, bootConfirmationTimeoutMs: 5000 };
+      new PresenceEngine(config, onPresenceChange, vi.fn(), onGenuineReturn);
+      vi.advanceTimersByTime(5000);
+      expect(onPresenceChange).not.toHaveBeenCalled();
+      expect(onGenuineReturn).not.toHaveBeenCalled();
+    });
+
+    it('is safe to omit entirely -- engine still functions with only the original 3 constructor args', () => {
+      const onPresenceChange = vi.fn();
+      const engine = new PresenceEngine(baseConfig, onPresenceChange, vi.fn());
+      engine.onCameraState('active');
+      engine.onFaceVisible(false);
+      engine.onMotion(false);
+      vi.advanceTimersByTime(baseConfig.absenceTimeoutMs);
+      expect(onPresenceChange).toHaveBeenCalledWith(false);
+      expect(() => engine.onFaceVisible(true)).not.toThrow();
+    });
+  });
 });

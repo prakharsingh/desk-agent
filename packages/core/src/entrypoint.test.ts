@@ -9,7 +9,7 @@ describe('buildPluginSpecs', () => {
       weather: { apiKey: 'k', location: 'Seattle' },
       presenceDebounceMs: 30000,
       wsPort: 8787,
-      presence: { absenceTimeoutMs: 300000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 300000 },
+      presence: { absenceTimeoutMs: 300000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 300000, wakeEnabled: true },
     };
     const registry = { weather: { modulePath: '/pkg/weather/dist/index.js', permissions: ['net:api.weather' as const] } };
     const specs = buildPluginSpecs(config, registry, vi.fn());
@@ -22,7 +22,7 @@ describe('buildPluginSpecs', () => {
       weather: { apiKey: 'k', location: 'Seattle' },
       presenceDebounceMs: 30000,
       wsPort: 8787,
-      presence: { absenceTimeoutMs: 300000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 300000 },
+      presence: { absenceTimeoutMs: 300000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 300000, wakeEnabled: true },
     };
     const onLog = vi.fn();
     const specs = buildPluginSpecs(config, {}, onLog);
@@ -34,14 +34,50 @@ describe('buildPluginSpecs', () => {
 describe('buildAutomationRules', () => {
   it('builds the sleep-on-absent rule debounced by config.presenceDebounceMs', () => {
     const config: Config = {
-      enabledPlugins: [], weather: { apiKey: 'k', location: 'Seattle' }, presenceDebounceMs: 45000, wsPort: 8787, presence: { absenceTimeoutMs: 300000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 300000 },
+      enabledPlugins: [], weather: { apiKey: 'k', location: 'Seattle' }, presenceDebounceMs: 45000, wsPort: 8787, presence: { absenceTimeoutMs: 300000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 300000, wakeEnabled: true },
     };
     const rules = buildAutomationRules(config);
-    expect(rules).toHaveLength(1);
-    expect(rules[0].debounceMs).toBe(45000);
-    expect(rules[0].condition({ present: false })).toBe(true);
-    expect(rules[0].condition({ present: true })).toBe(false);
-    expect(rules[0].action).toEqual({ pluginId: 'energy-saver', action: 'sleep-display' });
+    const sleepRule = rules.find((r) => r.id === 'sleep-on-absent')!;
+    expect(sleepRule.debounceMs).toBe(45000);
+    expect(sleepRule.condition({ present: false })).toBe(true);
+    expect(sleepRule.condition({ present: true })).toBe(false);
+    expect(sleepRule.action).toEqual({ pluginId: 'energy-saver', action: 'sleep-display' });
+  });
+});
+
+describe('buildAutomationRules — wake-on-return', () => {
+  it('builds the wake-on-return rule with zero debounce, targeting presence.returned', () => {
+    const config: Config = {
+      enabledPlugins: [], weather: { apiKey: 'k', location: 'Seattle' }, presenceDebounceMs: 45000, wsPort: 8787,
+      presence: { absenceTimeoutMs: 300000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 300000, wakeEnabled: true },
+    };
+    const rules = buildAutomationRules(config);
+    expect(rules).toHaveLength(2);
+    const wakeRule = rules.find((r) => r.id === 'wake-on-return')!;
+    expect(wakeRule).toBeDefined();
+    expect(wakeRule.eventName).toBe('presence.returned');
+    expect(wakeRule.debounceMs).toBe(0);
+    expect(wakeRule.action).toEqual({ pluginId: 'energy-saver', action: 'wake-display' });
+  });
+
+  it('wake-on-return condition is true when presence.wakeEnabled is true', () => {
+    const config: Config = {
+      enabledPlugins: [], weather: { apiKey: 'k', location: 'Seattle' }, presenceDebounceMs: 45000, wsPort: 8787,
+      presence: { absenceTimeoutMs: 300000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 300000, wakeEnabled: true },
+    };
+    const rules = buildAutomationRules(config);
+    const wakeRule = rules.find((r) => r.id === 'wake-on-return')!;
+    expect(wakeRule.condition({})).toBe(true);
+  });
+
+  it('wake-on-return condition is false when presence.wakeEnabled is false', () => {
+    const config: Config = {
+      enabledPlugins: [], weather: { apiKey: 'k', location: 'Seattle' }, presenceDebounceMs: 45000, wsPort: 8787,
+      presence: { absenceTimeoutMs: 300000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 300000, wakeEnabled: false },
+    };
+    const rules = buildAutomationRules(config);
+    const wakeRule = rules.find((r) => r.id === 'wake-on-return')!;
+    expect(wakeRule.condition({})).toBe(false);
   });
 });
 
@@ -74,6 +110,14 @@ describe('boot', () => {
     expect(deps.tunnelSupervisor.start).toHaveBeenCalledTimes(1);
     expect(deps.gateway.start).toHaveBeenCalledTimes(1);
   });
+
+  it('routes presence.returned events to automationEngine.handleEvent', () => {
+    const deps = makeMinimalBootDeps();
+    const handleEventSpy = vi.spyOn(deps.automationEngine, 'handleEvent');
+    boot(deps);
+    deps.eventBus.publish({ eventName: 'presence.returned', data: {} });
+    expect(handleEventSpy).toHaveBeenCalledWith('presence.returned', {});
+  });
 });
 
 import { buildPresenceEngineConfig } from './index.js';
@@ -82,7 +126,7 @@ describe('buildPresenceEngineConfig', () => {
   it('maps config.presence fields into a PresenceEngineConfig', () => {
     const config: Config = {
       enabledPlugins: [], weather: { apiKey: 'k', location: 'x' }, presenceDebounceMs: 30000, wsPort: 8787,
-      presence: { absenceTimeoutMs: 111, gazeIsKeepAwake: false, bootConfirmationTimeoutMs: 333 },
+      presence: { absenceTimeoutMs: 111, gazeIsKeepAwake: false, bootConfirmationTimeoutMs: 333, wakeEnabled: true },
     };
     expect(buildPresenceEngineConfig(config)).toEqual({ absenceTimeoutMs: 111, gazeIsKeepAwake: false, bootConfirmationTimeoutMs: 333 });
   });

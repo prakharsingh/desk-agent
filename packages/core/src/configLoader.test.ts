@@ -30,6 +30,7 @@ describe('loadConfig', () => {
       absenceTimeoutMs: 300000,
       gazeIsKeepAwake: true,
       bootConfirmationTimeoutMs: 300000,
+      wakeEnabled: true,
     });
   });
 
@@ -40,5 +41,18 @@ describe('loadConfig', () => {
     });
     expect(config.presence.absenceTimeoutMs).toBe(60000);
     expect(config.presence.gazeIsKeepAwake).toBe(false);
+  });
+
+  it('defaults wakeEnabled to true when the presence block is omitted', () => {
+    const config = loadConfig({ weather: { apiKey: 'k', location: 'Seattle' } });
+    expect(config.presence.wakeEnabled).toBe(true);
+  });
+
+  it('accepts an explicit wakeEnabled: false', () => {
+    const config = loadConfig({
+      weather: { apiKey: 'k', location: 'Seattle' },
+      presence: { wakeEnabled: false },
+    });
+    expect(config.presence.wakeEnabled).toBe(false);
   });
 });

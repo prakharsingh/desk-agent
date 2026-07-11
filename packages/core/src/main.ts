@@ -47,6 +47,7 @@ export function run() {
     buildPresenceEngineConfig(config),
     (present) => eventBus.publish({ eventName: 'person_present', data: { present } }),
     (level, message) => log('presence', level, message),
+    () => eventBus.publish({ eventName: 'presence.returned', data: {} }),
   );
 
   const workerHost = new WorkerHost(specs, {

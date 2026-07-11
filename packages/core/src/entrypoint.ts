@@ -42,6 +42,13 @@ export function buildAutomationRules(config: Config): AutomationRule[] {
       debounceMs: config.presenceDebounceMs,
       action: { pluginId: 'energy-saver', action: 'sleep-display' },
     },
+    {
+      id: 'wake-on-return',
+      eventName: 'presence.returned',
+      condition: () => config.presence.wakeEnabled,
+      debounceMs: 0,
+      action: { pluginId: 'energy-saver', action: 'wake-display' },
+    },
   ];
 }
 
@@ -67,6 +74,7 @@ export interface BootDeps {
 export function boot(deps: BootDeps) {
   const onLog = deps.onLog ?? (() => {});
   deps.eventBus.subscribe('person_present', (payload) => deps.automationEngine.handleEvent(payload.eventName, payload.data));
+  deps.eventBus.subscribe('presence.returned', (payload) => deps.automationEngine.handleEvent(payload.eventName, payload.data));
   deps.eventBus.subscribe('automation.override', (payload) => deps.automationEngine.setEnabled(Boolean(payload.data.enabled)));
   if (deps.presenceEngine) {
     const engine = deps.presenceEngine;

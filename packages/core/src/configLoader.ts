@@ -4,6 +4,7 @@ export const PresenceConfigSchema = z.object({
   absenceTimeoutMs: z.number().default(300_000),
   gazeIsKeepAwake: z.boolean().default(true),
   bootConfirmationTimeoutMs: z.number().default(300_000),
+  wakeEnabled: z.boolean().default(true),
 });
 
 export const ConfigSchema = z.object({

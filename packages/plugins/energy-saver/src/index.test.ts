@@ -24,4 +24,21 @@ describe('energySaverPlugin', () => {
     await expect(host.onAction('sleep-display')).resolves.not.toThrow();
     expect(host.recorder.logs).toContainEqual(expect.objectContaining({ level: 'error' }));
   });
+
+  it('runs caffeinate -u -t 2 on the wake-display action', async () => {
+    const host = createFakeHost(energySaverPlugin, { grantedPermissions: ['sys:control-display'] });
+    const run = vi.fn(async () => ({ stdout: '', stderr: '', code: 0 }));
+    (host.ctx.exec.run as any) = run;
+    await host.init();
+    await host.onAction('wake-display');
+    expect(run).toHaveBeenCalledWith('caffeinate', ['-u', '-t', '2']);
+  });
+
+  it('logs and does not throw when caffeinate fails', async () => {
+    const host = createFakeHost(energySaverPlugin, { grantedPermissions: ['sys:control-display'] });
+    (host.ctx.exec.run as any) = vi.fn(async () => ({ stdout: '', stderr: 'not permitted', code: 1 }));
+    await host.init();
+    await expect(host.onAction('wake-display')).resolves.not.toThrow();
+    expect(host.recorder.logs).toContainEqual(expect.objectContaining({ level: 'error' }));
+  });
 });

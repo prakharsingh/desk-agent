@@ -92,7 +92,7 @@ describe('full integration loop', () => {
     });
 
     const invokedActions: Array<{ pluginId: string; action: string }> = [];
-    const config: Config = { enabledPlugins: [], weather: { apiKey: 'k', location: 'x' }, presenceDebounceMs: 1000, wsPort: 8787, presence: { absenceTimeoutMs: 300000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 300000 } };
+    const config: Config = { enabledPlugins: [], weather: { apiKey: 'k', location: 'x' }, presenceDebounceMs: 1000, wsPort: 8787, presence: { absenceTimeoutMs: 300000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 300000, wakeEnabled: true } };
     const automationEngine = new AutomationEngine(buildAutomationRules(config), {
       invoke: (pluginId, action) => { invokedActions.push({ pluginId, action }); workerHost.invokeAction(pluginId, action); },
     }, vi.fn());
@@ -196,7 +196,7 @@ describe('full integration loop', () => {
     const invokedActions: Array<{ pluginId: string; action: string }> = [];
     const config: Config = {
       enabledPlugins: [], weather: { apiKey: 'k', location: 'x' }, presenceDebounceMs: 1000, wsPort: 8787,
-      presence: { absenceTimeoutMs: 2000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 2000 },
+      presence: { absenceTimeoutMs: 2000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 2000, wakeEnabled: true },
     };
     const automationEngine = new AutomationEngine(buildAutomationRules(config), {
       invoke: (pluginId, action) => { invokedActions.push({ pluginId, action }); workerHost.invokeAction(pluginId, action); },
@@ -237,7 +237,7 @@ describe('full integration loop', () => {
     const invokedActions: Array<{ pluginId: string; action: string }> = [];
     const config: Config = {
       enabledPlugins: [], weather: { apiKey: 'k', location: 'x' }, presenceDebounceMs: 1000, wsPort: 8787,
-      presence: { absenceTimeoutMs: 2000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 2000 },
+      presence: { absenceTimeoutMs: 2000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 2000, wakeEnabled: true },
     };
     const automationEngine = new AutomationEngine(buildAutomationRules(config), {
       invoke: (pluginId, action) => { invokedActions.push({ pluginId, action }); workerHost.invokeAction(pluginId, action); },
@@ -262,6 +262,105 @@ describe('full integration loop', () => {
     // Simulates main.ts's Watchdog.onMissed -> presenceEngine.onCameraState wiring (Task A6).
     eventBus.publish({ eventName: 'sensor.camera_state', data: { state: 'error', reason: 'watchdog-timeout' } });
     await vi.advanceTimersByTimeAsync(5000);
+    expect(invokedActions).toEqual([]);
+  });
+
+  it('drives wake-display through a genuine sensor return -> PresenceEngine.onGenuineReturn -> presence.returned -> automation (Slice 1c path)', async () => {
+    const spec: PluginSpec = { id: 'energy-saver', modulePath: '/fake', permissions: ['sys:control-display'] };
+    let fakeWorker!: FakeWorker;
+    let eventBus!: EventBus;
+    const workerHost = new WorkerHost([spec], {
+      maxOldGenerationSizeMb: 64, maxRestarts: 5, callTimeoutMs: 2000,
+      onLog: vi.fn(), onEventPublish: (raw) => eventBus.publish(raw), onWidgetPublish: vi.fn(),
+      createWorker: () => { fakeWorker = new FakeWorker(); return fakeWorker; },
+    });
+    await workerHost.start();
+    fakeWorker.emit('message', { kind: 'ready' });
+
+    const invokedActions: Array<{ pluginId: string; action: string }> = [];
+    const config: Config = {
+      enabledPlugins: [], weather: { apiKey: 'k', location: 'x' }, presenceDebounceMs: 1000, wsPort: 8787,
+      presence: { absenceTimeoutMs: 2000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 2000, wakeEnabled: true },
+    };
+    const automationEngine = new AutomationEngine(buildAutomationRules(config), {
+      invoke: (pluginId, action) => { invokedActions.push({ pluginId, action }); workerHost.invokeAction(pluginId, action); },
+    }, vi.fn());
+
+    eventBus = new EventBus();
+    // Mirrors main.ts's exact PresenceEngine construction, including the
+    // new 4th onGenuineReturn argument wired to presence.returned.
+    const presenceEngine = new PresenceEngine(
+      buildPresenceEngineConfig(config),
+      (present) => eventBus.publish({ eventName: 'person_present', data: { present } }),
+      vi.fn(),
+      () => eventBus.publish({ eventName: 'presence.returned', data: {} }),
+    );
+
+    const tunnelSupervisor = { start: vi.fn() } as any;
+    const gateway = { start: vi.fn(), broadcastWidgetUpdate: vi.fn() } as any;
+    boot({ workerHost, gateway, tunnelSupervisor, eventBus, automationEngine, presenceEngine });
+
+    // Drive the engine to absent first (mirrors the sleep-path test), then
+    // trigger a genuine return.
+    eventBus.publish({ eventName: 'sensor.camera_state', data: { state: 'active' } });
+    eventBus.publish({ eventName: 'sensor.face_visible', data: { visible: false } });
+    eventBus.publish({ eventName: 'sensor.motion', data: { active: false } });
+    await vi.advanceTimersByTimeAsync(3000); // absenceTimeoutMs (2000) + presenceDebounceMs (1000)
+    expect(invokedActions).toEqual([{ pluginId: 'energy-saver', action: 'sleep-display' }]);
+
+    invokedActions.length = 0; // isolate the wake assertion below
+
+    eventBus.publish({ eventName: 'sensor.face_visible', data: { visible: true } });
+    await vi.advanceTimersByTimeAsync(0); // wake-on-return has debounceMs: 0
+    expect(invokedActions).toEqual([{ pluginId: 'energy-saver', action: 'wake-display' }]);
+    expect(fakeWorker.postMessage).toHaveBeenCalledWith(expect.objectContaining({ kind: 'onAction', action: 'wake-display' }));
+  });
+
+  it('never invokes wake-display when a camera error forces present -- fail-safe present must not be mistaken for a genuine return', async () => {
+    const spec: PluginSpec = { id: 'energy-saver', modulePath: '/fake', permissions: ['sys:control-display'] };
+    let fakeWorker!: FakeWorker;
+    let eventBus!: EventBus;
+    const workerHost = new WorkerHost([spec], {
+      maxOldGenerationSizeMb: 64, maxRestarts: 5, callTimeoutMs: 2000,
+      onLog: vi.fn(), onEventPublish: (raw) => eventBus.publish(raw), onWidgetPublish: vi.fn(),
+      createWorker: () => { fakeWorker = new FakeWorker(); return fakeWorker; },
+    });
+    await workerHost.start();
+    fakeWorker.emit('message', { kind: 'ready' });
+
+    const invokedActions: Array<{ pluginId: string; action: string }> = [];
+    const config: Config = {
+      enabledPlugins: [], weather: { apiKey: 'k', location: 'x' }, presenceDebounceMs: 1000, wsPort: 8787,
+      presence: { absenceTimeoutMs: 2000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 2000, wakeEnabled: true },
+    };
+    const automationEngine = new AutomationEngine(buildAutomationRules(config), {
+      invoke: (pluginId, action) => { invokedActions.push({ pluginId, action }); workerHost.invokeAction(pluginId, action); },
+    }, vi.fn());
+
+    eventBus = new EventBus();
+    const presenceEngine = new PresenceEngine(
+      buildPresenceEngineConfig(config),
+      (present) => eventBus.publish({ eventName: 'person_present', data: { present } }),
+      vi.fn(),
+      () => eventBus.publish({ eventName: 'presence.returned', data: {} }),
+    );
+
+    const tunnelSupervisor = { start: vi.fn() } as any;
+    const gateway = { start: vi.fn(), broadcastWidgetUpdate: vi.fn() } as any;
+    boot({ workerHost, gateway, tunnelSupervisor, eventBus, automationEngine, presenceEngine });
+
+    // Get into maybe-absent (same setup as the existing fail-to-present
+    // test), then force a camera error -- this calls onPresenceChange(true)
+    // (sleep-on-absent's condition is unaffected either way, since it only
+    // fires on present:false) but must NOT call onGenuineReturn.
+    eventBus.publish({ eventName: 'sensor.camera_state', data: { state: 'active' } });
+    eventBus.publish({ eventName: 'sensor.face_visible', data: { visible: false } });
+    eventBus.publish({ eventName: 'sensor.motion', data: { active: false } });
+    await vi.advanceTimersByTimeAsync(1000);
+
+    eventBus.publish({ eventName: 'sensor.camera_state', data: { state: 'error', reason: 'watchdog-timeout' } });
+    await vi.advanceTimersByTimeAsync(5000);
+
     expect(invokedActions).toEqual([]);
   });
 });
