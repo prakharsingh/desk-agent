@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { loadConfig } from './index.js';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { loadConfig, loadConfigFromFile } from './index.js';
 
 describe('loadConfig', () => {
   it('applies sane defaults when optional fields are omitted', () => {
@@ -54,5 +57,29 @@ describe('loadConfig', () => {
       presence: { wakeEnabled: false },
     });
     expect(config.presence.wakeEnabled).toBe(false);
+  });
+});
+
+describe('loadConfigFromFile', () => {
+  const tmpDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'desk-agent-config-'));
+
+  it('loads and validates a config file', () => {
+    const configPath = path.join(tmpDir(), 'config.json');
+    fs.writeFileSync(configPath, JSON.stringify({ weather: { apiKey: 'k', location: 'Seattle' } }));
+    const config = loadConfigFromFile(configPath);
+    expect(config.wsPort).toBe(8787);
+  });
+
+  it('throws an error naming the resolved path and the fix when the file is missing', () => {
+    const configPath = path.join(tmpDir(), 'config.json');
+    expect(() => loadConfigFromFile(configPath)).toThrow(configPath);
+    expect(() => loadConfigFromFile(configPath)).toThrow(/config\.example\.json/);
+  });
+
+  it('throws an error naming the resolved path when the file is not valid JSON', () => {
+    const configPath = path.join(tmpDir(), 'config.json');
+    fs.writeFileSync(configPath, '{ not json');
+    expect(() => loadConfigFromFile(configPath)).toThrow(configPath);
+    expect(() => loadConfigFromFile(configPath)).toThrow(/not valid JSON/);
   });
 });

@@ -8,6 +8,7 @@ export interface WsClientLike {
 
 export interface WsServerLike {
   on(event: 'connection', handler: (client: WsClientLike) => void): void;
+  on(event: 'error', handler: (err: Error) => void): void;
   close(): void;
 }
 
@@ -18,6 +19,7 @@ export interface WsGatewayOptions {
   onEventPublish: (raw: unknown) => void;
   /** Invoked once per successfully-parsed inbound frame, of any type — a liveness signal for the watchdog. */
   onClientMessage?: () => void;
+  onLog?: (level: string, message: string) => void;
   wssFactory?: () => WsServerLike;
 }
 
@@ -40,10 +42,16 @@ export class WsGateway {
 
   constructor(private opts: WsGatewayOptions) {
     this.wss = opts.wssFactory ? opts.wssFactory() : defaultWssFactory(opts.port);
+    // The underlying WebSocketServer starts listening as soon as it's
+    // constructed, so both handlers must be attached here, not in start():
+    // an unhandled 'error' (e.g. EADDRINUSE) is an uncaught exception, and a
+    // client connecting during the worker-startup window before start()
+    // would otherwise be silently ignored until its heartbeat timeout.
+    this.wss.on('error', (err) => this.opts.onLog?.('error', `websocket server error: ${String(err)}`));
+    this.wss.on('connection', (client) => this.handleConnection(client));
   }
 
   start() {
-    this.wss.on('connection', (client) => this.handleConnection(client));
     this.heartbeatTimer = setInterval(() => this.broadcastHeartbeat(), this.opts.heartbeatMs);
   }
 

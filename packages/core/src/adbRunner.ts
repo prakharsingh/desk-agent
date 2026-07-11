@@ -4,13 +4,22 @@ import type { AdbRunner } from './tunnelSupervisor.js';
 
 const execFileAsync = promisify(execFile);
 
-export function createRealAdbRunner(): AdbRunner {
+export function createRealAdbRunner(
+  onLog: (level: string, message: string) => void = () => {},
+  adbPath = 'adb',
+): AdbRunner {
   return {
     async reverse(localPort, remotePort) {
-      await execFileAsync('adb', ['reverse', `tcp:${localPort}`, `tcp:${remotePort}`]);
+      await execFileAsync(adbPath, ['reverse', `tcp:${localPort}`, `tcp:${remotePort}`]);
     },
     trackDevices(onEvent) {
-      const child = spawn('adb', ['track-devices']);
+      const child = spawn(adbPath, ['track-devices']);
+      // Without this handler a missing adb binary (spawn ENOENT) is an
+      // unhandled 'error' event — an uncaught exception that kills the whole
+      // core, not just the tunnel.
+      child.on('error', (err) => {
+        onLog('error', `adb track-devices failed to start (is adb on PATH?): ${String(err)}`);
+      });
       let previouslySeen = new Set<string>();
       child.stdout.on('data', (chunk: Buffer) => {
         const seenNow = new Set<string>();

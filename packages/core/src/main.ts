@@ -1,7 +1,6 @@
-import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { loadConfig } from './configLoader.js';
+import { loadConfigFromFile } from './configLoader.js';
 import { buildPluginSpecs, buildAutomationRules, buildPresenceEngineConfig, boot, type PluginRegistryEntry } from './entrypoint.js';
 import { EventBus } from './eventBus.js';
 import { AutomationEngine } from './automationEngine.js';
@@ -33,7 +32,7 @@ function resolvePluginRegistry(): Record<string, PluginRegistryEntry> {
 
 export function run() {
   const configPath = process.env.DESK_AGENT_CONFIG_PATH ?? path.join(process.cwd(), 'config.json');
-  const config = loadConfig(JSON.parse(fs.readFileSync(configPath, 'utf8')));
+  const config = loadConfigFromFile(configPath);
 
   const log = (pluginId: string, level: string, message: string) => console.log(`[${level}] ${pluginId}: ${message}`);
   const specs = buildPluginSpecs(config, resolvePluginRegistry(), (level, message) => log('core', level, message));
@@ -67,6 +66,7 @@ export function run() {
   const gateway = new WsGateway({
     port: config.wsPort,
     heartbeatMs: 5000,
+    onLog: (level, message) => log('gateway', level, message),
     getSnapshot: async () => {
       const entries = await Promise.all(specs.map(async (spec) => {
         const widgets = await workerHost.getWidgets(spec.id);
@@ -87,12 +87,16 @@ export function run() {
     },
   });
 
-  const tunnelSupervisor = new TunnelSupervisor(createRealAdbRunner(), config.wsPort, (level, message) => log('tunnel', level, message));
+  const tunnelLog = (level: string, message: string) => log('tunnel', level, message);
+  const tunnelSupervisor = new TunnelSupervisor(createRealAdbRunner(tunnelLog), config.wsPort, tunnelLog);
 
   workerHost.start().then(() => boot({
     workerHost, gateway, tunnelSupervisor, eventBus, automationEngine, watchdog, presenceEngine,
     onLog: (level, message) => log('core', level, message),
-  }));
+  })).catch((err) => {
+    log('core', 'error', `startup failed: ${String(err)}`);
+    process.exit(1);
+  });
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

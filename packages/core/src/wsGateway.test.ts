@@ -90,6 +90,35 @@ describe('WsGateway', () => {
     expect(onClientMessage).not.toHaveBeenCalled();
   });
 
+  it('serves a client that connected before start() was called', async () => {
+    const server = new FakeServer();
+    const snapshot = [{ widgetId: 'system-stats', widget: { type: 'system-stats', props: { cpu: 1 } } }];
+    const gateway = new WsGateway({
+      port: 8787, heartbeatMs: 5000,
+      getSnapshot: async () => snapshot,
+      onEventPublish: vi.fn(),
+      wssFactory: () => server,
+    });
+    // The real WebSocketServer starts listening in the constructor, so a phone
+    // can connect during the worker-startup window before gateway.start().
+    const client = connectClient(server);
+    client.emit('message', JSON.stringify(createFrame('hello', { clientVersion: '1.0.0' })));
+    await vi.waitFor(() => expect(client.sent.length).toBe(1));
+    gateway.start();
+    gateway.stop();
+  });
+
+  it('logs a server error (e.g. port already in use) instead of crashing', () => {
+    const server = new FakeServer();
+    const onLog = vi.fn();
+    new WsGateway({
+      port: 8787, heartbeatMs: 5000, getSnapshot: async () => [], onEventPublish: vi.fn(), wssFactory: () => server,
+      onLog,
+    });
+    expect(() => server.emit('error', new Error('listen EADDRINUSE: address already in use 127.0.0.1:8787'))).not.toThrow();
+    expect(onLog).toHaveBeenCalledWith('error', expect.stringContaining('EADDRINUSE'));
+  });
+
   it('broadcastWidgetUpdate sends a single-entry widgets array to all clients', () => {
     const server = new FakeServer();
     const gateway = new WsGateway({
