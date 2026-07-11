@@ -44,6 +44,7 @@ config.json
 .claude/
 .gemini/
 .direnv-bin/
+.worktrees/
 docs/**/plans
 docs/**/specs
 docs/**/enhancements
