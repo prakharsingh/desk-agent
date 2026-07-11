@@ -39,6 +39,14 @@ version for the whole monorepo, not per-package — see
 - Worker-host startup failures are caught, logged, and exit non-zero instead
   of surfacing as an unhandled promise rejection.
 
+### Security
+
+- `exec.run` is now gated by a per-permission command allowlist instead of
+  "holds any `sys:*` permission": `sys:read-stats` unlocks only `pmset -g …`
+  and `osascript`, `sys:control-display` only `pmset displaysleepnow` and
+  `caffeinate`, and no permission unlocks arbitrary commands. Previously
+  either permission granted unrestricted command execution.
+
 ### Changed
 
 - Public documentation overhaul: README, AGENTS.md, SETUP.md, CONTRIBUTING.md,

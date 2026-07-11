@@ -115,7 +115,13 @@ the bar for a change to be considered done.
   more important than convenience.
 - **Plugins reach the outside world only through the capability object
   (`ctx`) passed to `init()`.** The host enforces each plugin's declared
-  `permissions` array on every `ctx` call. Don't add a plugin capability that
+  `permissions` array on every `ctx` call. For `exec.run` this is a
+  per-permission command allowlist (`EXEC_ALLOWLIST` in
+  `packages/core/src/permissionEnforcer.ts`): `sys:read-stats` unlocks only
+  `pmset -g …` and `osascript`, `sys:control-display` only
+  `pmset displaysleepnow` and `caffeinate`, and nothing unlocks arbitrary
+  commands. A plugin that needs a new command needs a new allowlist entry
+  (and a test), not a broader permission. Don't add a plugin capability that
   bypasses this (e.g. importing `child_process` directly in a plugin).
 - **Camera privacy is a real teardown, not a mute.** Toggling the privacy
   switch off must unmount `<CameraPresence>` so the OS actually releases the

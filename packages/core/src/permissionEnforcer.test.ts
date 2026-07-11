@@ -50,6 +50,60 @@ describe('createEnforcedCtx', () => {
     expect(onDenied).toHaveBeenCalled();
   });
 
+  it('denies caffeinate for a plugin holding only sys:read-stats', async () => {
+    const base = makeBaseCtx();
+    const onDenied = vi.fn();
+    const ctx = createEnforcedCtx('system-stats', ['sys:read-stats'], base, onDenied);
+    const result = await ctx.exec.run('caffeinate', ['-u', '-t', '2']);
+    expect(result.code).toBe(1);
+    expect(base.exec.run).not.toHaveBeenCalled();
+    expect(onDenied).toHaveBeenCalledWith(expect.objectContaining({ requiredPermission: 'sys:control-display' }));
+  });
+
+  it('denies pmset displaysleepnow for a plugin holding only sys:read-stats', async () => {
+    const base = makeBaseCtx();
+    const ctx = createEnforcedCtx('system-stats', ['sys:read-stats'], base, vi.fn());
+    const result = await ctx.exec.run('pmset', ['displaysleepnow']);
+    expect(result.code).toBe(1);
+    expect(base.exec.run).not.toHaveBeenCalled();
+  });
+
+  it('allows pmset -g and osascript with sys:read-stats', async () => {
+    const base = makeBaseCtx();
+    const onDenied = vi.fn();
+    const ctx = createEnforcedCtx('system-stats', ['sys:read-stats'], base, onDenied);
+    expect((await ctx.exec.run('pmset', ['-g', 'batt'])).code).toBe(0);
+    expect((await ctx.exec.run('osascript', ['-e', 'tell application "Music" to get name of current track'])).code).toBe(0);
+    expect(onDenied).not.toHaveBeenCalled();
+  });
+
+  it('allows pmset displaysleepnow and caffeinate with sys:control-display', async () => {
+    const base = makeBaseCtx();
+    const onDenied = vi.fn();
+    const ctx = createEnforcedCtx('energy-saver', ['sys:control-display'], base, onDenied);
+    expect((await ctx.exec.run('pmset', ['displaysleepnow'])).code).toBe(0);
+    expect((await ctx.exec.run('caffeinate', ['-u', '-t', '2'])).code).toBe(0);
+    expect(onDenied).not.toHaveBeenCalled();
+  });
+
+  it('denies pmset -g for a plugin holding only sys:control-display', async () => {
+    const base = makeBaseCtx();
+    const ctx = createEnforcedCtx('energy-saver', ['sys:control-display'], base, vi.fn());
+    const result = await ctx.exec.run('pmset', ['-g', 'batt']);
+    expect(result.code).toBe(1);
+    expect(base.exec.run).not.toHaveBeenCalled();
+  });
+
+  it('denies a command outside every allowlist even when both sys permissions are granted', async () => {
+    const base = makeBaseCtx();
+    const onDenied = vi.fn();
+    const ctx = createEnforcedCtx('rogue', ['sys:read-stats', 'sys:control-display'], base, onDenied);
+    const result = await ctx.exec.run('rm', ['-rf', '/']);
+    expect(result.code).toBe(1);
+    expect(base.exec.run).not.toHaveBeenCalled();
+    expect(onDenied).toHaveBeenCalledWith(expect.objectContaining({ requiredPermission: null }));
+  });
+
   it('passes timer, log, publishEvent, publishWidget through ungated', () => {
     const base = makeBaseCtx();
     const ctx = createEnforcedCtx('weather', [], base, vi.fn());

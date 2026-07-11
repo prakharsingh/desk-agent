@@ -3,7 +3,25 @@ import type { Ctx, ExecResult, Permission } from '@desk-agent/plugin-sdk';
 export interface PermissionDenial {
   pluginId: string;
   capability: string;
-  requiredPermission: Permission;
+  /** null when no permission allows the attempted invocation at all */
+  requiredPermission: Permission | null;
+}
+
+// Exec is allowlisted per permission, not gated on "holds some sys:*
+// permission": sys:read-stats must not unlock display control (or vice
+// versa), and no permission unlocks arbitrary commands. `firstArg` pins the
+// pmset subcommand, splitting its read mode from its control mode.
+const EXEC_ALLOWLIST: ReadonlyArray<{ permission: Permission; command: string; firstArg?: string }> = [
+  { permission: 'sys:read-stats', command: 'pmset', firstArg: '-g' },
+  { permission: 'sys:read-stats', command: 'osascript' },
+  { permission: 'sys:control-display', command: 'pmset', firstArg: 'displaysleepnow' },
+  { permission: 'sys:control-display', command: 'caffeinate' },
+];
+
+function execPermissionsFor(command: string, args: string[] | undefined): Permission[] {
+  return EXEC_ALLOWLIST
+    .filter((rule) => rule.command === command && (rule.firstArg === undefined || args?.[0] === rule.firstArg))
+    .map((rule) => rule.permission);
 }
 
 export function createEnforcedCtx(
@@ -30,10 +48,14 @@ export function createEnforcedCtx(
     publishWidget: base.publishWidget,
     exec: {
       async run(command, args): Promise<ExecResult> {
-        const hasSysPermission = granted.has('sys:read-stats') || granted.has('sys:control-display');
-        if (!hasSysPermission) {
-          onDenied({ pluginId, capability: 'exec.run', requiredPermission: 'sys:read-stats' });
-          return { stdout: '', stderr: 'permission denied: sys:read-stats or sys:control-display required', code: 1 };
+        const allowedBy = execPermissionsFor(command, args);
+        if (!allowedBy.some((permission) => granted.has(permission))) {
+          const requiredPermission = allowedBy[0] ?? null;
+          onDenied({ pluginId, capability: `exec.run(${command})`, requiredPermission });
+          const stderr = requiredPermission
+            ? `permission denied: ${command} requires ${requiredPermission}`
+            : `permission denied: ${command} is not allowed under any sys:* permission`;
+          return { stdout: '', stderr, code: 1 };
         }
         return base.exec.run(command, args);
       },
