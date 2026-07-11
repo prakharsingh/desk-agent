@@ -17,6 +17,8 @@ export interface WsGatewayOptions {
   heartbeatMs: number;
   getSnapshot: () => Promise<WidgetEntry[]>;
   onEventPublish: (raw: unknown) => void;
+  /** Invoked when a client sends action.invoke (e.g. the phone's media-control buttons). */
+  onActionInvoke?: (pluginId: string, action: string, args?: Record<string, unknown>) => void;
   /** Invoked once per successfully-parsed inbound frame, of any type — a liveness signal for the watchdog. */
   onClientMessage?: () => void;
   onLog?: (level: string, message: string) => void;
@@ -76,6 +78,8 @@ export class WsGateway {
       client.send(JSON.stringify(createFrame('widget.update', { widgets })));
     } else if (frame.type === 'event.publish') {
       this.opts.onEventPublish(frame.payload);
+    } else if (frame.type === 'action.invoke') {
+      this.opts.onActionInvoke?.(frame.payload.pluginId, frame.payload.action, frame.payload.args);
     }
   }
 

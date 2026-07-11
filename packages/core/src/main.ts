@@ -24,7 +24,10 @@ const WATCHDOG_TIMEOUT_MS = 30000;
 
 function resolvePluginRegistry(): Record<string, PluginRegistryEntry> {
   return {
-    'system-stats': { modulePath: require.resolve('@desk-agent/plugin-system-stats'), permissions: ['sys:read-stats'] },
+    'system-stats': {
+      modulePath: require.resolve('@desk-agent/plugin-system-stats'),
+      permissions: ['sys:read-stats', 'sys:control-media'],
+    },
     'weather': { modulePath: require.resolve('@desk-agent/plugin-weather'), permissions: ['net:api.weather'] },
     'energy-saver': { modulePath: require.resolve('@desk-agent/plugin-energy-saver'), permissions: ['sys:control-display'] },
   };
@@ -75,6 +78,7 @@ export function run() {
       return entries.flat();
     },
     onEventPublish: (raw) => eventBus.publish(raw),
+    onActionInvoke: (pluginId, action, args) => workerHost.invokeAction(pluginId, action, args),
     onClientMessage: () => {
       watchdog.pulse();
       // Any fresh client traffic proves the link is alive again, healing a

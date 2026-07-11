@@ -53,6 +53,34 @@ describe('WsGateway', () => {
     expect(onEventPublish).toHaveBeenCalledWith({ eventName: 'person_present', data: { present: false } });
   });
 
+  it('forwards action.invoke to onActionInvoke with pluginId, action, and args', () => {
+    const server = new FakeServer();
+    const onActionInvoke = vi.fn();
+    const gateway = new WsGateway({
+      port: 8787, heartbeatMs: 5000,
+      getSnapshot: async () => [],
+      onEventPublish: vi.fn(),
+      onActionInvoke,
+      wssFactory: () => server,
+    });
+    gateway.start();
+    const client = connectClient(server);
+    client.emit('message', JSON.stringify(createFrame('action.invoke', { pluginId: 'system-stats', action: 'togglePlayPause' })));
+    expect(onActionInvoke).toHaveBeenCalledWith('system-stats', 'togglePlayPause', undefined);
+  });
+
+  it('does not throw on action.invoke when onActionInvoke is not provided', () => {
+    const server = new FakeServer();
+    const gateway = new WsGateway({
+      port: 8787, heartbeatMs: 5000, getSnapshot: async () => [], onEventPublish: vi.fn(), wssFactory: () => server,
+    });
+    gateway.start();
+    const client = connectClient(server);
+    expect(() => {
+      client.emit('message', JSON.stringify(createFrame('action.invoke', { pluginId: 'system-stats', action: 'next' })));
+    }).not.toThrow();
+  });
+
   it('drops a malformed frame without throwing', () => {
     const server = new FakeServer();
     const gateway = new WsGateway({

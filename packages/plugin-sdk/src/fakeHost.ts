@@ -40,7 +40,8 @@ export function createFakeHost(plugin: Plugin, options: FakeHostOptions = {}) {
     publishWidget: (widgetId, widget) => recorder.publishedWidgets.push({ widgetId, widget }),
     exec: {
       async run(_command, _args): Promise<ExecResult> {
-        const hasSysPermission = granted.has('sys:read-stats') || granted.has('sys:control-display');
+        const hasSysPermission =
+          granted.has('sys:read-stats') || granted.has('sys:control-display') || granted.has('sys:control-media');
         if (!hasSysPermission) {
           recorder.deniedCalls.push('exec.run');
           return { stdout: '', stderr: 'permission denied', code: 1 };

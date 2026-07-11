@@ -68,12 +68,12 @@ describe('createEnforcedCtx', () => {
     expect(base.exec.run).not.toHaveBeenCalled();
   });
 
-  it('allows pmset -g and osascript with sys:read-stats', async () => {
+  it('allows pmset -g and nowplaying-cli get with sys:read-stats', async () => {
     const base = makeBaseCtx();
     const onDenied = vi.fn();
     const ctx = createEnforcedCtx('system-stats', ['sys:read-stats'], base, onDenied);
     expect((await ctx.exec.run('pmset', ['-g', 'batt'])).code).toBe(0);
-    expect((await ctx.exec.run('osascript', ['-e', 'tell application "Music" to get name of current track'])).code).toBe(0);
+    expect((await ctx.exec.run('nowplaying-cli', ['get', '--json', 'title', 'playbackRate'])).code).toBe(0);
     expect(onDenied).not.toHaveBeenCalled();
   });
 
@@ -84,6 +84,34 @@ describe('createEnforcedCtx', () => {
     expect((await ctx.exec.run('pmset', ['displaysleepnow'])).code).toBe(0);
     expect((await ctx.exec.run('caffeinate', ['-u', '-t', '2'])).code).toBe(0);
     expect(onDenied).not.toHaveBeenCalled();
+  });
+
+  it('allows nowplaying-cli play/pause/togglePlayPause/next/previous with sys:control-media', async () => {
+    const base = makeBaseCtx();
+    const onDenied = vi.fn();
+    const ctx = createEnforcedCtx('system-stats', ['sys:control-media'], base, onDenied);
+    for (const action of ['play', 'pause', 'togglePlayPause', 'next', 'previous']) {
+      expect((await ctx.exec.run('nowplaying-cli', [action])).code).toBe(0);
+    }
+    expect(onDenied).not.toHaveBeenCalled();
+  });
+
+  it('denies nowplaying-cli play for a plugin holding only sys:read-stats', async () => {
+    const base = makeBaseCtx();
+    const onDenied = vi.fn();
+    const ctx = createEnforcedCtx('system-stats', ['sys:read-stats'], base, onDenied);
+    const result = await ctx.exec.run('nowplaying-cli', ['play']);
+    expect(result.code).toBe(1);
+    expect(base.exec.run).not.toHaveBeenCalled();
+    expect(onDenied).toHaveBeenCalledWith(expect.objectContaining({ requiredPermission: 'sys:control-media' }));
+  });
+
+  it('denies nowplaying-cli get for a plugin holding only sys:control-media', async () => {
+    const base = makeBaseCtx();
+    const ctx = createEnforcedCtx('system-stats', ['sys:control-media'], base, vi.fn());
+    const result = await ctx.exec.run('nowplaying-cli', ['get', '--json', 'title']);
+    expect(result.code).toBe(1);
+    expect(base.exec.run).not.toHaveBeenCalled();
   });
 
   it('denies pmset -g for a plugin holding only sys:control-display', async () => {

@@ -13,9 +13,14 @@ export interface PermissionDenial {
 // pmset subcommand, splitting its read mode from its control mode.
 const EXEC_ALLOWLIST: ReadonlyArray<{ permission: Permission; command: string; firstArg?: string }> = [
   { permission: 'sys:read-stats', command: 'pmset', firstArg: '-g' },
-  { permission: 'sys:read-stats', command: 'osascript' },
+  { permission: 'sys:read-stats', command: 'nowplaying-cli', firstArg: 'get' },
   { permission: 'sys:control-display', command: 'pmset', firstArg: 'displaysleepnow' },
   { permission: 'sys:control-display', command: 'caffeinate' },
+  { permission: 'sys:control-media', command: 'nowplaying-cli', firstArg: 'play' },
+  { permission: 'sys:control-media', command: 'nowplaying-cli', firstArg: 'pause' },
+  { permission: 'sys:control-media', command: 'nowplaying-cli', firstArg: 'togglePlayPause' },
+  { permission: 'sys:control-media', command: 'nowplaying-cli', firstArg: 'next' },
+  { permission: 'sys:control-media', command: 'nowplaying-cli', firstArg: 'previous' },
 ];
 
 function execPermissionsFor(command: string, args: string[] | undefined): Permission[] {

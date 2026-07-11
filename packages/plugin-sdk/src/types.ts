@@ -1,6 +1,6 @@
 import type { Widget } from '@desk-agent/protocol';
 
-export type Permission = 'net:api.weather' | 'sys:read-stats' | 'sys:control-display';
+export type Permission = 'net:api.weather' | 'sys:read-stats' | 'sys:control-display' | 'sys:control-media';
 
 export interface ExecResult {
   stdout: string;
