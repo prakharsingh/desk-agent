@@ -1,67 +1,66 @@
-# Desk Agent OS — Slice 1a
+# Desk Agent OS
 
-Docked Android phone renders an always-on React Native dashboard (System
-Stats + Weather) driven by a Mac-side Node core agent over WebSocket. A
-stubbed presence toggle in the app flows phone→desktop→action
-(`pmset displaysleepnow`), proving both data-flow directions.
+**v0.2.0** · 152 tests passing · [Changelog](CHANGELOG.md)
 
-See `docs/superpowers/specs/2026-07-10-desk-agent-os-slice1a-design.md` for
-the full design and `docs/superpowers/plans/2026-07-10-desk-agent-os-slice1a.md`
-for the implementation plan (both gitignored locally; consult your working
-tree, not the remote, if they're missing).
+An old Android phone, docked next to a Mac, becomes a live desk dashboard and
+an honest presence sensor. A Mac-side Node "brain" drives what the phone shows
+and reacts to what the phone honestly reports seeing — starting with
+auto-sleeping the display when you're genuinely away from your desk.
 
-## Setup
-
-```bash
-rtk pnpm install
-rtk pnpm build
-rtk vitest run
+```
+[Mac core: gateway, event bus, plugins, automation]  <--WebSocket over USB-->  [phone: RN dashboard + camera CV]
+        |                                                                              |
+   widget.update  ------------------------------------------------------------->  live widgets render
+   sensor.face_visible / sensor.gaze_at_screen / sensor.motion / sensor.camera_state
+        |  <-------------------------------------------------------------------  on-device MLKit face detection
+   PresenceEngine (hysteresis fusion, Mac-side)
+        |
+   person_present  -->  AutomationEngine  -->  energy-saver plugin  -->  pmset displaysleepnow
 ```
 
-## Running
+**Honest signals, not vibes.** The phone never claims "person present" — it
+only reports what its camera actually saw this frame (`face_visible`,
+`gaze_at_screen`, `motion`) as debounced edge events, and never leaves the
+device. All the judgment — fusing those signals, applying a multi-minute
+hysteresis window so a still moment reading doesn't sleep your display, and
+failing safe toward "present" the instant the camera or link looks unhealthy
+— lives in a fully unit-tested state machine on the Mac
+(`packages/core/src/presenceEngine.ts`).
 
-1. Start the core agent: `node packages/core/dist/main.js` (reads config from
-   `DESK_AGENT_CONFIG_PATH` or `./config.json` — see
-   `packages/core/src/configLoader.ts` for the schema).
-2. Dock the phone via USB; the tunnel supervisor issues
-   `adb reverse tcp:8787 tcp:8787` automatically on device attach.
-3. Launch the React Native app on the phone (`app/`); it connects to
-   `ws://localhost:8787` (reachable through the reverse tunnel).
+## Roadmap
 
-## Android manual setup (required once per device)
+| Slice | Status | Delivers |
+|---|---|---|
+| **1a** | ✅ shipped | Live dashboard (System Stats, Weather) + stubbed presence toggle proving the phone↔Mac spine |
+| **1b** | ✅ shipped | Real camera presence detection, hysteresis-guarded auto-sleep, honest `sensor.*` protocol |
+| **1c** | planned | Programmatic wake of the external HDMI monitor when presence returns (no physical keypress) |
 
-See `app/android-notes/RELIABILITY.md` — keep-awake, foreground service,
-battery optimization, OEM autostart allowlisting.
+See [CHANGELOG.md](CHANGELOG.md) for what shipped in each slice.
 
-## macOS manual setup (required once, before any headless/launchd operation)
+## Quickstart
 
-See `packages/core/macos-notes/PERMISSIONS.md` — the Automation (Apple
-Events) TCC prompt for now-playing must be granted through a real UI session
-before the agent is ever started unattended.
+```bash
+pnpm install
+pnpm build
+pnpm test
+```
 
-## Manual E2E checklist (Slice 1a)
+That builds and tests the whole monorepo. For running the actual agent + app
+on real hardware (Node core on the Mac, React Native app on a docked Android
+phone) and the full manual verification checklist, see **[SETUP.md](SETUP.md)**.
 
-Run this after `rtk vitest run` is green and both processes are built:
+## Documentation
 
-- [ ] Dock phone → tunnel supervisor log shows `adb reverse` issued.
-- [ ] Launch app → `hello` → both System Stats and Weather widgets render
-      with live values within 5s.
-- [ ] Toggle "Present" off in the app → within `presenceDebounceMs`, the Mac
-      display sleeps via `pmset displaysleepnow`.
-- [ ] Wake the Mac only via physical touch/keypress — toggling "Present" back
-      on does NOT itself wake the display (no programmatic wake in 1a).
-- [ ] Toggle "Automation Enabled" off, then toggle "Present" off — confirm the
-      display does NOT sleep (manual override wins).
-- [ ] Unplug and replug the USB cable → tunnel supervisor re-issues
-      `adb reverse` → app reconnects and re-syncs a fresh snapshot, without
-      restarting either process.
-- [ ] Deny the Automation (Apple Events) TCC prompt for now-playing → System
-      Stats widget shows `nowPlaying: unavailable`, agent stays up (no crash).
-- [ ] Leave both processes running overnight → next morning, either the phone
-      is still sending heartbeats, or the Mac-side watchdog log shows it
-      flagged the silence.
+- **[SETUP.md](SETUP.md)** — from-zero install, running the core + app on
+  real hardware, manual E2E checklist.
+- **[AGENTS.md](AGENTS.md)** — architecture map and conventions for anyone
+  (human or AI coding agent) working in this codebase.
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** — branch/commit conventions, test
+  expectations, PR process, versioning & release model.
+- **[CHANGELOG.md](CHANGELOG.md)** — what shipped in each release.
+- **[Wiki](https://github.com/prakharsingh/desk-agent/wiki)** — deeper
+  architecture notes, hardware specifics, and troubleshooting.
 
-## Open Items (record before Slice 1b)
+## License
 
-- Exact target phone make + Android/OEM version: _______________
-- Exact target Mac model + macOS version: _______________
+[MIT](LICENSE)

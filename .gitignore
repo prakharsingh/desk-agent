@@ -47,7 +47,6 @@ config.json
 docs/**/plans
 docs/**/specs
 docs/**/enhancements
-AGENTS.md
 gemini.md
 CLAUDE.md
 ANTIGRAVITY.md
