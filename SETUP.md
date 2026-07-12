@@ -131,21 +131,20 @@ background-kill behavior, and real thermal/timing behavior.
       within `WATCHDOG_TIMEOUT_MS`, the engine goes fail-to-present, and the
       display does NOT sleep purely from the resulting silence.
 
-**Wake-on-return (Slice 1c) — REQUIRED before calling 1c done.** Slice 1c is
-code-complete but every automated test mocks the shell-exec boundary; nothing
-has physically observed a real wake yet. This checklist *is* the missing
-hardware spike:
-- [ ] **The spike:** with the display asleep (real DPMS sleep via the
+**Wake-on-return (Slice 1c) — verified 2026-07-12** on a OnePlus 6T +
+target Mac/external HDMI monitor. All four checks passed; no code changes
+were required.
+- [x] **The spike:** with the display asleep (real DPMS sleep via the
       auto-sleep path, not the lid), run `caffeinate -u -t 2` by hand on the
       target Mac + external HDMI monitor → confirm the monitor actually wakes.
       If it doesn't, set `presence.wakeEnabled: false` and keep auto-sleep.
-- [ ] Let the display auto-sleep, then walk back to the desk → display wakes
+- [x] Let the display auto-sleep, then walk back to the desk → display wakes
       within a few seconds of the camera seeing you, no keypress.
-- [ ] **Fail-safe test:** while absent (display asleep), force-kill the app so
+- [x] **Fail-safe test:** while absent (display asleep), force-kill the app so
       the watchdog fires → the engine goes fail-to-present but the display
       must NOT wake (forced-present must never trigger a wake; only a genuine
       absent→present edge may).
-- [ ] Set `presence.wakeEnabled: false`, restart the core, return from a real
+- [x] Set `presence.wakeEnabled: false`, restart the core, return from a real
       absence → display stays asleep until a keypress (auto-sleep unaffected).
 
 ## Troubleshooting

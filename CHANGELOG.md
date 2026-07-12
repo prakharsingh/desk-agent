@@ -8,7 +8,7 @@ version for the whole monorepo, not per-package — see
 
 ## [Unreleased]
 
-### Added — Slice 1c: programmatic wake-from-sleep (code-complete)
+### Added — Slice 1c: programmatic wake-from-sleep
 
 - **Wake-on-return** (100% Mac-side; no `app/` or protocol changes): when the
   presence engine sees a genuine, sensor-driven `absent → present` edge, a new
@@ -21,10 +21,12 @@ version for the whole monorepo, not per-package — see
   can be disabled independently of auto-sleep.
 - 17 new/modified vitest tests, including end-to-end proofs that the wake
   fires on a real return and never on a fail-safe transition.
-- **Status: code-complete, not feature-complete.** Every test mocks the
-  shell-exec boundary; whether `caffeinate -u -t 2` wakes the real target
-  monitor from DPMS sleep is unverified — see SETUP.md's wake-on-return
-  checklist for the required hardware spike.
+- **Status: feature-complete, hardware-verified 2026-07-12** (OnePlus 6T +
+  target Mac/external HDMI monitor) — see SETUP.md's wake-on-return
+  checklist. `caffeinate -u -t 2` genuinely wakes the monitor from real DPMS
+  sleep, walk-back auto-wake works with no keypress, the fail-safe path
+  correctly never wakes the display, and `presence.wakeEnabled: false`
+  correctly disables only the programmatic wake (auto-sleep unaffected).
 
 ### Fixed
 
