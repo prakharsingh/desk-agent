@@ -22,17 +22,30 @@ hysteresis-guarded fusion engine on the Mac. See
 [Architecture](Architecture) for the design and
 [Hardware](Hardware) for what it's been validated against.
 
+### Slice 1c — v0.3.0 — wake-from-sleep
+Programmatic wake of the Mac's external HDMI monitor when presence returns,
+without a physical keypress. Deliberately deferred out of 1b — it was the
+riskiest, least-certain piece (waking an external monitor out of DPMS via
+`caffeinate -u -t 2`, behavior that can vary by monitor/cable) and
+independent of presence detection, so isolating it kept it from blocking
+1b. Hardware-verified on a OnePlus 6T + target Mac/external HDMI monitor
+2026-07-12 — the wake genuinely fires, and the fail-safe path (a
+watchdog-triggered forced-present) correctly never wakes the display.
+
+### Slice 1d — v0.3.0 — phone display UI
+A designed multi-screen phone dashboard (Home cards, tap-through detail
+screens, ambient idle clock) replacing the original unstyled scaffold, plus
+a live camera preview with a face-detection bounding-box overlay on the
+Presence screen, a weather rework (Open-Meteo, 7-day forecast), and a new
+Chin Light widget (fullscreen fill light for video calls). Shipped in the
+same v0.3.0 release as Slice 1c since both landed on `main` before either
+was tagged — see [CHANGELOG.md](https://github.com/prakharsingh/desk-agent/blob/main/CHANGELOG.md)
+for the full breakdown.
+
 ## Planned
 
-### Slice 1c — wake-from-sleep
-Programmatic wake of the Mac's external HDMI monitor when presence returns,
-without a physical keypress. Deliberately deferred out of 1b — it's the
-riskiest, least-certain piece (waking an external monitor out of DPMS via
-IOKit power assertions, `caffeinate -u -t 2` + `IOPMAssertionDeclareUserActivity`,
-behavior that can vary by monitor/cable) and independent of presence
-detection, so isolating it kept it from blocking 1b. The trigger source
-already exists — the presence engine's `present` transition — 1c should only
-need to consume it.
+Nothing currently scoped into a named slice — see "Later" below for the
+backlog.
 
 ### Later (not yet sliced)
 From the original four-version vision (dashboard → voice/presence/AI →

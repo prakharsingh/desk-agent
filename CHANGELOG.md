@@ -8,6 +8,14 @@ version for the whole monorepo, not per-package — see
 
 ## [Unreleased]
 
+## [0.3.0] — Slice 1c: wake-from-sleep + Slice 1d: phone display UI — 2026-07-12
+
+Two slices, released together since both landed on `main` before either was
+tagged. Roughly 140 new/modified vitest tests across the two, plus this
+release's own first Kotlin native-module test coverage (9 tests, JUnit +
+MockK + Robolectric) and ~10 new pure-logic `.ts` modules extracted from
+previously-untested `.tsx` display components.
+
 ### Added — Slice 1c: programmatic wake-from-sleep
 
 - **Wake-on-return** (100% Mac-side; no `app/` or protocol changes): when the
@@ -21,12 +29,58 @@ version for the whole monorepo, not per-package — see
   can be disabled independently of auto-sleep.
 - 17 new/modified vitest tests, including end-to-end proofs that the wake
   fires on a real return and never on a fail-safe transition.
-- **Status: feature-complete, hardware-verified 2026-07-12** (OnePlus 6T +
-  target Mac/external HDMI monitor) — see SETUP.md's wake-on-return
-  checklist. `caffeinate -u -t 2` genuinely wakes the monitor from real DPMS
-  sleep, walk-back auto-wake works with no keypress, the fail-safe path
-  correctly never wakes the display, and `presence.wakeEnabled: false`
-  correctly disables only the programmatic wake (auto-sleep unaffected).
+- **Hardware-verified 2026-07-12** on a OnePlus 6T + target Mac/external HDMI
+  monitor — see SETUP.md's wake-on-return checklist. `caffeinate -u -t 2`
+  genuinely wakes the monitor from real DPMS sleep, walk-back auto-wake works
+  with no keypress, the fail-safe path correctly never wakes the display, and
+  `presence.wakeEnabled: false` correctly disables only the programmatic
+  wake (auto-sleep unaffected).
+
+### Added — Slice 1d: phone display UI, live camera preview, weather rework, Chin Light
+
+- **Phone-mounted dashboard**: a designed multi-screen UI replacing the
+  original unstyled single-screen scaffold — a Home screen with per-widget
+  cards, tap-through detail screens (Clock, System, Weather, Presence, Now
+  Playing), a nav/screen-state reducer, an ambient idle/asleep clock screen,
+  local auto-idle policy, CPU/RAM sparkline history buffers, OLED
+  pixel-shift drift mitigation, and IBM Plex Mono font bundling.
+- **Live camera preview + face-detection bounding-box overlay** on the
+  PRESENCE detail screen: the persistently-mounted camera (never
+  interrupted, so detection keeps running on every screen) is portaled into
+  a measured on-screen slot with a green accent bounding box tracking the
+  detected face. Includes a fix for a Fabric render crash (unifying two
+  conditional `<Camera>` render paths that were sending an explicit `null`
+  to a non-nullable native prop) and a sensor-orientation correction
+  (`orientBBoxForPreview.ts`) for a rotation-plus-reflection bbox
+  misalignment found on-device. See
+  `docs/superpowers/plans/2026-07-12-presence-live-camera-preview.md` for
+  the full implementation trail.
+- **Weather widget migrated to Open-Meteo** with a 7-day forecast detail
+  screen and an F/C toggle.
+- **New Chin Light widget**: a Home-screen card that turns the phone's own
+  screen into a fullscreen fill light (White/Sunlight presets, adjustable
+  rendered brightness, forced OS screen brightness via a new in-repo
+  `Brightness` native module, tap-to-reveal controls, 30-minute auto-exit,
+  idle-suppression so the local auto-idle timer never fires mid-call).
+
+### Fixed — system-wide Now Playing + media controls
+
+- `system-stats`'s now-playing read no longer queries Apple Music
+  exclusively via `tell application "Music"`, which unconditionally
+  launched Music.app if it wasn't already running — causing it to
+  relentlessly relaunch itself every 2s poll even after being force-quit,
+  and reporting "unavailable" for anyone using a different player. Replaced
+  with `nowplaying-cli`, which reads macOS's system-wide MediaRemote
+  registration (the same source Control Center uses) — source-agnostic
+  across Music, Spotify, and browser tabs, and a passive read with no app
+  to launch.
+- Added album artwork and play/pause/next/previous controls, gated behind a
+  new `sys:control-media` permission, with a short local grace window
+  distinguishing "paused a moment ago" from "the source app quit hours
+  ago" (both report the same null `playbackRate` from `nowplaying-cli`).
+- The WebSocket gateway now actually routes incoming `action.invoke` frames
+  to plugins — previously a no-op, so the phone had no way to trigger a
+  plugin action at all.
 
 ### Fixed
 
@@ -40,6 +94,11 @@ version for the whole monorepo, not per-package — see
   `EADDRINUSE` instead of crashing uncaught.
 - Worker-host startup failures are caught, logged, and exit non-zero instead
   of surfacing as an unhandled promise rejection.
+- A latent divide-by-zero: dragging the Chin Light brightness slider before
+  its track's first `onLayout` measurement (width 0) propagated `NaN` into
+  brightness, desyncing the slider fill/knob from the actual value. Fixed
+  by extracting the drag math into a guarded, unit-tested
+  `lightScreenDrag.ts` helper.
 
 ### Security
 
@@ -53,6 +112,12 @@ version for the whole monorepo, not per-package — see
 
 - Public documentation overhaul: README, AGENTS.md, SETUP.md, CONTRIBUTING.md,
   this changelog, and a GitHub wiki.
+- Backfilled test coverage on two previously-untested surfaces: five
+  predicates/formatters extracted out of `.tsx` display components into
+  tested `.ts` helpers (`connectionChip`, `triState`, `systemFormat`,
+  `nowPlayingFormat`, `lightScreenDrag`), and the two in-repo Android native
+  modules (`BrightnessModule`, `PresenceServiceModule`) got their first
+  JUnit/MockK/Robolectric unit tests.
 
 ## [0.2.0] — Slice 1b: Real camera presence — 2026-07-11
 
@@ -133,6 +198,7 @@ tested with zero camera/CV risk.
   (startup → snapshot → widget-update → event → action, plus simulated
   crash-and-restart and tunnel-down/reconnect).
 
-[Unreleased]: https://github.com/prakharsingh/desk-agent/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/prakharsingh/desk-agent/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/prakharsingh/desk-agent/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/prakharsingh/desk-agent/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/prakharsingh/desk-agent/releases/tag/v0.1.0

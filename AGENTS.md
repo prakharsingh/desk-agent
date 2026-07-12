@@ -85,6 +85,22 @@ their built output, not on-the-fly.
 There's no CI pipeline yet — `pnpm build && pnpm test` passing locally is
 the bar for a change to be considered done.
 
+**RN component tests are Jest, not Vitest.** `vitest.config.ts` only globs
+`*.test.ts`, never `*.test.tsx` — Vitest's Rollup/esbuild pipeline can't
+parse `react-native`'s raw Flow source at all. `.tsx` component tests
+(render + interaction, via `@testing-library/react-native`) live in
+`app/`'s own `jest.config.js`/`app/package.json`'s `test:components` script
+(`cd app && pnpm test:components`), a second, `app/`-scoped runner that
+never overlaps with Vitest's file glob. Two API quirks worth knowing before
+writing one: `render()` and `fireEvent.press()` are both **async** in the
+installed `@testing-library/react-native` version — forgetting `await`
+doesn't error loudly, it just leaves `screen` queries reading a stale/empty
+tree (or, for un-awaited concurrent `fireEvent` calls, an "overlapping
+act() calls" warning and flaky cross-test pollution). Pure logic still
+belongs in a `.ts` + Vitest `.test.ts` file per the existing convention —
+reach for a `.tsx` Jest test only for genuinely view-level behavior
+(conditional rendering, interaction wiring) that has no non-JSX home.
+
 ## Conventions that are load-bearing (don't casually violate)
 
 - **TDD.** Every package here was built test-first; `presenceEngine.ts` in
