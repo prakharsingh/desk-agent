@@ -5,6 +5,7 @@ import type { SensorFrame } from '../sensorFrame.js';
 import type { PresenceView } from '../derivePresence.js';
 import { BackHeader } from '../ui/BackHeader.js';
 import { Toggle } from '../ui/Toggle.js';
+import { fmtTri, fmtCameraState } from '../triState.js';
 
 export interface PresenceDetailProps {
   presence: PresenceView;
@@ -16,19 +17,6 @@ export interface PresenceDetailProps {
   onBack: () => void;
   onSleepNow: () => void;
   onPreviewRect?: (rect: { x: number; y: number; width: number; height: number } | null) => void;
-}
-
-function fmtTri(v: boolean | null): { text: string; color: string } {
-  if (v === true) return { text: 'TRUE', color: theme.colors.accent };
-  if (v === false) return { text: 'FALSE', color: theme.colors.textFaint };
-  return { text: 'UNKNOWN', color: theme.colors.textFaint };
-}
-
-function fmtCameraState(v: SensorFrame['cameraState']): { text: string; color: string } {
-  if (v === 'active') return { text: 'ACTIVE', color: theme.colors.accent };
-  if (v === 'released') return { text: 'RELEASED', color: theme.colors.textFaint };
-  if (v === 'error') return { text: 'ERROR', color: theme.colors.alert };
-  return { text: 'UNKNOWN', color: theme.colors.textFaint };
 }
 
 export function PresenceDetail({

@@ -3,6 +3,7 @@ import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { theme } from './theme.js';
 import type { ConnectionState } from '../wsClient.js';
 import type { PresenceView } from './derivePresence.js';
+import { connectionChip } from './connectionChip.js';
 
 export interface HeaderProps {
   connectionState: ConnectionState;
@@ -14,20 +15,6 @@ export interface HeaderProps {
 // this presentational component to a build-time JSON import; bump by hand
 // alongside real release milestones.
 const VERSION_LABEL = 'v0.2.0';
-
-function connectionChip(state: ConnectionState): { color: string; label: string; dim?: boolean } {
-  switch (state) {
-    case 'connected':
-      return { color: theme.colors.accent, label: 'LIVE' };
-    case 'connecting':
-      return { color: theme.colors.textFaint, label: 'CONNECTING', dim: true };
-    case 'tunnel-down':
-    case 'server-down':
-      return { color: theme.colors.alert, label: 'LINK DOWN' };
-    default:
-      return { color: theme.colors.textFaint, label: 'UNKNOWN' };
-  }
-}
 
 export function Header({ connectionState, presence, onSleep }: HeaderProps) {
   const chip = connectionChip(connectionState);

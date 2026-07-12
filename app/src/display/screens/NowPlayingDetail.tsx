@@ -3,6 +3,7 @@ import { View, Text, Image, Pressable, StyleSheet } from 'react-native';
 import { theme } from '../theme.js';
 import type { SystemStatsView } from '../widgetReaders.js';
 import { BackHeader } from '../ui/BackHeader.js';
+import { hasActiveTrack } from '../nowPlayingFormat.js';
 
 export interface NowPlayingDetailProps {
   stats: SystemStatsView;
@@ -16,7 +17,7 @@ export interface NowPlayingDetailProps {
 // design spec's honest-placeholder rule) -- artist is always rendered as '—'
 // and no elapsed/duration readout is shown.
 export function NowPlayingDetail({ stats, onBack, onTogglePlayPause, onNext, onPrevious }: NowPlayingDetailProps) {
-  const hasTrack = stats.nowPlaying !== '—' && stats.nowPlaying !== 'unavailable';
+  const hasTrack = hasActiveTrack(stats.nowPlaying);
 
   return (
     <View style={styles.screen}>

@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, NativeModules, type GestureResponderEvent, type LayoutChangeEvent, PanResponder } from 'react-native';
 import { theme } from '../theme.js';
 import { renderedLightColor, type LightColorPreset } from '../lightColor.js';
+import { computeDraggedBrightness } from '../lightScreenDrag.js';
+import { shouldAutoIdle } from '../autoIdle.js';
 import { Toggle } from '../ui/Toggle.js';
 
 // Task 3's in-repo native module (app/android/.../BrightnessModule.kt), accessed
@@ -91,7 +93,7 @@ export function LightScreen({ color, onToggleColor, brightness, onChangeBrightne
   const autoExitFiredRef = useRef(false);
   useEffect(() => {
     const interval = setInterval(() => {
-      if (!autoExitFiredRef.current && Date.now() - mountedAtRef.current >= AUTO_EXIT_MS) {
+      if (!autoExitFiredRef.current && shouldAutoIdle(Date.now() - mountedAtRef.current, AUTO_EXIT_MS)) {
         autoExitFiredRef.current = true;
         onBack();
       }
@@ -134,7 +136,7 @@ export function LightScreen({ color, onToggleColor, brightness, onChangeBrightne
         dragStartBrightnessRef.current = latestBrightnessRef.current;
       },
       onPanResponderMove: (_evt: GestureResponderEvent, gestureState) => {
-        const next = Math.max(0, Math.min(1, dragStartBrightnessRef.current + gestureState.dx / sliderWidthRef.current));
+        const next = computeDraggedBrightness(dragStartBrightnessRef.current, gestureState.dx, sliderWidthRef.current);
         onChangeBrightness(next);
       },
     })

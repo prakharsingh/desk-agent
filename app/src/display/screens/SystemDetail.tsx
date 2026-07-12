@@ -5,20 +5,13 @@ import type { SystemStatsView } from '../widgetReaders.js';
 import { BackHeader } from '../ui/BackHeader.js';
 import { StatBar } from '../ui/StatBar.js';
 import { Sparkline } from '../ui/Sparkline.js';
+import { pctOrZero, fmtPct } from '../systemFormat.js';
 
 export interface SystemDetailProps {
   stats: SystemStatsView;
   cpuHistory: number[];
   ramHistory: number[];
   onBack: () => void;
-}
-
-function pctOrZero(v: number | null): number {
-  return typeof v === 'number' ? v : 0;
-}
-
-function fmtPct(v: number | null): string {
-  return typeof v === 'number' ? `${Math.round(v)}%` : '—';
 }
 
 export function SystemDetail({ stats, cpuHistory, ramHistory, onBack }: SystemDetailProps) {
