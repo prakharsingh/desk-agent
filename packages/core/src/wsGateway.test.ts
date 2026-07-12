@@ -53,7 +53,7 @@ describe('WsGateway', () => {
     expect(onEventPublish).toHaveBeenCalledWith({ eventName: 'person_present', data: { present: false } });
   });
 
-  it('forwards action.invoke to onActionInvoke with pluginId, action, and args', () => {
+  it('forwards action.invoke payload to onActionInvoke', () => {
     const server = new FakeServer();
     const onActionInvoke = vi.fn();
     const gateway = new WsGateway({

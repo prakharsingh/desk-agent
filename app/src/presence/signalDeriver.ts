@@ -1,6 +1,12 @@
 export interface FaceObservation {
   faceCount: number;
   bbox?: { x: number; y: number; width: number; height: number };
+  // The camera frame's own pixel dimensions that bbox is normalized against
+  // (same as frame.width/frame.height in the worklet). Only present alongside
+  // bbox; needed by the visible-preview overlay to account for
+  // resizeMode="contain" letterboxing (see mapBoxToPreview.ts).
+  frameWidth?: number;
+  frameHeight?: number;
   eulerX?: number;
   eulerY?: number;
   leftEyeOpenProbability?: number;

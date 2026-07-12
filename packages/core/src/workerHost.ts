@@ -8,6 +8,11 @@ export interface PluginSpec {
   id: string;
   modulePath: string;
   permissions: Permission[];
+  config?: unknown;
+}
+
+export function buildWorkerData(spec: PluginSpec) {
+  return { pluginModulePath: spec.modulePath, grantedPermissions: spec.permissions, pluginConfig: spec.config };
 }
 
 export type PluginStatus = 'starting' | 'running' | 'degraded' | 'failed';
@@ -45,7 +50,7 @@ export class WorkerHost {
 
   private defaultCreateWorker(spec: PluginSpec): WorkerLike {
     return new Worker(path.join(__dirname, 'workerEntry.js'), {
-      workerData: { pluginModulePath: spec.modulePath, grantedPermissions: spec.permissions },
+      workerData: buildWorkerData(spec),
       resourceLimits: { maxOldGenerationSizeMb: this.opts.maxOldGenerationSizeMb },
     }) as unknown as WorkerLike;
   }

@@ -14,6 +14,7 @@ export interface PermissionDenial {
 const EXEC_ALLOWLIST: ReadonlyArray<{ permission: Permission; command: string; firstArg?: string }> = [
   { permission: 'sys:read-stats', command: 'pmset', firstArg: '-g' },
   { permission: 'sys:read-stats', command: 'nowplaying-cli', firstArg: 'get' },
+  { permission: 'sys:read-stats', command: 'pgrep', firstArg: '-i' },
   { permission: 'sys:control-display', command: 'pmset', firstArg: 'displaysleepnow' },
   { permission: 'sys:control-display', command: 'caffeinate' },
   { permission: 'sys:control-media', command: 'nowplaying-cli', firstArg: 'play' },

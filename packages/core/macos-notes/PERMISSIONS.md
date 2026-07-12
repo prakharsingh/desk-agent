@@ -7,8 +7,17 @@
 widget uses. This is source-agnostic (Music, Spotify, and browser tabs
 playing HTML5 media all register with it) and, unlike the earlier
 per-app-AppleScript approach this replaced, it does **not** trigger a
-macOS Automation (Apple Events) TCC prompt — it's a passive read with no
-app to launch or address by name.
+macOS Automation (Apple Events) TCC prompt.
+
+**It is not a fully passive read, though**: on this macOS version, calling
+`nowplaying-cli get` (via `execFile`, i.e. a detached/non-interactive
+process — the same call typed into an interactive shell does not reproduce
+this) when nothing is currently registered as now-playing has been observed
+to relaunch the last-used native player (Music.app) as a side effect. To
+avoid this, `readNowPlaying` checks (`pgrep`) whether a known player or
+browser process is running first, and skips the `nowplaying-cli` call
+entirely when none are — see the comment on `isKnownPlayerRunning` in
+`packages/plugins/system-stats/src/index.ts`.
 
 ## Runtime dependency
 

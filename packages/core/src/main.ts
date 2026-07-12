@@ -24,11 +24,8 @@ const WATCHDOG_TIMEOUT_MS = 30000;
 
 function resolvePluginRegistry(): Record<string, PluginRegistryEntry> {
   return {
-    'system-stats': {
-      modulePath: require.resolve('@desk-agent/plugin-system-stats'),
-      permissions: ['sys:read-stats', 'sys:control-media'],
-    },
-    'weather': { modulePath: require.resolve('@desk-agent/plugin-weather'), permissions: ['net:api.weather'] },
+    'system-stats': { modulePath: require.resolve('@desk-agent/plugin-system-stats'), permissions: ['sys:read-stats', 'sys:control-media'] },
+    'weather': { modulePath: require.resolve('@desk-agent/plugin-weather'), permissions: ['net:api.weather'], configKey: 'weather' },
     'energy-saver': { modulePath: require.resolve('@desk-agent/plugin-energy-saver'), permissions: ['sys:control-display'] },
   };
 }

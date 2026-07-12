@@ -1,11 +1,58 @@
+import os, { type CpuInfo } from 'node:os';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createFakeHost } from '@desk-agent/plugin-sdk';
 import systemStatsPlugin from './index.js';
 
 beforeEach(() => vi.useFakeTimers());
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 describe('systemStatsPlugin', () => {
+  it('computes cpuPercent from the delta between successive polls, not a cumulative since-boot average', async () => {
+    // os.cpus()[i].times are cumulative counters since boot. A single snapshot's
+    // idle/total ratio is the AVERAGE utilization since boot, which barely moves
+    // between two polls seconds apart -- it must be diffed against the previous
+    // snapshot to reflect the load during that interval.
+    const snapshots: CpuInfo['times'][][] = [
+      [{ user: 100_000, nice: 0, sys: 50_000, idle: 850_000, irq: 0 }], // poll #1 baseline
+      [{ user: 100_150, nice: 0, sys: 50_000, idle: 850_150, irq: 0 }], // poll #2: +150 busy, +150 idle over the interval -> 50% busy
+    ];
+    let call = 0;
+    vi.spyOn(os, 'cpus').mockImplementation(
+      () => snapshots[Math.min(call++, snapshots.length - 1)].map((times) => ({ model: 'x', speed: 0, times })) as any,
+    );
+    const host = createFakeHost(systemStatsPlugin, { grantedPermissions: ['sys:read-stats'] });
+    (host.ctx.exec.run as any) = vi.fn(async () => ({ stdout: '', stderr: '', code: 1 }));
+    await systemStatsPlugin.init(host.ctx); // poll #1: establishes baseline, no prior snapshot to diff against
+    await vi.advanceTimersByTimeAsync(2000); // poll #2: should diff against poll #1's snapshot
+    const last = host.recorder.publishedWidgets.at(-1)!;
+    expect(last.widget.props.cpuPercent).toBe(50);
+  });
+
+  it('getWidgets reflects the last poll\'s real nowPlaying/battery instead of a stale hardcoded placeholder', async () => {
+    // getWidgets() answers the hello snapshot on every connect/reconnect --
+    // if it always returned a hardcoded "unavailable"/"N/A" placeholder
+    // regardless of what poll() already observed, every reconnect would
+    // briefly show wrong data even when the plugin has been running with
+    // known-good state for a while.
+    const host = createFakeHost(systemStatsPlugin, { grantedPermissions: ['sys:read-stats'] });
+    (host.ctx.exec.run as any) = vi.fn(async (command: string, args?: string[]) => {
+      if (command === 'pgrep') return { stdout: '123', stderr: '', code: 0 };
+      if (command === 'pmset') return { stdout: 'Battery Power\n -InternalBattery-0 (id=1) 77%; discharging;', stderr: '', code: 0 };
+      if (command === 'nowplaying-cli' && args?.[0] === 'get') {
+        return { stdout: JSON.stringify({ title: 'Reconnect Track', playbackRate: 1 }), stderr: '', code: 0 };
+      }
+      return { stdout: '', stderr: '', code: 0 };
+    });
+    await systemStatsPlugin.init(host.ctx);
+    const widgets = await systemStatsPlugin.getWidgets();
+    expect(widgets[0].props.nowPlaying).toBe('Reconnect Track');
+    expect(widgets[0].props.nowPlayingIsPlaying).toBe(true);
+    expect(widgets[0].props.battery).toBe('77%');
+  });
+
   it('declares sys:read-stats and sys:control-media, and pushes a widget on the poll interval', async () => {
     expect(systemStatsPlugin.permissions).toEqual(['sys:read-stats', 'sys:control-media']);
     const host = createFakeHost(systemStatsPlugin);
@@ -26,6 +73,44 @@ describe('systemStatsPlugin', () => {
     vi.advanceTimersByTime(2000);
     const last = host.recorder.publishedWidgets.at(-1)!;
     expect(last.widget.props.battery).toBe('N/A');
+  });
+
+  it('never calls nowplaying-cli when no known player process is running, reporting unavailable instead', async () => {
+    // nowplaying-cli has been observed to relaunch the last-used player
+    // (e.g. Music.app) as a side effect when nothing is currently
+    // registered as now-playing -- skip the read entirely rather than risk
+    // that, since the result would be "unavailable" either way.
+    const host = createFakeHost(systemStatsPlugin, { grantedPermissions: ['sys:read-stats'] });
+    const calls: string[] = [];
+    (host.ctx.exec.run as any) = vi.fn(async (command: string) => {
+      calls.push(command);
+      if (command === 'pgrep') return { stdout: '', stderr: '', code: 1 };
+      return { stdout: '', stderr: '', code: 0 };
+    });
+    await systemStatsPlugin.init(host.ctx);
+    vi.advanceTimersByTime(2000);
+    const last = host.recorder.publishedWidgets.at(-1)!;
+    expect(last.widget.props.nowPlaying).toBe('unavailable');
+    expect(last.widget.props.nowPlayingIsPlaying).toBe(false);
+    expect(last.widget.props.nowPlayingArtwork).toBeNull();
+    expect(calls).toContain('pgrep');
+    expect(calls).not.toContain('nowplaying-cli');
+  });
+
+  it('reads now-playing normally when a known player process is running', async () => {
+    const host = createFakeHost(systemStatsPlugin, { grantedPermissions: ['sys:read-stats'] });
+    (host.ctx.exec.run as any) = vi.fn(async (command: string) => {
+      if (command === 'pgrep') return { stdout: '13399', stderr: '', code: 0 };
+      if (command === 'nowplaying-cli') {
+        return { stdout: JSON.stringify({ title: 'Real Track', playbackRate: 1 }), stderr: '', code: 0 };
+      }
+      return { stdout: '', stderr: '', code: 0 };
+    });
+    await systemStatsPlugin.init(host.ctx);
+    vi.advanceTimersByTime(2000);
+    const last = host.recorder.publishedWidgets.at(-1)!;
+    expect(last.widget.props.nowPlaying).toBe('Real Track');
+    expect(last.widget.props.nowPlayingIsPlaying).toBe(true);
   });
 
   it('renders now-playing as "unavailable" when nowplaying-cli is missing or fails', async () => {

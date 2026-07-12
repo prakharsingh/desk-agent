@@ -1,6 +1,6 @@
 {
   "enabledPlugins": ["system-stats", "weather", "energy-saver"],
-  "weather": { "apiKey": "placeholder-not-a-real-key", "location": "Seattle" },
+  "weather": { "location": "Seattle" },
   "presenceDebounceMs": 10000,
   "wsPort": 8787
 }

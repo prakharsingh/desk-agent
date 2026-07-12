@@ -14,6 +14,10 @@ import type { PresenceEngine, PresenceEngineConfig } from './presenceEngine.js';
 export interface PluginRegistryEntry {
   modulePath: string;
   permissions: Permission[];
+  // Names the top-level Config field this plugin's instance config lives
+  // under (e.g. 'weather' -> config.weather). Omitted for plugins that need
+  // no external config (system-stats, energy-saver).
+  configKey?: keyof Config;
 }
 
 export function buildPluginSpecs(
@@ -28,7 +32,12 @@ export function buildPluginSpecs(
       onLog('error', `enabled plugin "${id}" not found in registry, skipping`);
       continue;
     }
-    specs.push({ id, modulePath: entry.modulePath, permissions: entry.permissions });
+    specs.push({
+      id,
+      modulePath: entry.modulePath,
+      permissions: entry.permissions,
+      config: entry.configKey ? config[entry.configKey] : undefined,
+    });
   }
   return specs;
 }

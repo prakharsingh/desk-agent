@@ -1,4 +1,4 @@
-import os from 'node:os';
+import os, { type CpuInfo } from 'node:os';
 import type { Ctx, Plugin } from '@desk-agent/plugin-sdk';
 
 const POLL_MS = 2000;
@@ -40,16 +40,45 @@ const PAUSED_GRACE_MS = 30000;
 let lastPlayingTitle: string | null = null;
 let lastPlayingAt = 0;
 
+// Every process nowplaying-cli could plausibly be reading from: native
+// players plus common browsers (HTML5 media registers under the browser's
+// own process). Substring match (no -x) so browser helper/renderer process
+// name variants (e.g. "Google Chrome Helper") still count as "Chrome
+// running". Checked before every nowplaying-cli read (see readNowPlaying's
+// guard) so the read is skipped entirely when none of these are running --
+// i.e. only when nothing could possibly be playing anywhere.
+// "Microsoft Edge" (not bare "Edge"): the single word matches unrelated
+// macOS background daemons whose names happen to contain "edge" as a
+// substring (spotlightknowledged, siriknowledged, knowledge-agent), which
+// made this check match almost always regardless of whether a real player
+// was running.
+const KNOWN_PLAYER_PROCESSES_PATTERN = 'Music|Spotify|Safari|Chrome|Firefox|Brave|Microsoft Edge';
+
+async function isKnownPlayerRunning(ctx: Ctx): Promise<boolean> {
+  try {
+    const result = await ctx.exec.run('pgrep', ['-i', KNOWN_PLAYER_PROCESSES_PATTERN]);
+    return result.code === 0;
+  } catch {
+    return false;
+  }
+}
+
 async function readNowPlaying(ctx: Ctx): Promise<NowPlayingInfo> {
   try {
     // nowplaying-cli reads macOS's system-wide MediaRemote "Now Playing"
     // registration (the same source Control Center's widget uses) instead
-    // of addressing one specific app by name. Two things this buys us: (1)
-    // it's source-agnostic -- Music, Spotify, and browser tabs playing
-    // HTML5 media (YouTube, Spotify Web) all register with the same OS
-    // mechanism, so no per-app scripting is needed; (2) it's a passive
-    // read with no app to launch, so there's no "tell application" launch
-    // side effect to guard against.
+    // of addressing one specific app by name. That's source-agnostic --
+    // Music, Spotify, and browser tabs playing HTML5 media (YouTube,
+    // Spotify Web) all register with the same OS mechanism, so no per-app
+    // scripting is needed. BUT: on this macOS version, calling it when
+    // NOTHING is currently registered as now-playing has been observed to
+    // relaunch the last-used native player (Music.app) as a side effect --
+    // so skip the call entirely unless some known player/browser process
+    // is already running (i.e. unless nothing could possibly be playing).
+    if (!(await isKnownPlayerRunning(ctx))) {
+      lastPlayingTitle = null;
+      return NOW_PLAYING_UNAVAILABLE;
+    }
     const result = await ctx.exec.run('nowplaying-cli', ['get', '--json', 'title', 'playbackRate', 'artworkData']);
     if (result.code !== 0) return NOW_PLAYING_UNAVAILABLE;
     const parsed: unknown = JSON.parse(result.stdout);
@@ -89,10 +118,23 @@ async function handleMediaAction(ctx: Ctx, action: string): Promise<void> {
   }
 }
 
+// os.cpus()[i].times are cumulative counters since boot, not instantaneous
+// values -- a single snapshot's idle/total ratio is the AVERAGE utilization
+// since boot, which barely moves between polls seconds apart (on a machine
+// up for hours/days it's effectively flat). The load during the most recent
+// interval is the DELTA between two snapshots, so the previous poll's
+// snapshot must be retained and diffed against the current one.
+let prevCpuTimes: CpuInfo['times'][] | null = null;
+
 function cpuPercent(): number {
-  const loads = os.cpus().map((cpu) => {
-    const total = Object.values(cpu.times).reduce((a, b) => a + b, 0);
-    return total > 0 ? 1 - cpu.times.idle / total : 0;
+  const current = os.cpus().map((cpu) => cpu.times);
+  const prev = prevCpuTimes;
+  prevCpuTimes = current;
+  if (!prev || prev.length !== current.length) return 0;
+  const loads = current.map((times, i) => {
+    const idleDelta = times.idle - prev[i].idle;
+    const totalDelta = Object.keys(times).reduce((sum, key) => sum + (times[key as keyof typeof times] - prev[i][key as keyof typeof times]), 0);
+    return totalDelta > 0 ? 1 - idleDelta / totalDelta : 0;
   });
   return Math.round((loads.reduce((a, b) => a + b, 0) / loads.length) * 100);
 }
@@ -101,9 +143,18 @@ function ramPercent(): number {
   return Math.round(((os.totalmem() - os.freemem()) / os.totalmem()) * 100);
 }
 
+// Mirrors the last poll's result so getWidgets() (answering the hello
+// snapshot on every connect/reconnect) reflects actually-known state instead
+// of a hardcoded placeholder -- otherwise every reconnect would briefly show
+// wrong data even after the plugin has long since observed the real values.
+let lastBattery = 'N/A';
+let lastNowPlaying: NowPlayingInfo = NOW_PLAYING_UNAVAILABLE;
+
 async function poll(ctx: Ctx) {
   try {
     const [battery, nowPlaying] = await Promise.all([readBattery(ctx), readNowPlaying(ctx)]);
+    lastBattery = battery;
+    lastNowPlaying = nowPlaying;
     ctx.publishWidget('system-stats', {
       type: 'system-stats',
       props: { cpuPercent: cpuPercent(), ramPercent: ramPercent(), battery, ...nowPlaying },
@@ -127,7 +178,7 @@ const systemStatsPlugin: Plugin = {
     return [
       {
         type: 'system-stats',
-        props: { cpuPercent: cpuPercent(), ramPercent: ramPercent(), battery: 'N/A', ...NOW_PLAYING_UNAVAILABLE },
+        props: { cpuPercent: cpuPercent(), ramPercent: ramPercent(), battery: lastBattery, ...lastNowPlaying },
       },
     ];
   },

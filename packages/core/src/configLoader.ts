@@ -10,7 +10,8 @@ export const PresenceConfigSchema = z.object({
 
 export const ConfigSchema = z.object({
   enabledPlugins: z.array(z.string()).default(['system-stats', 'weather', 'energy-saver']),
-  weather: z.object({ apiKey: z.string(), location: z.string() }),
+  // No apiKey: the weather plugin uses Open-Meteo, which needs no API key.
+  weather: z.object({ location: z.string() }),
   presenceDebounceMs: z.number().default(30000),
   wsPort: z.number().default(8787),
   presence: PresenceConfigSchema.default({}),

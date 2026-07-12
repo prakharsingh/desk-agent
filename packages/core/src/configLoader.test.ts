@@ -6,7 +6,7 @@ import { loadConfig, loadConfigFromFile } from './index.js';
 
 describe('loadConfig', () => {
   it('applies sane defaults when optional fields are omitted', () => {
-    const config = loadConfig({ weather: { apiKey: 'k', location: 'Seattle' } });
+    const config = loadConfig({ weather: { location: 'Seattle' } });
     expect(config.enabledPlugins).toEqual(['system-stats', 'weather', 'energy-saver']);
     expect(config.presenceDebounceMs).toBe(30000);
     expect(config.wsPort).toBe(8787);
@@ -15,7 +15,7 @@ describe('loadConfig', () => {
   it('accepts fully specified config', () => {
     const config = loadConfig({
       enabledPlugins: ['weather'],
-      weather: { apiKey: 'k', location: 'Seattle' },
+      weather: { location: 'Seattle' },
       presenceDebounceMs: 5000,
       wsPort: 9000,
     });
@@ -28,7 +28,7 @@ describe('loadConfig', () => {
   });
 
   it('applies sane defaults for the presence block when omitted', () => {
-    const config = loadConfig({ weather: { apiKey: 'k', location: 'Seattle' } });
+    const config = loadConfig({ weather: { location: 'Seattle' } });
     expect(config.presence).toEqual({
       absenceTimeoutMs: 300000,
       gazeIsKeepAwake: true,
@@ -39,7 +39,7 @@ describe('loadConfig', () => {
 
   it('accepts a fully specified presence block', () => {
     const config = loadConfig({
-      weather: { apiKey: 'k', location: 'Seattle' },
+      weather: { location: 'Seattle' },
       presence: { absenceTimeoutMs: 60000, gazeIsKeepAwake: false, bootConfirmationTimeoutMs: 60000 },
     });
     expect(config.presence.absenceTimeoutMs).toBe(60000);
@@ -47,13 +47,13 @@ describe('loadConfig', () => {
   });
 
   it('defaults wakeEnabled to true when the presence block is omitted', () => {
-    const config = loadConfig({ weather: { apiKey: 'k', location: 'Seattle' } });
+    const config = loadConfig({ weather: { location: 'Seattle' } });
     expect(config.presence.wakeEnabled).toBe(true);
   });
 
   it('accepts an explicit wakeEnabled: false', () => {
     const config = loadConfig({
-      weather: { apiKey: 'k', location: 'Seattle' },
+      weather: { location: 'Seattle' },
       presence: { wakeEnabled: false },
     });
     expect(config.presence.wakeEnabled).toBe(false);
@@ -65,7 +65,7 @@ describe('loadConfigFromFile', () => {
 
   it('loads and validates a config file', () => {
     const configPath = path.join(tmpDir(), 'config.json');
-    fs.writeFileSync(configPath, JSON.stringify({ weather: { apiKey: 'k', location: 'Seattle' } }));
+    fs.writeFileSync(configPath, JSON.stringify({ weather: { location: 'Seattle' } }));
     const config = loadConfigFromFile(configPath);
     expect(config.wsPort).toBe(8787);
   });

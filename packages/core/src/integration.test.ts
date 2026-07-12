@@ -92,7 +92,7 @@ describe('full integration loop', () => {
     });
 
     const invokedActions: Array<{ pluginId: string; action: string }> = [];
-    const config: Config = { enabledPlugins: [], weather: { apiKey: 'k', location: 'x' }, presenceDebounceMs: 1000, wsPort: 8787, presence: { absenceTimeoutMs: 300000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 300000, wakeEnabled: true } };
+    const config: Config = { enabledPlugins: [], weather: { location: 'x' }, presenceDebounceMs: 1000, wsPort: 8787, presence: { absenceTimeoutMs: 300000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 300000, wakeEnabled: true } };
     const automationEngine = new AutomationEngine(buildAutomationRules(config), {
       invoke: (pluginId, action) => { invokedActions.push({ pluginId, action }); workerHost.invokeAction(pluginId, action); },
     }, vi.fn());
@@ -195,7 +195,7 @@ describe('full integration loop', () => {
 
     const invokedActions: Array<{ pluginId: string; action: string }> = [];
     const config: Config = {
-      enabledPlugins: [], weather: { apiKey: 'k', location: 'x' }, presenceDebounceMs: 1000, wsPort: 8787,
+      enabledPlugins: [], weather: { location: 'x' }, presenceDebounceMs: 1000, wsPort: 8787,
       presence: { absenceTimeoutMs: 2000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 2000, wakeEnabled: true },
     };
     const automationEngine = new AutomationEngine(buildAutomationRules(config), {
@@ -236,7 +236,7 @@ describe('full integration loop', () => {
 
     const invokedActions: Array<{ pluginId: string; action: string }> = [];
     const config: Config = {
-      enabledPlugins: [], weather: { apiKey: 'k', location: 'x' }, presenceDebounceMs: 1000, wsPort: 8787,
+      enabledPlugins: [], weather: { location: 'x' }, presenceDebounceMs: 1000, wsPort: 8787,
       presence: { absenceTimeoutMs: 2000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 2000, wakeEnabled: true },
     };
     const automationEngine = new AutomationEngine(buildAutomationRules(config), {
@@ -279,7 +279,7 @@ describe('full integration loop', () => {
 
     const invokedActions: Array<{ pluginId: string; action: string }> = [];
     const config: Config = {
-      enabledPlugins: [], weather: { apiKey: 'k', location: 'x' }, presenceDebounceMs: 1000, wsPort: 8787,
+      enabledPlugins: [], weather: { location: 'x' }, presenceDebounceMs: 1000, wsPort: 8787,
       presence: { absenceTimeoutMs: 2000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 2000, wakeEnabled: true },
     };
     const automationEngine = new AutomationEngine(buildAutomationRules(config), {
@@ -330,7 +330,7 @@ describe('full integration loop', () => {
 
     const invokedActions: Array<{ pluginId: string; action: string }> = [];
     const config: Config = {
-      enabledPlugins: [], weather: { apiKey: 'k', location: 'x' }, presenceDebounceMs: 1000, wsPort: 8787,
+      enabledPlugins: [], weather: { location: 'x' }, presenceDebounceMs: 1000, wsPort: 8787,
       presence: { absenceTimeoutMs: 2000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 2000, wakeEnabled: true },
     };
     const automationEngine = new AutomationEngine(buildAutomationRules(config), {

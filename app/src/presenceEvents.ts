@@ -22,3 +22,7 @@ export function buildCameraStateFrame(state: CameraStatePayload['state'], reason
 export function buildOverrideFrame(enabled: boolean): Frame {
   return createFrame('event.publish', { eventName: 'automation.override', data: { enabled } });
 }
+
+export function buildMediaActionFrame(action: 'togglePlayPause' | 'next' | 'previous'): Frame {
+  return createFrame('action.invoke', { pluginId: 'system-stats', action });
+}

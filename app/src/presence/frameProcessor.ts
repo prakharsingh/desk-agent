@@ -31,6 +31,22 @@ import type { FaceObservation } from './signalDeriver.js';
  * fraction of `frame.width` / `frame.height` before handing them to
  * `onObservation`, matching `FaceObservation.bbox`'s documented unit.
  *
+ * ORIENTATION NOTE (confirmed on-device, OnePlus 6T -- see
+ * `orientBBoxForPreview.ts`'s doc comment for the full diagnosis):
+ * `frame.width`/`frame.height` and `face.bounds` are in the camera's raw
+ * sensor buffer orientation (landscape, e.g. 1280x720), not the portrait
+ * orientation the `<Camera>` preview actually displays. The bbox emitted
+ * here is intentionally left in raw sensor orientation -- `orientBBoxForPreview`
+ * must be applied on the JS thread (in `CameraPresence.tsx`'s
+ * `handleObservation`), not here, because `onFrame` below runs on the
+ * separate worklet runtime, which cannot synchronously call a plain
+ * (non-worklet) function from a regular
+ * module -- attempting that throws "[Worklets] Tried to synchronously call
+ * a Regular-function..." at runtime (confirmed on-device). Keep this
+ * worklet emitting only raw values; all further derivation (rotation,
+ * signal deriving, edge detection) happens downstream on the JS thread,
+ * matching this file's existing division of responsibility.
+ *
  * BUGFIX (Task C2, verified live on a physically-connected OnePlus 6T):
  * MLKit's `detectFaces(frame)` was throwing on every real camera frame --
  * `IllegalArgumentException: Only JPEG and YUV_420_888 are supported now`.
@@ -83,12 +99,16 @@ export function useFaceFrameProcessor(
 
       runOnJS(onObservation)({
         faceCount: faces.length,
+        // Intentionally unrotated (raw sensor orientation) -- see doc
+        // comment above. Rotated by CameraPresence.tsx's handleObservation.
         bbox: {
           x: face.bounds.x / frameWidth,
           y: face.bounds.y / frameHeight,
           width: face.bounds.width / frameWidth,
           height: face.bounds.height / frameHeight,
         },
+        frameWidth,
+        frameHeight,
         eulerX: face.pitchAngle,
         eulerY: face.yawAngle,
         leftEyeOpenProbability: face.leftEyeOpenProbability,

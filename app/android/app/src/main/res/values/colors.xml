@@ -1,0 +1,4 @@
+<resources>
+    <!-- Matches app/src/display/theme.ts colors.bg -->
+    <color name="deskAgentBg">#050708</color>
+</resources>

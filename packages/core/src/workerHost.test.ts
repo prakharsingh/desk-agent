@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
-import { WorkerHost } from './index.js';
+import { WorkerHost, buildWorkerData } from './index.js';
 import type { PluginSpec, WorkerLike } from './index.js';
 
 class FakeWorker extends EventEmitter implements WorkerLike {
@@ -19,6 +19,22 @@ function makeSpec(overrides: Partial<PluginSpec> = {}): PluginSpec {
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
+
+describe('buildWorkerData', () => {
+  it('carries the spec\'s config through as pluginConfig', () => {
+    const spec = makeSpec({ config: { location: 'Seattle' } });
+    expect(buildWorkerData(spec)).toEqual({
+      pluginModulePath: '/fake/system-stats.js',
+      grantedPermissions: ['sys:read-stats'],
+      pluginConfig: { location: 'Seattle' },
+    });
+  });
+
+  it('leaves pluginConfig undefined when the spec has no config', () => {
+    const spec = makeSpec();
+    expect(buildWorkerData(spec).pluginConfig).toBeUndefined();
+  });
+});
 
 describe('WorkerHost', () => {
   it('marks a plugin running once its worker reports ready', async () => {

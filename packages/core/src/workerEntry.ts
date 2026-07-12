@@ -6,14 +6,18 @@ import type { Ctx, Permission, Plugin } from '@desk-agent/plugin-sdk';
 
 const execFileAsync = promisify(execFile);
 
-const { pluginModulePath, grantedPermissions } = workerData as {
+const { pluginModulePath, grantedPermissions, pluginConfig } = workerData as {
   pluginModulePath: string;
   grantedPermissions: Permission[];
+  pluginConfig?: unknown;
 };
 
 async function main() {
   const mod = await import(pluginModulePath);
-  const plugin: Plugin = mod.default;
+  // Plugins that need instance config (e.g. weather's location) export a
+  // createPlugin(config) factory; plugins that need none export a plain
+  // default instance.
+  const plugin: Plugin = typeof mod.createPlugin === 'function' ? mod.createPlugin(pluginConfig) : mod.default;
 
   const baseCtx: Ctx = {
     http: { fetch: (url, init) => fetch(url, init) },

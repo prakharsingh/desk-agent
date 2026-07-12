@@ -36,10 +36,11 @@ against built `dist/` output, not source.
 cp config.example.json config.json
 ```
 
-Edit `config.json` — at minimum, set a real `weather.apiKey` and
-`weather.location` if you want the Weather widget to return real data (it
-degrades to a `stale` last-known-value state on any API failure, so a bad key
-won't crash the agent, just leave that widget stale). See
+Edit `config.json` — set `weather.location` to a real city name so the
+Weather widget (backed by Open-Meteo, no API key needed) returns real
+current conditions and a 7-day forecast. It degrades to a `stale`
+last-known-value state on any API/geocoding failure, so a bad location won't
+crash the agent, just leave that widget stale. See
 `packages/core/src/configLoader.ts` for the full schema, defaults, and the
 `presence` block Slice 1b added (`absenceTimeoutMs`, `gazeIsKeepAwake`,
 `bootConfirmationTimeoutMs`) plus Slice 1c's `presence.wakeEnabled`

@@ -77,6 +77,22 @@ describe('createEnforcedCtx', () => {
     expect(onDenied).not.toHaveBeenCalled();
   });
 
+  it('allows pgrep -i with sys:read-stats', async () => {
+    const base = makeBaseCtx();
+    const onDenied = vi.fn();
+    const ctx = createEnforcedCtx('system-stats', ['sys:read-stats'], base, onDenied);
+    expect((await ctx.exec.run('pgrep', ['-i', 'Music|Spotify'])).code).toBe(0);
+    expect(onDenied).not.toHaveBeenCalled();
+  });
+
+  it('denies pgrep for a plugin holding only sys:control-display', async () => {
+    const base = makeBaseCtx();
+    const ctx = createEnforcedCtx('energy-saver', ['sys:control-display'], base, vi.fn());
+    const result = await ctx.exec.run('pgrep', ['-i', 'Music|Spotify']);
+    expect(result.code).toBe(1);
+    expect(base.exec.run).not.toHaveBeenCalled();
+  });
+
   it('allows pmset displaysleepnow and caffeinate with sys:control-display', async () => {
     const base = makeBaseCtx();
     const onDenied = vi.fn();
