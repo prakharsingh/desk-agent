@@ -3,6 +3,7 @@ import { View, Text, StyleSheet } from 'react-native';
 import { theme } from '../theme.js';
 import type { StandbyInfo } from '../screens.js';
 import { BackHeader } from '../ui/BackHeader.js';
+import { Badge } from '../ui/Badge.js';
 
 export interface StandbyScreenProps {
   standby: StandbyInfo;
@@ -17,9 +18,7 @@ export function StandbyScreen({ standby, onBack }: StandbyScreenProps) {
         <Text style={styles.glyph}>{standby.glyph}</Text>
         <Text style={styles.caption}>MODULE NOT CONNECTED</Text>
         <Text style={styles.desc}>{standby.desc}</Text>
-        <View style={styles.badge}>
-          <Text style={styles.badgeText}>ON THE ROADMAP</Text>
-        </View>
+        <Badge label="ON THE ROADMAP" tone="neutral" style={styles.badge} />
       </View>
     </View>
   );
@@ -58,16 +57,5 @@ const styles = StyleSheet.create({
   },
   badge: {
     marginTop: theme.spacing.md,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: theme.radii.pill,
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.xs,
-  },
-  badgeText: {
-    fontSize: 10,
-    letterSpacing: 1,
-    color: theme.colors.textFaint,
-    fontFamily: theme.font.medium,
   },
 });

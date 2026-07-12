@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { hasActiveTrack } from './nowPlayingFormat.js';
+import { hasActiveTrack, homeTrackLabel } from './nowPlayingFormat.js';
 
 describe('hasActiveTrack', () => {
   it('is true for a real track name', () => {
@@ -21,5 +21,19 @@ describe('hasActiveTrack', () => {
   // of a silent behavior change.
   it('treats an empty string as an active track, matching current behavior', () => {
     expect(hasActiveTrack('')).toBe(true);
+  });
+});
+
+describe('homeTrackLabel', () => {
+  it('passes a real track name through unchanged', () => {
+    expect(homeTrackLabel('Comfortably Numb')).toBe('Comfortably Numb');
+  });
+
+  it('maps the em-dash sentinel to the honest Idle label', () => {
+    expect(homeTrackLabel('—')).toBe('Idle');
+  });
+
+  it('maps the unavailable sentinel to the honest Idle label', () => {
+    expect(homeTrackLabel('unavailable')).toBe('Idle');
   });
 });

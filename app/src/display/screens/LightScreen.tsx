@@ -169,6 +169,12 @@ export function LightScreen({ color, onToggleColor, brightness, onChangeBrightne
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
+    // Without this, the absolutely-positioned control strip below can leave
+    // a stale, background-less ghost of itself near the top of the screen
+    // (visible on real hardware) the first time it mounts, before its
+    // bottom:0 layout settles -- the same class of stale-paint bug AppShell's
+    // overflow:'hidden' fixes for the pixel-shift transform elsewhere.
+    overflow: 'hidden',
   },
   controlStrip: {
     position: 'absolute',

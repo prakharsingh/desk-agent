@@ -104,15 +104,27 @@ export function AppShell({
 }: AppShellProps) {
   const translate = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
 
+  // Chin Light is a full-bleed immersive surface -- see chromeless/Header
+  // below, and the pixel-shift pin just below this.
+  const immersiveLight = screenState.screen === 'light';
+
   // OLED pixel-shift drift wrapper, moved verbatim in spirit from App.tsx:
   // same constants, same computePixelShiftOffset, same 1s tick cadence.
+  // Pinned to {0,0} (and the interval skipped entirely) while the immersive
+  // Chin Light screen shows: any nonzero drift offset there reveals a sliver
+  // of the dark root background past the light's edge, breaking the
+  // full-bleed fill.
   useEffect(() => {
+    if (immersiveLight) {
+      translate.setValue({ x: 0, y: 0 });
+      return;
+    }
     const interval = setInterval(() => {
       const offset = computePixelShiftOffset(Date.now() - startedAt, AMPLITUDE_PX, PERIOD_MS);
       translate.setValue(offset);
     }, 1000);
     return () => clearInterval(interval);
-  }, [startedAt, translate]);
+  }, [startedAt, translate, immersiveLight]);
 
   // Local auto-idle policy: track last local-interaction timestamp, reset by
   // a root touch responder, and periodically check whether enough silence
@@ -297,7 +309,9 @@ export function AppShell({
     }
   }
 
-  const isIdle = screenState.screen === 'idle';
+  // Chromeless (no Header) on Idle -- and on Chin Light, so the header bar
+  // doesn't leave a dark strip across an otherwise full-bleed fill-light.
+  const chromeless = screenState.screen === 'idle' || immersiveLight;
 
   return (
     <Animated.View
@@ -308,7 +322,7 @@ export function AppShell({
         return false;
       }}
     >
-      {!isIdle && (
+      {!chromeless && (
         <Header connectionState={connectionState} presence={presence} onSleep={onSleep} />
       )}
       <View style={styles.body}>{renderScreen()}</View>
@@ -328,8 +342,13 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: theme.colors.bg,
+    // The pixel-shift Animated.View above translates its content by a couple
+    // px each cycle; without clipping, a scrolled screen's content can drift
+    // past the viewport edge and leave a visible afterimage/ghost bleed.
+    overflow: 'hidden',
   },
   body: {
     flex: 1,
+    overflow: 'hidden',
   },
 });

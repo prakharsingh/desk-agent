@@ -12,6 +12,17 @@ export const theme = {
     ram: '#6FA8D0',
     border: '#1E272C',
     borderDim: '#141b1f',
+    // Surface/derived tokens for the shared IconChip / Badge / AreaChart
+    // primitives — additive, do not replace the solid colors above.
+    chipBg: 'rgba(95,208,122,0.12)',
+    chipBgDim: 'rgba(255,255,255,0.05)',
+    warnBg: 'rgba(224,177,95,0.12)',
+    warnBorder: 'rgba(224,177,95,0.3)',
+    accentBg: 'rgba(95,208,122,0.06)',
+    accentBorder: 'rgba(95,208,122,0.18)',
+    gridLine: 'rgba(255,255,255,0.06)',
+    roadmapBg: '#0C0E12',
+    roadmapBorder: 'rgba(255,255,255,0.14)',
   },
   font: {
     regular: 'IBMPlexMono-Regular',
@@ -20,5 +31,5 @@ export const theme = {
     bold: 'IBMPlexMono-Bold',
   },
   spacing: { xs: 4, sm: 8, md: 12, lg: 16, xl: 24 },
-  radii: { card: 12, pill: 20 },
+  radii: { card: 12, pill: 20, chip: 12 },
 } as const;

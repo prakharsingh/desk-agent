@@ -4,8 +4,8 @@ import { theme } from '../theme.js';
 
 export type SectionIconKind = 'clock' | 'system' | 'presence' | 'playing' | 'voice' | 'deck' | 'light';
 
-export function SectionIcon({ kind, size = 14 }: { kind: SectionIconKind; size?: number }) {
-  const accent = theme.colors.accent;
+export function SectionIcon({ kind, size = 14, color }: { kind: SectionIconKind; size?: number; color?: string }) {
+  const accent = color ?? theme.colors.accent;
 
   switch (kind) {
     case 'clock':

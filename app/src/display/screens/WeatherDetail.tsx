@@ -8,6 +8,7 @@ import type { WeatherView } from '../widgetReaders.js';
 import { BackHeader } from '../ui/BackHeader.js';
 import { Toggle } from '../ui/Toggle.js';
 import { WeatherIcon } from '../ui/WeatherIcon.js';
+import { Badge } from '../ui/Badge.js';
 
 export interface WeatherDetailProps {
   weather: WeatherView;
@@ -27,9 +28,7 @@ export function WeatherDetail({ weather, onBack, unit, onToggleUnit }: WeatherDe
         <WeatherIcon kind={iconKindForConditions(weather.conditions)} size={40} />
         <Text style={styles.temp}>{typeof weather.tempF === 'number' ? formatTemp(weather.tempF, unit) : '—'}</Text>
         <Text style={styles.conditions}>{weather.conditions}</Text>
-        <Text style={[styles.tag, { color: weather.stale ? theme.colors.warn : theme.colors.accent }]}>
-          {weather.stale ? 'STALE' : 'LIVE'}
-        </Text>
+        <Badge label={weather.stale ? 'STALE' : 'LIVE'} tone={weather.stale ? 'stale' : 'live'} style={styles.tag} />
       </View>
       <View style={styles.unitRow}>
         <Text style={[styles.unitLabel, !isCelsius && styles.unitLabelActive]}>°F</Text>
@@ -76,10 +75,7 @@ const styles = StyleSheet.create({
     fontFamily: theme.font.regular,
   },
   tag: {
-    fontSize: 11,
-    letterSpacing: 1,
     marginTop: theme.spacing.md,
-    fontFamily: theme.font.medium,
   },
   forecast: {
     borderTopWidth: 1,

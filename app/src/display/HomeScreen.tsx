@@ -9,8 +9,11 @@ import type { PresenceView } from './derivePresence.js';
 import { Card } from './ui/Card.js';
 import { StatBar } from './ui/StatBar.js';
 import { Sparkline } from './ui/Sparkline.js';
-import { SectionIcon } from './ui/SectionIcon.js';
+import { IconChip } from './ui/IconChip.js';
+import { Badge } from './ui/Badge.js';
 import { WeatherIcon } from './ui/WeatherIcon.js';
+import { pctOrZero, fmtPct, loadColor, formatBattery } from './systemFormat.js';
+import { homeTrackLabel } from './nowPlayingFormat.js';
 
 export interface HomeScreenProps {
   stats: SystemStatsView;
@@ -31,14 +34,6 @@ export interface HomeScreenProps {
   onGoVoice: () => void;
   onGoDeck: () => void;
   onGoLight: () => void;
-}
-
-function pctOrZero(v: number | null): number {
-  return typeof v === 'number' ? v : 0;
-}
-
-function fmtPct(v: number | null): string {
-  return typeof v === 'number' ? `${Math.round(v)}%` : '—';
 }
 
 export function HomeScreen({
@@ -63,13 +58,18 @@ export function HomeScreen({
   const dateStr = formatDate(now);
   const uptimeStr = formatUptime(startedAt, now);
 
+  // Amber when running hot so a sustained ~99% RAM reads as an intentional
+  // "high" state rather than the same neutral colour as an idle metric.
+  const cpuColor = loadColor(stats.cpuPercent, theme.colors.accent, theme.colors.warn);
+  const ramColor = loadColor(stats.ramPercent, theme.colors.ram, theme.colors.warn);
+
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       {/* Clock hero card */}
-      <Card onPress={onGoClock}>
+      <Card onPress={onGoClock} accent>
         <View style={styles.cardHeaderRow}>
           <View style={styles.labelRow}>
-            <SectionIcon kind="clock" />
+            <IconChip kind="clock" />
             <Text style={styles.sectionLabelAccent}>CLOCK</Text>
           </View>
           <Text style={styles.chevron}>›</Text>
@@ -85,50 +85,48 @@ export function HomeScreen({
       </Card>
 
       {/* System card */}
-      <Card onPress={onGoSystem}>
+      <Card onPress={onGoSystem} accent>
         <View style={styles.cardHeaderRow}>
           <View style={styles.labelRow}>
-            <SectionIcon kind="system" />
+            <IconChip kind="system" />
             <Text style={styles.sectionLabelAccent}>SYSTEM</Text>
           </View>
           <Text style={styles.chevron}>›</Text>
         </View>
         <View style={styles.systemColumns}>
           <View style={styles.systemColumn}>
-            <StatBar label="CPU" value={fmtPct(stats.cpuPercent)} pct={pctOrZero(stats.cpuPercent)} color={theme.colors.accent} />
+            <StatBar label="CPU" value={fmtPct(stats.cpuPercent)} pct={pctOrZero(stats.cpuPercent)} color={cpuColor} />
             <View style={styles.sparklineWrap}>
-              <Sparkline history={cpuHistory} color={theme.colors.accent} width={120} height={28} />
+              <Sparkline history={cpuHistory} color={cpuColor} width={120} height={28} />
             </View>
           </View>
           <View style={styles.systemColumn}>
-            <StatBar label="RAM" value={fmtPct(stats.ramPercent)} pct={pctOrZero(stats.ramPercent)} color={theme.colors.ram} />
+            <StatBar label="RAM" value={fmtPct(stats.ramPercent)} pct={pctOrZero(stats.ramPercent)} color={ramColor} />
             <View style={styles.sparklineWrap}>
-              <Sparkline history={ramHistory} color={theme.colors.ram} width={120} height={28} />
+              <Sparkline history={ramHistory} color={ramColor} width={120} height={28} />
             </View>
           </View>
         </View>
         <View style={styles.batteryRow}>
           <Text style={styles.batteryLabel}>BATTERY</Text>
-          <Text style={styles.batteryValue}>{stats.battery}</Text>
+          <Text style={styles.batteryValue}>{formatBattery(stats.battery)}</Text>
         </View>
       </Card>
 
       {/* Weather + Presence row */}
       <View style={styles.halfRow}>
-        <Card onPress={onGoWeather} style={styles.halfCard}>
+        <Card onPress={onGoWeather} accent style={styles.halfCard}>
           <View style={styles.labelRow}>
             <WeatherIcon kind={iconKindForConditions(weather.conditions)} size={14} />
             <Text style={styles.sectionLabelAccent}>WEATHER</Text>
           </View>
           <Text style={styles.weatherTemp}>{typeof weather.tempF === 'number' ? formatTemp(weather.tempF, unit) : '—'}</Text>
           <Text style={styles.weatherConditions}>{weather.conditions}</Text>
-          <Text style={[styles.weatherTag, { color: weather.stale ? theme.colors.warn : theme.colors.accent }]}>
-            {weather.stale ? 'STALE' : 'LIVE'}
-          </Text>
+          <Badge label={weather.stale ? 'STALE' : 'LIVE'} tone={weather.stale ? 'stale' : 'live'} style={styles.weatherBadge} />
         </Card>
-        <Card onPress={onGoPresence} style={styles.halfCard}>
+        <Card onPress={onGoPresence} accent style={styles.halfCard}>
           <View style={styles.labelRow}>
-            <SectionIcon kind="presence" />
+            <IconChip kind="presence" />
             <Text style={styles.sectionLabelFaint}>PRESENCE</Text>
           </View>
           <View style={styles.presenceRow}>
@@ -143,9 +141,9 @@ export function HomeScreen({
           design spec's honest-placeholder rule) -- omit the progress readout
           entirely rather than showing a fabricated 0% bar. */}
       <View style={styles.halfRow}>
-        <Card onPress={onGoPlaying} style={styles.halfCard}>
+        <Card onPress={onGoPlaying} accent style={styles.halfCard}>
           <View style={styles.labelRow}>
-            <SectionIcon kind="playing" />
+            <IconChip kind="playing" />
             <Text style={styles.sectionLabelAccent}>NOW PLAYING</Text>
           </View>
           <View style={styles.playingRow}>
@@ -153,34 +151,36 @@ export function HomeScreen({
               <Text style={styles.albumArtGlyph}>♪</Text>
             </View>
             <Text style={styles.trackName} numberOfLines={1}>
-              {stats.nowPlaying}
+              {homeTrackLabel(stats.nowPlaying)}
             </Text>
           </View>
         </Card>
-        <Card onPress={onGoLight} style={styles.halfCard}>
+        <Card onPress={onGoLight} accent style={styles.halfCard}>
           <View style={styles.labelRow}>
-            <SectionIcon kind="light" />
+            <IconChip kind="light" />
             <Text style={styles.sectionLabelAccent}>CHIN LIGHT</Text>
           </View>
         </Card>
       </View>
 
-      {/* Voice + Steam Deck standby row */}
+      {/* Voice + Steam Deck standby row -- roadmap variant: dashed, dimmed,
+          honest ROADMAP / MODULE STANDBY / NOT LINKED copy, never a
+          fabricated feature description. */}
       <View style={styles.halfRow}>
-        <Card onPress={onGoVoice} style={styles.halfCard}>
+        <Card onPress={onGoVoice} variant="roadmap" style={styles.halfCard}>
           <View style={styles.labelRow}>
-            <SectionIcon kind="voice" />
+            <IconChip kind="voice" tone="dim" />
             <Text style={styles.standbyLabel}>VOICE</Text>
           </View>
-          <Text style={styles.roadmapBadge}>ROADMAP</Text>
+          <Badge label="ROADMAP" tone="neutral" style={styles.roadmapBadge} />
           <Text style={styles.standbyCaption}>MODULE STANDBY</Text>
         </Card>
-        <Card onPress={onGoDeck} style={styles.halfCard}>
+        <Card onPress={onGoDeck} variant="roadmap" style={styles.halfCard}>
           <View style={styles.labelRow}>
-            <SectionIcon kind="deck" />
+            <IconChip kind="deck" tone="dim" />
             <Text style={styles.standbyLabel}>STEAM DECK</Text>
           </View>
-          <Text style={styles.roadmapBadge}>ROADMAP</Text>
+          <Badge label="ROADMAP" tone="neutral" style={styles.roadmapBadge} />
           <Text style={styles.standbyCaption}>NOT LINKED</Text>
         </Card>
       </View>
@@ -302,11 +302,8 @@ const styles = StyleSheet.create({
     color: theme.colors.textDim,
     fontFamily: theme.font.regular,
   },
-  weatherTag: {
-    fontSize: 9,
-    letterSpacing: 1,
+  weatherBadge: {
     marginTop: theme.spacing.sm,
-    fontFamily: theme.font.medium,
   },
   presenceRow: {
     flexDirection: 'row',
@@ -355,11 +352,7 @@ const styles = StyleSheet.create({
     fontFamily: theme.font.regular,
   },
   roadmapBadge: {
-    fontSize: 9,
-    letterSpacing: 1,
-    color: theme.colors.textFainter,
     marginTop: theme.spacing.sm,
-    fontFamily: theme.font.medium,
   },
   standbyCaption: {
     fontSize: 10,

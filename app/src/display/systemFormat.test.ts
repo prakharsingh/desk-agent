@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { pctOrZero, fmtPct } from './systemFormat.js';
+import { pctOrZero, fmtPct, loadColor, formatBattery } from './systemFormat.js';
 
 describe('pctOrZero', () => {
   it('passes through a numeric percentage', () => {
@@ -30,5 +30,41 @@ describe('fmtPct', () => {
 
   it('formats null as the honest em-dash placeholder, never a fake 0%', () => {
     expect(fmtPct(null)).toBe('—');
+  });
+});
+
+describe('loadColor', () => {
+  it('returns the base color for a normal load', () => {
+    expect(loadColor(24, 'base', 'warn')).toBe('base');
+  });
+
+  it('returns the warn color at the 90% threshold (inclusive)', () => {
+    expect(loadColor(90, 'base', 'warn')).toBe('warn');
+  });
+
+  it('returns the warn color above the threshold', () => {
+    expect(loadColor(99, 'base', 'warn')).toBe('warn');
+  });
+
+  it('returns the base color just below the threshold', () => {
+    expect(loadColor(89.9, 'base', 'warn')).toBe('base');
+  });
+
+  it('returns the base color for null (no data yet, not a fault)', () => {
+    expect(loadColor(null, 'base', 'warn')).toBe('base');
+  });
+});
+
+describe('formatBattery', () => {
+  it('maps the N/A sentinel to an honest AC-power label', () => {
+    expect(formatBattery('N/A')).toBe('AC · DOCKED');
+  });
+
+  it('maps the em-dash sentinel to an honest AC-power label', () => {
+    expect(formatBattery('—')).toBe('AC · DOCKED');
+  });
+
+  it('passes a real battery percentage through unchanged', () => {
+    expect(formatBattery('87%')).toBe('87%');
   });
 });

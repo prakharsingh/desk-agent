@@ -70,4 +70,21 @@ describe('NowPlayingDetail', () => {
     await render(<NowPlayingDetail stats={PLAYING_TRACK} onBack={() => {}} />);
     expect(screen.getByText('—')).toBeTruthy();
   });
+
+  it('shows the honest composed empty state instead of the raw wire sentinel when idle', async () => {
+    await render(<NowPlayingDetail stats={NO_TRACK} onBack={() => {}} />);
+    expect(screen.getByText('NOTHING PLAYING')).toBeTruthy();
+    expect(screen.getByText('Music.app · idle')).toBeTruthy();
+  });
+
+  it('never renders the raw "—" wire sentinel as a track name when idle', async () => {
+    await render(<NowPlayingDetail stats={NO_TRACK} onBack={() => {}} />);
+    expect(screen.queryByText('—')).toBeNull();
+  });
+
+  it('shows the same composed empty state for the "unavailable" TCC-denied sentinel', async () => {
+    await render(<NowPlayingDetail stats={{ ...NO_TRACK, nowPlaying: 'unavailable' }} onBack={() => {}} />);
+    expect(screen.getByText('NOTHING PLAYING')).toBeTruthy();
+    expect(screen.queryByText('unavailable')).toBeNull();
+  });
 });

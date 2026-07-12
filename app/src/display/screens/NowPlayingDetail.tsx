@@ -22,17 +22,17 @@ export function NowPlayingDetail({ stats, onBack, onTogglePlayPause, onNext, onP
   return (
     <View style={styles.screen}>
       <BackHeader title="NOW PLAYING" onBack={onBack} />
-      <View style={styles.body}>
-        <View style={styles.albumArt}>
-          {hasTrack && stats.nowPlayingArtwork ? (
-            <Image source={{ uri: stats.nowPlayingArtwork }} style={styles.albumArtImage} />
-          ) : (
-            <Text style={styles.albumArtGlyph}>♪</Text>
-          )}
-        </View>
-        <Text style={styles.trackName}>{stats.nowPlaying}</Text>
-        <Text style={styles.artist}>{'—'}</Text>
-        {hasTrack && (
+      {hasTrack ? (
+        <View style={styles.body}>
+          <View style={styles.albumArt}>
+            {stats.nowPlayingArtwork ? (
+              <Image source={{ uri: stats.nowPlayingArtwork }} style={styles.albumArtImage} />
+            ) : (
+              <Text style={styles.albumArtGlyph}>♪</Text>
+            )}
+          </View>
+          <Text style={styles.trackName}>{stats.nowPlaying}</Text>
+          <Text style={styles.artist}>{'—'}</Text>
           <View style={styles.controls}>
             <Pressable style={styles.controlButton} onPress={onPrevious}>
               <Text style={styles.controlGlyph}>⏮</Text>
@@ -44,8 +44,18 @@ export function NowPlayingDetail({ stats, onBack, onTogglePlayPause, onNext, onP
               <Text style={styles.controlGlyph}>⏭</Text>
             </Pressable>
           </View>
-        )}
-      </View>
+        </View>
+      ) : (
+        // Honest, composed empty state -- centred rather than top-aligned in
+        // a void, and never the raw '—' / 'unavailable' sentinel from the wire.
+        <View style={styles.emptyBody}>
+          <View style={styles.albumArtIdle}>
+            <Text style={styles.albumArtGlyphIdle}>♪</Text>
+          </View>
+          <Text style={styles.emptyTitle}>NOTHING PLAYING</Text>
+          <Text style={styles.emptyCaption}>Music.app · idle</Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -61,6 +71,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: theme.spacing.xl,
     gap: theme.spacing.sm,
+  },
+  // Fills the space below the header and vertically centres the empty state
+  // so it doesn't float at the top of a large black void.
+  emptyBody: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: theme.spacing.md,
   },
   albumArt: {
     width: 96,
@@ -79,6 +97,19 @@ const styles = StyleSheet.create({
   },
   albumArtGlyph: {
     color: theme.colors.textFaint,
+    fontSize: 32,
+  },
+  albumArtIdle: {
+    width: 96,
+    height: 96,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: theme.colors.borderDim,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  albumArtGlyphIdle: {
+    color: theme.colors.textFainter,
     fontSize: 32,
   },
   controls: {
@@ -108,6 +139,18 @@ const styles = StyleSheet.create({
   artist: {
     fontSize: 13,
     color: theme.colors.textFaint,
+    fontFamily: theme.font.regular,
+  },
+  emptyTitle: {
+    fontSize: 13,
+    letterSpacing: 3,
+    color: theme.colors.textFaint,
+    fontFamily: theme.font.medium,
+  },
+  emptyCaption: {
+    fontSize: 11,
+    letterSpacing: 1,
+    color: theme.colors.textFainter,
     fontFamily: theme.font.regular,
   },
 });
