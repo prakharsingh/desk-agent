@@ -39,6 +39,9 @@ const ACTIVITY_CHECK_INTERVAL_MS = 2000;
 
 export interface AppShellProps {
   widgets: Record<string, Widget>;
+  // From the Mac's Widgets pane, forwarded from App.tsx's widget.update
+  // handler straight to HomeScreen -- see HomeScreenProps's own doc comment.
+  visibleWidgets?: readonly string[];
   connectionState: ConnectionState;
   sensorFrame: SensorFrame;
   cameraEnabled: boolean;
@@ -75,6 +78,7 @@ export interface AppShellProps {
 
 export function AppShell({
   widgets,
+  visibleWidgets,
   connectionState,
   sensorFrame,
   cameraEnabled,
@@ -296,6 +300,7 @@ export function AppShell({
             cpuHistory={cpuHistoryRef.current}
             ramHistory={ramHistoryRef.current}
             unit={temperatureUnit}
+            visibleWidgets={visibleWidgets}
             onGoSystem={onGoSystem}
             onGoWeather={onGoWeather}
             onGoPlaying={onGoPlaying}

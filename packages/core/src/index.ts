@@ -9,3 +9,5 @@ export * from './adbRunner.js';
 export * from './entrypoint.js';
 export * from './watchdog.js';
 export * from './presenceEngine.js';
+export * from './controlChannel.js';
+export * from './main.js';

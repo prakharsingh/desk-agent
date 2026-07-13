@@ -1,4 +1,5 @@
 import type { CameraStatePayload } from '@desk-agent/protocol';
+import type { LogLevel } from '@desk-agent/plugin-sdk';
 
 export type PresenceState = 'present' | 'maybe-absent' | 'absent';
 // Derived from the protocol's CameraStatePayloadSchema rather than
@@ -16,6 +17,7 @@ export interface PresenceEngineConfig {
 
 export class PresenceEngine {
   private state: PresenceState = 'present';
+  private stateSince: number = Date.now();
   // cameraHealthy is derived from two independent signals rather than a
   // single hand-toggled latch:
   //   - cameraReportedHealthy: the phone's own camera pipeline, confirmed
@@ -48,8 +50,14 @@ export class PresenceEngine {
   constructor(
     private config: PresenceEngineConfig,
     private onPresenceChange: (present: boolean) => void,
-    private log: (level: string, message: string) => void,
+    private log: (level: LogLevel, message: string) => void,
     private onGenuineReturn?: () => void,
+    // Fires on every state transition, including into the intermediate
+    // 'maybe-absent' state that onPresenceChange (boolean present/absent
+    // only) never reports -- the state-surface's presence.state field
+    // (Overview/Presence panes, per the Phase 0 control-channel contract)
+    // needs the live three-value state, not just the boolean.
+    private onStateChange?: (state: PresenceState, since: number) => void,
   ) {
     this.bootTimer = setTimeout(() => {
       if (!this.cameraHealthy) {
@@ -124,11 +132,30 @@ export class PresenceEngine {
     return this.state;
   }
 
+  // Lets a snapshot-builder (ControlChannel) read "state + since" fresh at
+  // any moment by pulling, with no subscription/ordering dependency on
+  // onStateChange -- which stays purely a push notification for callers that
+  // want to react to a change immediately.
+  getStateSince(): number {
+    return this.stateSince;
+  }
+
+  // The one place `this.state` is ever assigned, so onStateChange can never
+  // be missed at a future assignment site. Fires only on an actual change --
+  // a same-state call (e.g. refreshKeepAwake while already 'present') is not
+  // a transition.
+  private setState(state: PresenceState) {
+    if (this.state === state) return;
+    this.state = state;
+    this.stateSince = Date.now();
+    this.onStateChange?.(state, this.stateSince);
+  }
+
   private forceFailToPresent(reason: string) {
     this.clearAbsenceTimer();
     this.clearBootTimer();
     const wasPresent = this.state === 'present';
-    this.state = 'present';
+    this.setState('present');
     if (!wasPresent) this.onPresenceChange(true);
     this.log('info', `presence forced to present: ${reason}`);
   }
@@ -136,7 +163,7 @@ export class PresenceEngine {
   private refreshKeepAwake() {
     this.clearAbsenceTimer();
     if (this.state !== 'present') {
-      this.state = 'present';
+      this.setState('present');
       this.onPresenceChange(true);
       this.onGenuineReturn?.();
     }
@@ -149,10 +176,10 @@ export class PresenceEngine {
     if (!this.cameraHealthy) return;
     if (this.lastFaceVisible || this.lastMotion) return;
     if (this.state === 'absent' || this.absenceTimer) return;
-    this.state = 'maybe-absent';
+    this.setState('maybe-absent');
     this.absenceTimer = setTimeout(() => {
       this.absenceTimer = undefined;
-      this.state = 'absent';
+      this.setState('absent');
       this.onPresenceChange(false);
     }, this.config.absenceTimeoutMs);
   }

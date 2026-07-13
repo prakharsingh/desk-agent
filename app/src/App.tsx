@@ -12,6 +12,9 @@ const HEARTBEAT_TIMEOUT_MS = 15000;
 export default function App() {
   const [startedAt] = useState(() => Date.now());
   const [widgets, setWidgets] = useState<Record<string, Widget>>({});
+  // undefined until the first hello-reply arrives -- HomeScreen treats that
+  // as "show everything" (fail open), not "hide everything".
+  const [visibleWidgets, setVisibleWidgets] = useState<readonly string[] | undefined>(undefined);
   const [cameraEnabled, setCameraEnabled] = useState(false);
   const [automationEnabled, setAutomationEnabled] = useState(true);
   const [connectionEpoch, setConnectionEpoch] = useState(0);
@@ -36,6 +39,10 @@ export default function App() {
             for (const entry of frame.payload.widgets) next[entry.widgetId] = entry.widget;
             return next;
           });
+          // Only the hello-reply snapshot carries this (see
+          // WidgetUpdatePayloadSchema's comment) -- a later single-widget
+          // push omits it and must not be treated as "hide everything".
+          if (frame.payload.visibleWidgets) setVisibleWidgets(frame.payload.visibleWidgets);
         },
       }),
     [],
@@ -120,6 +127,7 @@ export default function App() {
   return (
     <AppShell
       widgets={widgets}
+      visibleWidgets={visibleWidgets}
       connectionState={connectionState}
       sensorFrame={sensorFrame}
       cameraEnabled={cameraEnabled}

@@ -42,6 +42,11 @@ async function main() {
 
   const ctx = createEnforcedCtx(plugin.id, grantedPermissions, baseCtx, (denial) => {
     parentPort!.postMessage({ kind: 'log', level: 'warn', message: `permission denied: ${JSON.stringify(denial)}` });
+    // Structured, alongside the human-readable log line above -- the
+    // Overview pane's denialsToday counts these directly instead of
+    // string-scraping the log message (see the Phase 0 control-channel
+    // contract's denialsToday row).
+    parentPort!.postMessage({ kind: 'denial', denial });
   });
 
   await plugin.init(ctx);

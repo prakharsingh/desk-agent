@@ -2,5 +2,7 @@ packages:
   - 'packages/*'
   - 'packages/plugins/*'
   - 'app'
+  - 'apps/*'
 allowBuilds:
+  electron-winstaller: false
   esbuild: true

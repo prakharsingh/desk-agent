@@ -1,0 +1,55 @@
+{
+  "name": "@desk-agent/mac",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Desk Agent macOS app shell",
+  "author": "Desk Agent",
+  "type": "module",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "pack": "pnpm build && electron-builder --mac dir --arm64"
+  },
+  "dependencies": {
+    "@desk-agent/config-schema": "workspace:*",
+    "@desk-agent/core": "workspace:*",
+    "@desk-agent/protocol": "workspace:*",
+    "react": "19.2.3",
+    "react-dom": "19.2.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "electron": "^43.1.0",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "typescript": "^5.6.0",
+    "vite": "^6.0.0",
+    "vitest": "^2.1.0"
+  },
+  "build": {
+    "appId": "com.deskagent.mac",
+    "productName": "Desk Agent",
+    "asar": true,
+    "directories": { "output": "release" },
+    "files": [
+      "out/**/*",
+      "node_modules/**/*"
+    ],
+    "extraResources": [
+      { "from": "resources", "to": "resources" }
+    ],
+    "mac": {
+      "target": "dir",
+      "identity": null,
+      "category": "public.app-category.utilities",
+      "icon": "build/icon.icns"
+    }
+  }
+}

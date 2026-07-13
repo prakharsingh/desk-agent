@@ -45,7 +45,22 @@ const TARGET_FPS = 15;
  * `useCameraDevice('front')` (Task C2/brief) is unchanged and confirmed real
  * (`hooks/useCameraDevice.d.ts:20`).
  */
-export function CameraPresence({
+// Memoized: AppShell (this component's parent) re-renders every second from
+// App.tsx's 1Hz clock tick (`now`), and without React.memo a plain function
+// component re-renders every time its parent does, regardless of whether its
+// own props changed. Every CameraPresence render re-invokes useCameraDevice/
+// useFaceDetector/useFrameOutput (see frameProcessor.ts) unconditionally,
+// each of which allocates native camera/face-detector JNI objects
+// (HybridCameraDevice, HybridFaceDetectorSpec$CxxPart) -- found on-device via
+// a reproducible crash: `JNI ERROR (app bug): global reference table
+// overflow (max=51200)`, with those exact classes filling the last entries
+// of the reference table dump. All of this component's props (enabled, send,
+// connectionEpoch, onSensor, previewRect) are already referentially stable
+// from App.tsx/AppShell (useCallback / state that only changes on a real
+// event), so React.memo's default shallow-prop comparison correctly skips
+// the once-a-second re-render instead of re-allocating native camera
+// handles on a clock tick that has nothing to do with the camera.
+export const CameraPresence = React.memo(function CameraPresence({
   enabled,
   send,
   connectionEpoch,
@@ -256,4 +271,4 @@ export function CameraPresence({
       )}
     </>
   );
-}
+});

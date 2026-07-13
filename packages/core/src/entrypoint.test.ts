@@ -6,7 +6,7 @@ describe('buildPluginSpecs', () => {
   it('maps enabled plugin ids through the registry', () => {
     const config: Config = {
       enabledPlugins: ['weather'],
-      weather: { location: 'Seattle' },
+      weather: { location: 'Seattle', intervalMs: 600_000 }, systemStats: { pollIntervalMs: 2000 }, energySaver: { idleAction: 'displaysleepnow' }, watchdogTimeoutMs: 30000, visibleWidgets: ['clock', 'system', 'weather', 'presence', 'playing', 'light'],
       presenceDebounceMs: 30000,
       wsPort: 8787,
       presence: { absenceTimeoutMs: 300000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 300000, wakeEnabled: true },
@@ -19,7 +19,7 @@ describe('buildPluginSpecs', () => {
   it('logs and skips an enabled plugin id missing from the registry, never throwing', () => {
     const config: Config = {
       enabledPlugins: ['unknown-plugin'],
-      weather: { location: 'Seattle' },
+      weather: { location: 'Seattle', intervalMs: 600_000 }, systemStats: { pollIntervalMs: 2000 }, energySaver: { idleAction: 'displaysleepnow' }, watchdogTimeoutMs: 30000, visibleWidgets: ['clock', 'system', 'weather', 'presence', 'playing', 'light'],
       presenceDebounceMs: 30000,
       wsPort: 8787,
       presence: { absenceTimeoutMs: 300000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 300000, wakeEnabled: true },
@@ -33,7 +33,7 @@ describe('buildPluginSpecs', () => {
   it('attaches the config slice named by the registry entry\'s configKey', () => {
     const config: Config = {
       enabledPlugins: ['weather'],
-      weather: { location: 'Seattle' },
+      weather: { location: 'Seattle', intervalMs: 600_000 }, systemStats: { pollIntervalMs: 2000 }, energySaver: { idleAction: 'displaysleepnow' }, watchdogTimeoutMs: 30000, visibleWidgets: ['clock', 'system', 'weather', 'presence', 'playing', 'light'],
       presenceDebounceMs: 30000,
       wsPort: 8787,
       presence: { absenceTimeoutMs: 300000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 300000, wakeEnabled: true },
@@ -42,13 +42,13 @@ describe('buildPluginSpecs', () => {
       weather: { modulePath: '/pkg/weather/dist/index.js', permissions: ['net:api.weather' as const], configKey: 'weather' as const },
     };
     const specs = buildPluginSpecs(config, registry, vi.fn());
-    expect(specs[0].config).toEqual({ location: 'Seattle' });
+    expect(specs[0].config).toEqual({ location: 'Seattle', intervalMs: 600_000 });
   });
 
   it('leaves config undefined for a registry entry with no configKey', () => {
     const config: Config = {
       enabledPlugins: ['system-stats'],
-      weather: { location: 'Seattle' },
+      weather: { location: 'Seattle', intervalMs: 600_000 }, systemStats: { pollIntervalMs: 2000 }, energySaver: { idleAction: 'displaysleepnow' }, watchdogTimeoutMs: 30000, visibleWidgets: ['clock', 'system', 'weather', 'presence', 'playing', 'light'],
       presenceDebounceMs: 30000,
       wsPort: 8787,
       presence: { absenceTimeoutMs: 300000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 300000, wakeEnabled: true },
@@ -62,7 +62,7 @@ describe('buildPluginSpecs', () => {
 describe('buildAutomationRules', () => {
   it('builds the sleep-on-absent rule debounced by config.presenceDebounceMs', () => {
     const config: Config = {
-      enabledPlugins: [], weather: { location: 'Seattle' }, presenceDebounceMs: 45000, wsPort: 8787, presence: { absenceTimeoutMs: 300000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 300000, wakeEnabled: true },
+      enabledPlugins: [], weather: { location: 'Seattle', intervalMs: 600_000 }, systemStats: { pollIntervalMs: 2000 }, energySaver: { idleAction: 'displaysleepnow' }, watchdogTimeoutMs: 30000, visibleWidgets: ['clock', 'system', 'weather', 'presence', 'playing', 'light'], presenceDebounceMs: 45000, wsPort: 8787, presence: { absenceTimeoutMs: 300000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 300000, wakeEnabled: true },
     };
     const rules = buildAutomationRules(config);
     const sleepRule = rules.find((r) => r.id === 'sleep-on-absent')!;
@@ -76,7 +76,7 @@ describe('buildAutomationRules', () => {
 describe('buildAutomationRules — wake-on-return', () => {
   it('builds the wake-on-return rule with zero debounce, targeting presence.returned', () => {
     const config: Config = {
-      enabledPlugins: [], weather: { location: 'Seattle' }, presenceDebounceMs: 45000, wsPort: 8787,
+      enabledPlugins: [], weather: { location: 'Seattle', intervalMs: 600_000 }, systemStats: { pollIntervalMs: 2000 }, energySaver: { idleAction: 'displaysleepnow' }, watchdogTimeoutMs: 30000, visibleWidgets: ['clock', 'system', 'weather', 'presence', 'playing', 'light'], presenceDebounceMs: 45000, wsPort: 8787,
       presence: { absenceTimeoutMs: 300000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 300000, wakeEnabled: true },
     };
     const rules = buildAutomationRules(config);
@@ -90,7 +90,7 @@ describe('buildAutomationRules — wake-on-return', () => {
 
   it('wake-on-return condition is true when presence.wakeEnabled is true', () => {
     const config: Config = {
-      enabledPlugins: [], weather: { location: 'Seattle' }, presenceDebounceMs: 45000, wsPort: 8787,
+      enabledPlugins: [], weather: { location: 'Seattle', intervalMs: 600_000 }, systemStats: { pollIntervalMs: 2000 }, energySaver: { idleAction: 'displaysleepnow' }, watchdogTimeoutMs: 30000, visibleWidgets: ['clock', 'system', 'weather', 'presence', 'playing', 'light'], presenceDebounceMs: 45000, wsPort: 8787,
       presence: { absenceTimeoutMs: 300000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 300000, wakeEnabled: true },
     };
     const rules = buildAutomationRules(config);
@@ -100,7 +100,7 @@ describe('buildAutomationRules — wake-on-return', () => {
 
   it('wake-on-return condition is false when presence.wakeEnabled is false', () => {
     const config: Config = {
-      enabledPlugins: [], weather: { location: 'Seattle' }, presenceDebounceMs: 45000, wsPort: 8787,
+      enabledPlugins: [], weather: { location: 'Seattle', intervalMs: 600_000 }, systemStats: { pollIntervalMs: 2000 }, energySaver: { idleAction: 'displaysleepnow' }, watchdogTimeoutMs: 30000, visibleWidgets: ['clock', 'system', 'weather', 'presence', 'playing', 'light'], presenceDebounceMs: 45000, wsPort: 8787,
       presence: { absenceTimeoutMs: 300000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 300000, wakeEnabled: false },
     };
     const rules = buildAutomationRules(config);
@@ -153,7 +153,7 @@ import { buildPresenceEngineConfig } from './index.js';
 describe('buildPresenceEngineConfig', () => {
   it('maps config.presence fields into a PresenceEngineConfig', () => {
     const config: Config = {
-      enabledPlugins: [], weather: { location: 'x' }, presenceDebounceMs: 30000, wsPort: 8787,
+      enabledPlugins: [], weather: { location: 'x', intervalMs: 600_000 }, systemStats: { pollIntervalMs: 2000 }, energySaver: { idleAction: 'displaysleepnow' }, watchdogTimeoutMs: 30000, visibleWidgets: ['clock', 'system', 'weather', 'presence', 'playing', 'light'], presenceDebounceMs: 30000, wsPort: 8787,
       presence: { absenceTimeoutMs: 111, gazeIsKeepAwake: false, bootConfirmationTimeoutMs: 333, wakeEnabled: true },
     };
     expect(buildPresenceEngineConfig(config)).toEqual({ absenceTimeoutMs: 111, gazeIsKeepAwake: false, bootConfirmationTimeoutMs: 333 });

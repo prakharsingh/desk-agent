@@ -26,6 +26,12 @@ export interface HomeScreenProps {
   // Owned by AppShell so the preference stays in sync with WeatherDetail's
   // toggle regardless of which screen last changed it.
   unit: TemperatureUnit;
+  // From the Mac's Widgets pane (config.visibleWidgets), sent in the
+  // hello-reply's widget.update frame. Omitted/undefined (not yet received,
+  // or a build with no config source) means "show everything" -- fail open,
+  // never fail hidden. Voice/Steam Deck are permanently roadmap and are
+  // never controlled by this list.
+  visibleWidgets?: readonly string[];
   onGoSystem: () => void;
   onGoWeather: () => void;
   onGoPlaying: () => void;
@@ -45,6 +51,7 @@ export function HomeScreen({
   cpuHistory,
   ramHistory,
   unit,
+  visibleWidgets,
   onGoSystem,
   onGoWeather,
   onGoPlaying,
@@ -57,6 +64,7 @@ export function HomeScreen({
   const { timeHHMM, timeSS } = formatClock(now);
   const dateStr = formatDate(now);
   const uptimeStr = formatUptime(startedAt, now);
+  const isVisible = (id: string) => !visibleWidgets || visibleWidgets.includes(id);
 
   // Amber when running hot so a sustained ~99% RAM reads as an intentional
   // "high" state rather than the same neutral colour as an idle metric.
@@ -66,102 +74,118 @@ export function HomeScreen({
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       {/* Clock hero card */}
-      <Card onPress={onGoClock} accent>
-        <View style={styles.cardHeaderRow}>
-          <View style={styles.labelRow}>
-            <IconChip kind="clock" />
-            <Text style={styles.sectionLabelAccent}>CLOCK</Text>
+      {isVisible('clock') && (
+        <Card onPress={onGoClock} accent>
+          <View style={styles.cardHeaderRow}>
+            <View style={styles.labelRow}>
+              <IconChip kind="clock" />
+              <Text style={styles.sectionLabelAccent}>CLOCK</Text>
+            </View>
+            <Text style={styles.chevron}>›</Text>
           </View>
-          <Text style={styles.chevron}>›</Text>
-        </View>
-        <View style={styles.clockRow}>
-          <Text style={styles.heroTime}>{timeHHMM}</Text>
-          <Text style={styles.heroSeconds}>{timeSS}</Text>
-        </View>
-        <View style={styles.clockFooterRow}>
-          <Text style={styles.clockFooterText}>{dateStr}</Text>
-          <Text style={styles.clockFooterText}>{'UP ' + uptimeStr}</Text>
-        </View>
-      </Card>
+          <View style={styles.clockRow}>
+            <Text style={styles.heroTime}>{timeHHMM}</Text>
+            <Text style={styles.heroSeconds}>{timeSS}</Text>
+          </View>
+          <View style={styles.clockFooterRow}>
+            <Text style={styles.clockFooterText}>{dateStr}</Text>
+            <Text style={styles.clockFooterText}>{'UP ' + uptimeStr}</Text>
+          </View>
+        </Card>
+      )}
 
       {/* System card */}
-      <Card onPress={onGoSystem} accent>
-        <View style={styles.cardHeaderRow}>
-          <View style={styles.labelRow}>
-            <IconChip kind="system" />
-            <Text style={styles.sectionLabelAccent}>SYSTEM</Text>
+      {isVisible('system') && (
+        <Card onPress={onGoSystem} accent>
+          <View style={styles.cardHeaderRow}>
+            <View style={styles.labelRow}>
+              <IconChip kind="system" />
+              <Text style={styles.sectionLabelAccent}>SYSTEM</Text>
+            </View>
+            <Text style={styles.chevron}>›</Text>
           </View>
-          <Text style={styles.chevron}>›</Text>
-        </View>
-        <View style={styles.systemColumns}>
-          <View style={styles.systemColumn}>
-            <StatBar label="CPU" value={fmtPct(stats.cpuPercent)} pct={pctOrZero(stats.cpuPercent)} color={cpuColor} />
-            <View style={styles.sparklineWrap}>
-              <Sparkline history={cpuHistory} color={cpuColor} width={120} height={28} />
+          <View style={styles.systemColumns}>
+            <View style={styles.systemColumn}>
+              <StatBar label="CPU" value={fmtPct(stats.cpuPercent)} pct={pctOrZero(stats.cpuPercent)} color={cpuColor} />
+              <View style={styles.sparklineWrap}>
+                <Sparkline history={cpuHistory} color={cpuColor} width={120} height={28} />
+              </View>
+            </View>
+            <View style={styles.systemColumn}>
+              <StatBar label="RAM" value={fmtPct(stats.ramPercent)} pct={pctOrZero(stats.ramPercent)} color={ramColor} />
+              <View style={styles.sparklineWrap}>
+                <Sparkline history={ramHistory} color={ramColor} width={120} height={28} />
+              </View>
             </View>
           </View>
-          <View style={styles.systemColumn}>
-            <StatBar label="RAM" value={fmtPct(stats.ramPercent)} pct={pctOrZero(stats.ramPercent)} color={ramColor} />
-            <View style={styles.sparklineWrap}>
-              <Sparkline history={ramHistory} color={ramColor} width={120} height={28} />
-            </View>
+          <View style={styles.batteryRow}>
+            <Text style={styles.batteryLabel}>BATTERY</Text>
+            <Text style={styles.batteryValue}>{formatBattery(stats.battery)}</Text>
           </View>
-        </View>
-        <View style={styles.batteryRow}>
-          <Text style={styles.batteryLabel}>BATTERY</Text>
-          <Text style={styles.batteryValue}>{formatBattery(stats.battery)}</Text>
-        </View>
-      </Card>
+        </Card>
+      )}
 
       {/* Weather + Presence row */}
-      <View style={styles.halfRow}>
-        <Card onPress={onGoWeather} accent style={styles.halfCard}>
-          <View style={styles.labelRow}>
-            <WeatherIcon kind={iconKindForConditions(weather.conditions)} size={14} />
-            <Text style={styles.sectionLabelAccent}>WEATHER</Text>
-          </View>
-          <Text style={styles.weatherTemp}>{typeof weather.tempF === 'number' ? formatTemp(weather.tempF, unit) : '—'}</Text>
-          <Text style={styles.weatherConditions}>{weather.conditions}</Text>
-          <Badge label={weather.stale ? 'STALE' : 'LIVE'} tone={weather.stale ? 'stale' : 'live'} style={styles.weatherBadge} />
-        </Card>
-        <Card onPress={onGoPresence} accent style={styles.halfCard}>
-          <View style={styles.labelRow}>
-            <IconChip kind="presence" />
-            <Text style={styles.sectionLabelFaint}>PRESENCE</Text>
-          </View>
-          <View style={styles.presenceRow}>
-            <View style={[styles.presenceDot, { backgroundColor: presence.color }]} />
-            <Text style={[styles.presenceLabel, { color: presence.color }]}>{presence.label}</Text>
-          </View>
-        </Card>
-      </View>
+      {(isVisible('weather') || isVisible('presence')) && (
+        <View style={styles.halfRow}>
+          {isVisible('weather') && (
+            <Card onPress={onGoWeather} accent style={styles.halfCard}>
+              <View style={styles.labelRow}>
+                <WeatherIcon kind={iconKindForConditions(weather.conditions)} size={14} />
+                <Text style={styles.sectionLabelAccent}>WEATHER</Text>
+              </View>
+              <Text style={styles.weatherTemp}>{typeof weather.tempF === 'number' ? formatTemp(weather.tempF, unit) : '—'}</Text>
+              <Text style={styles.weatherConditions}>{weather.conditions}</Text>
+              <Badge label={weather.stale ? 'STALE' : 'LIVE'} tone={weather.stale ? 'stale' : 'live'} style={styles.weatherBadge} />
+            </Card>
+          )}
+          {isVisible('presence') && (
+            <Card onPress={onGoPresence} accent style={styles.halfCard}>
+              <View style={styles.labelRow}>
+                <IconChip kind="presence" />
+                <Text style={styles.sectionLabelFaint}>PRESENCE</Text>
+              </View>
+              <View style={styles.presenceRow}>
+                <View style={[styles.presenceDot, { backgroundColor: presence.color }]} />
+                <Text style={[styles.presenceLabel, { color: presence.color }]}>{presence.label}</Text>
+              </View>
+            </Card>
+          )}
+        </View>
+      )}
 
       {/* Now Playing + Chin Light row */}
       {/* No track-position data exists on the wire (see NowPlayingDetail.tsx /
           design spec's honest-placeholder rule) -- omit the progress readout
           entirely rather than showing a fabricated 0% bar. */}
-      <View style={styles.halfRow}>
-        <Card onPress={onGoPlaying} accent style={styles.halfCard}>
-          <View style={styles.labelRow}>
-            <IconChip kind="playing" />
-            <Text style={styles.sectionLabelAccent}>NOW PLAYING</Text>
-          </View>
-          <View style={styles.playingRow}>
-            <View style={styles.albumArt}>
-              <Text style={styles.albumArtGlyph}>♪</Text>
-            </View>
-            <Text style={styles.trackName} numberOfLines={1}>
-              {homeTrackLabel(stats.nowPlaying)}
-            </Text>
-          </View>
-        </Card>
-        <Card onPress={onGoLight} accent style={styles.halfCard}>
-          <View style={styles.labelRow}>
-            <IconChip kind="light" />
-            <Text style={styles.sectionLabelAccent}>CHIN LIGHT</Text>
-          </View>
-        </Card>
-      </View>
+      {(isVisible('playing') || isVisible('light')) && (
+        <View style={styles.halfRow}>
+          {isVisible('playing') && (
+            <Card onPress={onGoPlaying} accent style={styles.halfCard}>
+              <View style={styles.labelRow}>
+                <IconChip kind="playing" />
+                <Text style={styles.sectionLabelAccent}>NOW PLAYING</Text>
+              </View>
+              <View style={styles.playingRow}>
+                <View style={styles.albumArt}>
+                  <Text style={styles.albumArtGlyph}>♪</Text>
+                </View>
+                <Text style={styles.trackName} numberOfLines={1}>
+                  {homeTrackLabel(stats.nowPlaying)}
+                </Text>
+              </View>
+            </Card>
+          )}
+          {isVisible('light') && (
+            <Card onPress={onGoLight} accent style={styles.halfCard}>
+              <View style={styles.labelRow}>
+                <IconChip kind="light" />
+                <Text style={styles.sectionLabelAccent}>CHIN LIGHT</Text>
+              </View>
+            </Card>
+          )}
+        </View>
+      )}
 
       {/* Voice + Steam Deck standby row -- roadmap variant: dashed, dimmed,
           honest ROADMAP / MODULE STANDBY / NOT LINKED copy, never a

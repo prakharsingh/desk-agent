@@ -121,6 +121,31 @@ describe('WorkerHost', () => {
     expect(spawnCount).toBe(3); // initial + exactly 2 restarts -- no extra spawn from double-counting
   });
 
+  it('forwards a denial message from a worker to onDenial with the plugin id, for denialsToday counting', async () => {
+    let fake!: FakeWorker;
+    const onDenial = vi.fn();
+    const host = new WorkerHost([makeSpec()], {
+      maxOldGenerationSizeMb: 64, maxRestarts: 5, callTimeoutMs: 1000,
+      onLog: vi.fn(), onEventPublish: vi.fn(), onWidgetPublish: vi.fn(), onDenial,
+      createWorker: () => { fake = new FakeWorker(); return fake; },
+    });
+    await host.start();
+    const denial = { pluginId: 'system-stats', capability: 'exec.run(pmset)', requiredPermission: 'sys:control-display' as const };
+    fake.emit('message', { kind: 'denial', denial });
+    expect(onDenial).toHaveBeenCalledWith('system-stats', denial);
+  });
+
+  it('does not throw when a denial message arrives and no onDenial callback was provided', async () => {
+    let fake!: FakeWorker;
+    const host = new WorkerHost([makeSpec()], {
+      maxOldGenerationSizeMb: 64, maxRestarts: 5, callTimeoutMs: 1000,
+      onLog: vi.fn(), onEventPublish: vi.fn(), onWidgetPublish: vi.fn(),
+      createWorker: () => { fake = new FakeWorker(); return fake; },
+    });
+    await host.start();
+    expect(() => fake.emit('message', { kind: 'denial', denial: { pluginId: 'x', capability: 'y', requiredPermission: null } })).not.toThrow();
+  });
+
   it('terminates and marks a plugin degraded when a call exceeds its deadline (hang)', async () => {
     let fake!: FakeWorker;
     const host = new WorkerHost([makeSpec()], {

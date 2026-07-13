@@ -14,9 +14,19 @@ __pycache__/
 dist/
 build/
 out/
+release/
 *.egg-info/
 node_modules/
 *.tsbuildinfo
+
+# apps/mac/build/ is caught by the blanket build/ rule above, but
+# icon-source.svg and icon.icns in there are hand-authored/regenerated
+# source assets (electron-builder's build.mac.icon), not generated output --
+# track them explicitly.
+!apps/mac/build/
+apps/mac/build/*
+!apps/mac/build/icon-source.svg
+!apps/mac/build/icon.icns
 
 # Android (React Native native project)
 app/android/.gradle/
@@ -58,6 +68,8 @@ opencode.json
 e2e_manual_output/
 results.sarif
 github_conf/
+apps/mac/test-results/
+apps/mac/playwright-report/
 
 # Generated scan / report artifacts (never commit these)
 audit-packs.sarif

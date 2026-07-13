@@ -1,0 +1,28 @@
+/* Without this, the browser UA stylesheet's default body margin (8px)
+   pushes App.tsx's root past the viewport on every edge, producing spurious
+   horizontal AND vertical document scrollbars. html/body/#root are sized to
+   100% (not 100vw/100vh) because vw/vh are defined against the initial
+   containing block and can measure larger than
+   document.documentElement.clientWidth once any scrollbar-gutter is
+   reserved, causing the same overflow this reset is meant to fix.
+
+   This lives in a real stylesheet (imported by main.tsx, bundled by Vite as
+   an external, same-origin <link>), NOT an inline <style> block in
+   index.html -- index.html's CSP (`default-src 'self'; script-src 'self'`,
+   no style-src allowance) silently blocks inline <style> elements, which
+   previously made this entire reset a no-op: html/body/#root never got a
+   definite height, so App.tsx's own `height:'100%'` resolved against an
+   auto-height ancestor and collapsed to content height instead of filling
+   the window -- the visible symptom was a large blank gap below the app's
+   actual content. An external stylesheet is same-origin ('self') and needs
+   no CSP change at all. */
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}

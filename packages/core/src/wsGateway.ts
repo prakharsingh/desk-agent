@@ -1,5 +1,6 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import { parseFrame, createFrame, type WidgetEntry, type Widget } from '@desk-agent/protocol';
+import type { LogLevel } from '@desk-agent/plugin-sdk';
 
 export interface WsClientLike {
   send(data: string): void;
@@ -16,12 +17,14 @@ export interface WsGatewayOptions {
   port: number;
   heartbeatMs: number;
   getSnapshot: () => Promise<WidgetEntry[]>;
+  /** Included only in the hello-reply snapshot, never a later single-widget push -- see WidgetUpdatePayloadSchema's comment on why "absent" means "no visibility change", not "hide everything". */
+  getVisibleWidgets?: () => string[];
   onEventPublish: (raw: unknown) => void;
   /** Invoked when a client sends an action.invoke frame (e.g. media transport buttons). */
   onActionInvoke?: (pluginId: string, action: string, args?: Record<string, unknown>) => void;
   /** Invoked once per successfully-parsed inbound frame, of any type — a liveness signal for the watchdog. */
   onClientMessage?: () => void;
-  onLog?: (level: string, message: string) => void;
+  onLog?: (level: LogLevel, message: string) => void;
   wssFactory?: () => WsServerLike;
 }
 
@@ -41,6 +44,7 @@ export class WsGateway {
   private wss: WsServerLike;
   private clients = new Set<WsClientLike>();
   private heartbeatTimer?: NodeJS.Timeout;
+  private lastHelloAt: number | null = null;
 
   constructor(private opts: WsGatewayOptions) {
     this.wss = opts.wssFactory ? opts.wssFactory() : defaultWssFactory(opts.port);
@@ -62,6 +66,14 @@ export class WsGateway {
     this.wss.close();
   }
 
+  getClientCount(): number {
+    return this.clients.size;
+  }
+
+  getLastHelloAt(): number | null {
+    return this.lastHelloAt;
+  }
+
   private handleConnection(client: WsClientLike) {
     this.clients.add(client);
     client.on('message', (raw) => this.handleMessage(client, raw));
@@ -74,8 +86,10 @@ export class WsGateway {
     this.opts.onClientMessage?.();
     const frame = parsed.value;
     if (frame.type === 'hello') {
+      this.lastHelloAt = Date.now();
       const widgets = await this.opts.getSnapshot();
-      client.send(JSON.stringify(createFrame('widget.update', { widgets })));
+      const visibleWidgets = this.opts.getVisibleWidgets?.();
+      client.send(JSON.stringify(createFrame('widget.update', { widgets, ...(visibleWidgets ? { visibleWidgets } : {}) })));
     } else if (frame.type === 'event.publish') {
       this.opts.onEventPublish(frame.payload);
     } else if (frame.type === 'action.invoke') {

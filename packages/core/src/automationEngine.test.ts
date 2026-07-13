@@ -58,4 +58,57 @@ describe('AutomationEngine', () => {
     expect(() => vi.advanceTimersByTime(1000)).not.toThrow();
     expect(log).toHaveBeenCalledWith('error', expect.stringContaining('sleep-on-absent'));
   });
+
+  describe('isEnabled/getRules/setRuleEnabled (Phase 3 state-surface read/toggle API)', () => {
+    it('isEnabled reflects setEnabled', () => {
+      const engine = new AutomationEngine([sleepRule], { invoke: vi.fn() }, vi.fn());
+      expect(engine.isEnabled()).toBe(true);
+      engine.setEnabled(false);
+      expect(engine.isEnabled()).toBe(false);
+    });
+
+    it('getRules maps each rule to a display-only shape without leaking the condition closure, all enabled by default', () => {
+      const engine = new AutomationEngine([sleepRule], { invoke: vi.fn() }, vi.fn());
+      expect(engine.getRules()).toEqual([
+        { id: 'sleep-on-absent', eventName: 'person_present', actionLabel: 'energy-saver · sleep-display', debounceMs: 1000, enabled: true },
+      ]);
+    });
+
+    it('setRuleEnabled(id, false) is reflected in getRules and suppresses that rule without touching others', () => {
+      const otherRule: AutomationRule = { ...sleepRule, id: 'other', eventName: 'other_event' };
+      const invoke = vi.fn();
+      const engine = new AutomationEngine([sleepRule, otherRule], { invoke }, vi.fn());
+
+      engine.setRuleEnabled('sleep-on-absent', false);
+      expect(engine.getRules().find((r) => r.id === 'sleep-on-absent')?.enabled).toBe(false);
+      expect(engine.getRules().find((r) => r.id === 'other')?.enabled).toBe(true);
+
+      engine.handleEvent('person_present', { present: false });
+      vi.advanceTimersByTime(1000);
+      expect(invoke).not.toHaveBeenCalled(); // disabled rule never fires
+
+      engine.handleEvent('other_event', { present: false });
+      vi.advanceTimersByTime(1000);
+      expect(invoke).toHaveBeenCalledWith('energy-saver', 'sleep-display', undefined); // untouched rule still fires
+    });
+
+    it('disabling a rule with an already-armed debounce timer cancels the pending fire', () => {
+      const invoke = vi.fn();
+      const engine = new AutomationEngine([sleepRule], { invoke }, vi.fn());
+      engine.handleEvent('person_present', { present: false });
+      engine.setRuleEnabled('sleep-on-absent', false);
+      vi.advanceTimersByTime(1000);
+      expect(invoke).not.toHaveBeenCalled();
+    });
+
+    it('setRuleEnabled(id, true) re-arms a previously disabled rule', () => {
+      const invoke = vi.fn();
+      const engine = new AutomationEngine([sleepRule], { invoke }, vi.fn());
+      engine.setRuleEnabled('sleep-on-absent', false);
+      engine.setRuleEnabled('sleep-on-absent', true);
+      engine.handleEvent('person_present', { present: false });
+      vi.advanceTimersByTime(1000);
+      expect(invoke).toHaveBeenCalledWith('energy-saver', 'sleep-display', undefined);
+    });
+  });
 });

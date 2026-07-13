@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { parseFrame, parseWidget, createFrame, PROTOCOL_VERSION, parseSensorEvent } from './index.js';
+import { parseFrame, parseWidget, createFrame, PROTOCOL_VERSION, parseSensorEvent, WIDGET_IDS } from './index.js';
+
+describe('WIDGET_IDS', () => {
+  it('is the single source of truth for known widget ids, shared by the Mac config schema and the phone app', () => {
+    expect(WIDGET_IDS).toEqual(['clock', 'system', 'weather', 'presence', 'playing', 'light']);
+  });
+});
 
 describe('parseFrame', () => {
   it('accepts a valid hello frame', () => {
@@ -21,6 +27,16 @@ describe('parseFrame', () => {
 
   it('accepts a widget.update frame with an empty widgets array', () => {
     const raw = { v: 1, type: 'widget.update', id: 'abc', ts: 123, payload: { widgets: [] } };
+    expect(parseFrame(raw).ok).toBe(true);
+  });
+
+  it('accepts a widget.update frame carrying visibleWidgets alongside widgets (the hello-reply snapshot)', () => {
+    const raw = { v: 1, type: 'widget.update', id: 'abc', ts: 123, payload: { widgets: [], visibleWidgets: ['clock', 'weather'] } };
+    expect(parseFrame(raw).ok).toBe(true);
+  });
+
+  it('accepts a widget.update frame with no visibleWidgets (a live single-widget push, not the hello snapshot)', () => {
+    const raw = { v: 1, type: 'widget.update', id: 'abc', ts: 123, payload: { widgets: [{ widgetId: 'weather', widget: { type: 'weather', props: {} } }] } };
     expect(parseFrame(raw).ok).toBe(true);
   });
 

@@ -1,0 +1,31 @@
+{
+  "name": "@desk-agent/spike-electron",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/main.js",
+  "scripts": {
+    "pack": "electron-builder --mac dir --arm64"
+  },
+  "dependencies": {
+    "@desk-agent/core": "workspace:*"
+  },
+  "devDependencies": {
+    "electron": "^43.1.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.deskagent.spike",
+    "productName": "DeskAgentSpike",
+    "asar": true,
+    "directories": { "output": "release" },
+    "files": [
+      "src/**/*",
+      "node_modules/**/*"
+    ],
+    "mac": {
+      "target": "dir",
+      "identity": null
+    }
+  }
+}

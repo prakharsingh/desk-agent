@@ -18,6 +18,56 @@ describe('PresenceEngine', () => {
     expect(onPresenceChange).not.toHaveBeenCalled();
   });
 
+  describe('onStateChange (Phase 3 state-surface: live presence.state for Overview/Presence panes)', () => {
+    it('fires with the new state and a timestamp on every transition, including the intermediate maybe-absent state', () => {
+      const onStateChange = vi.fn();
+      const engine = new PresenceEngine(baseConfig, vi.fn(), vi.fn(), undefined, onStateChange);
+      engine.onCameraState('active');
+      engine.onFaceVisible(false);
+      engine.onMotion(false);
+
+      expect(onStateChange).toHaveBeenCalledWith('maybe-absent', expect.any(Number));
+
+      onStateChange.mockClear();
+      vi.advanceTimersByTime(baseConfig.absenceTimeoutMs);
+      expect(onStateChange).toHaveBeenCalledWith('absent', expect.any(Number));
+
+      onStateChange.mockClear();
+      engine.onFaceVisible(true);
+      expect(onStateChange).toHaveBeenCalledWith('present', expect.any(Number));
+    });
+
+    it('does not fire for a call that does not actually change the state', () => {
+      const onStateChange = vi.fn();
+      const engine = new PresenceEngine(baseConfig, vi.fn(), vi.fn(), undefined, onStateChange);
+      // Engine already starts 'present'; a face-visible refresh while already
+      // present is a same-state no-op, not a transition.
+      engine.onFaceVisible(true);
+      expect(onStateChange).not.toHaveBeenCalled();
+    });
+
+    it('getStateSince() reports the timestamp of the most recent transition, readable independent of onStateChange (no listener required)', () => {
+      const engine = new PresenceEngine(baseConfig, vi.fn(), vi.fn());
+      const initialSince = engine.getStateSince();
+      engine.onCameraState('active');
+      engine.onFaceVisible(false);
+      engine.onMotion(false);
+      vi.advanceTimersByTime(1000);
+      expect(engine.getStateSince()).toBeGreaterThanOrEqual(initialSince);
+      expect(engine.getState()).toBe('maybe-absent');
+    });
+
+    it('getState() matches the state most recently passed to onStateChange', () => {
+      const onStateChange = vi.fn();
+      const engine = new PresenceEngine(baseConfig, vi.fn(), vi.fn(), undefined, onStateChange);
+      engine.onCameraState('active');
+      engine.onFaceVisible(false);
+      engine.onMotion(false);
+      expect(engine.getState()).toBe('maybe-absent');
+      expect(onStateChange).toHaveBeenLastCalledWith('maybe-absent', expect.any(Number));
+    });
+  });
+
   it('goes absent after absenceTimeoutMs of no face and no motion, once camera is confirmed healthy', () => {
     const onPresenceChange = vi.fn();
     const engine = new PresenceEngine(baseConfig, onPresenceChange, vi.fn());
@@ -222,7 +272,7 @@ describe('PresenceEngine', () => {
   });
 
   describe('real Watchdog -> PresenceEngine wiring (matches main.ts composition)', () => {
-    // main.ts wires: new Watchdog(WATCHDOG_TIMEOUT_MS, () => {
+    // main.ts wires: new Watchdog(config.watchdogTimeoutMs, () => {
     //   log(...); presenceEngine.onCameraState('error', 'watchdog-timeout');
     // });
     // This is the single most safety-critical cross-module connection this
@@ -232,7 +282,7 @@ describe('PresenceEngine', () => {
     // through the EventBus), this constructs a REAL Watchdog instance and
     // exercises the actual closure that connects Watchdog.onMissed to
     // presenceEngine.onCameraState(...).
-    const WATCHDOG_TIMEOUT_MS = 30000; // must match main.ts's WATCHDOG_TIMEOUT_MS
+    const WATCHDOG_TIMEOUT_MS = 30000; // must match ConfigSchema's watchdogTimeoutMs default
 
     it('a real Watchdog timing out with no pulse() drives the real PresenceEngine to fail-to-present via the exact main.ts wiring', () => {
       const onPresenceChange = vi.fn();

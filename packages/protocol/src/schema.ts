@@ -2,6 +2,15 @@ import { z } from 'zod';
 
 export const PROTOCOL_VERSION = 1 as const;
 
+// Single source of truth for which phone-dashboard tiles exist, shared by
+// the Mac config schema (packages/config-schema's visibleWidgets default)
+// and the phone app (app/src/display/HomeScreen.tsx's per-tile visibility
+// check) -- both import this instead of hand-copying the list. Voice/Steam
+// Deck are permanently roadmap tiles (never toggleable, always shown
+// disabled) and deliberately excluded here.
+export const WIDGET_IDS = ['clock', 'system', 'weather', 'presence', 'playing', 'light'] as const;
+export type WidgetId = (typeof WIDGET_IDS)[number];
+
 export const WidgetSchema = z.object({
   type: z.string().min(1),
   props: z.record(z.unknown()),
@@ -22,6 +31,10 @@ export type HeartbeatPayload = z.infer<typeof HeartbeatPayloadSchema>;
 
 export const WidgetUpdatePayloadSchema = z.object({
   widgets: z.array(WidgetEntrySchema),
+  // Only present on the hello-reply snapshot (packages/core/src/wsGateway.ts),
+  // not on later single-widget push updates (broadcastWidgetUpdate) -- the
+  // phone treats "absent" as "no change to visibility", not "hide everything".
+  visibleWidgets: z.array(z.string()).optional(),
 });
 export type WidgetUpdatePayload = z.infer<typeof WidgetUpdatePayloadSchema>;
 

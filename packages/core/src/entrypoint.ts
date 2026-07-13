@@ -1,4 +1,4 @@
-import type { Permission } from '@desk-agent/plugin-sdk';
+import type { LogLevel, Permission } from '@desk-agent/plugin-sdk';
 import { parseSensorEvent, type SensorEventName } from '@desk-agent/protocol';
 import type { Config } from './configLoader.js';
 import type { PluginSpec } from './workerHost.js';
@@ -23,7 +23,7 @@ export interface PluginRegistryEntry {
 export function buildPluginSpecs(
   config: Config,
   registry: Record<string, PluginRegistryEntry>,
-  onLog: (level: string, message: string) => void,
+  onLog: (level: LogLevel, message: string) => void,
 ): PluginSpec[] {
   const specs: PluginSpec[] = [];
   for (const id of config.enabledPlugins) {
@@ -77,7 +77,7 @@ export interface BootDeps {
   automationEngine: AutomationEngine;
   watchdog?: Watchdog;
   presenceEngine?: PresenceEngine;
-  onLog?: (level: string, message: string) => void;
+  onLog?: (level: LogLevel, message: string) => void;
 }
 
 export function boot(deps: BootDeps) {

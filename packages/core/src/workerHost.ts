@@ -2,7 +2,8 @@ import { Worker } from 'node:worker_threads';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Widget } from '@desk-agent/protocol';
-import type { Permission } from '@desk-agent/plugin-sdk';
+import type { LogLevel, Permission } from '@desk-agent/plugin-sdk';
+import type { PermissionDenial } from './permissionEnforcer.js';
 
 export interface PluginSpec {
   id: string;
@@ -27,9 +28,10 @@ export interface WorkerHostOptions {
   maxOldGenerationSizeMb: number;
   maxRestarts: number;
   callTimeoutMs: number;
-  onLog: (pluginId: string, level: string, message: string) => void;
+  onLog: (pluginId: string, level: LogLevel, message: string) => void;
   onEventPublish: (raw: unknown) => void;
   onWidgetPublish: (widgetId: string, raw: unknown) => void;
+  onDenial?: (pluginId: string, denial: PermissionDenial) => void;
   createWorker?: (spec: PluginSpec) => WorkerLike;
 }
 
@@ -64,6 +66,8 @@ export class WorkerHost {
         this.status.set(spec.id, 'running');
       } else if (msg.kind === 'log') {
         this.opts.onLog(spec.id, msg.level, msg.message);
+      } else if (msg.kind === 'denial') {
+        this.opts.onDenial?.(spec.id, msg.denial);
       } else if (msg.kind === 'publishEvent') {
         this.opts.onEventPublish({ eventName: msg.eventName, data: msg.data });
       } else if (msg.kind === 'publishWidget') {

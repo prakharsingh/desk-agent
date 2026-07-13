@@ -94,4 +94,35 @@ describe('HomeScreen', () => {
     const { toJSON } = await render(<HomeScreen {...BASE_PROPS} stats={STATS} />);
     expect(hasStyledNode(toJSON(), 'borderStyle', 'dashed')).toBe(true);
   });
+
+  describe('visibleWidgets (Phase 4: Widgets pane)', () => {
+    it('shows every real tile when visibleWidgets is omitted -- fail open, not fail hidden, before the first hello reply', async () => {
+      await render(<HomeScreen {...BASE_PROPS} stats={STATS} />);
+      expect(screen.getByText('CLOCK')).toBeTruthy();
+      expect(screen.getByText('SYSTEM')).toBeTruthy();
+      expect(screen.getByText('WEATHER')).toBeTruthy();
+      expect(screen.getByText('NOW PLAYING')).toBeTruthy();
+      expect(screen.getByText('CHIN LIGHT')).toBeTruthy();
+    });
+
+    it('hides a tile whose id is absent from visibleWidgets', async () => {
+      await render(<HomeScreen {...BASE_PROPS} stats={STATS} visibleWidgets={['clock', 'system', 'presence', 'playing', 'light']} />);
+      expect(screen.getByText('CLOCK')).toBeTruthy();
+      expect(screen.queryByText('WEATHER')).toBeNull();
+    });
+
+    it('shows only the tiles present in visibleWidgets, hiding the rest', async () => {
+      await render(<HomeScreen {...BASE_PROPS} stats={STATS} visibleWidgets={['clock']} />);
+      expect(screen.getByText('CLOCK')).toBeTruthy();
+      expect(screen.queryByText('SYSTEM')).toBeNull();
+      expect(screen.queryByText('WEATHER')).toBeNull();
+      expect(screen.queryByText('NOW PLAYING')).toBeNull();
+      expect(screen.queryByText('CHIN LIGHT')).toBeNull();
+    });
+
+    it('never hides the roadmap tiles (Voice, Steam Deck) -- they are not in WIDGET_IDS and are never toggleable', async () => {
+      await render(<HomeScreen {...BASE_PROPS} stats={STATS} visibleWidgets={['clock']} />);
+      expect(screen.getAllByText('ROADMAP').length).toBeGreaterThan(0);
+    });
+  });
 });

@@ -1,11 +1,12 @@
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import type { LogLevel } from '@desk-agent/plugin-sdk';
 import type { AdbRunner } from './tunnelSupervisor.js';
 
 const execFileAsync = promisify(execFile);
 
 export function createRealAdbRunner(
-  onLog: (level: string, message: string) => void = () => {},
+  onLog: (level: LogLevel, message: string) => void = () => {},
   adbPath = 'adb',
 ): AdbRunner {
   return {

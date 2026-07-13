@@ -10,17 +10,9 @@ import { WsGateway } from './wsGateway.js';
 import { TunnelSupervisor } from './tunnelSupervisor.js';
 import { createRealAdbRunner } from './adbRunner.js';
 import { Watchdog } from './watchdog.js';
+import { ControlChannel, type ControlTransport } from './controlChannel.js';
 
 const require = createRequire(import.meta.url);
-
-// The phone now acks every server heartbeat (WsGateway broadcasts one every
-// `heartbeatMs` = 5000ms; see app/src/wsClient.ts's onmessage handler),
-// independent of sensor-edge activity -- this is what makes the watchdog
-// safe to use as a genuine link-liveness signal even during a real, quiet
-// absence (edge-only sensor emission legitimately produces zero traffic
-// once a signal has settled). 30s gives a comfortable ~6x margin over that
-// 5s ack cadence before concluding the link is actually dead.
-const WATCHDOG_TIMEOUT_MS = 30000;
 
 function resolvePluginRegistry(): Record<string, PluginRegistryEntry> {
   return {
@@ -30,12 +22,30 @@ function resolvePluginRegistry(): Record<string, PluginRegistryEntry> {
   };
 }
 
-export function run() {
+export interface RunOptions {
+  // Only supplied when hosted by the Electron app (apps/mac/src/main/coreHost.ts).
+  // Standalone `node` launches (SETUP.md's manual path, and every test in this
+  // package) pass none, so no ControlChannel is ever constructed and this file's
+  // only change in that path is the extra (unused) log-forwarding closure below.
+  transport?: ControlTransport;
+}
+
+export function run(opts: RunOptions = {}) {
   const configPath = process.env.DESK_AGENT_CONFIG_PATH ?? path.join(process.cwd(), 'config.json');
   const config = loadConfigFromFile(configPath);
+  const pluginRegistry = resolvePluginRegistry();
 
-  const log = (pluginId: string, level: string, message: string) => console.log(`[${level}] ${pluginId}: ${message}`);
-  const specs = buildPluginSpecs(config, resolvePluginRegistry(), (level, message) => log('core', level, message));
+  // Declared before construction and assigned after (forward reference): the
+  // log/denial/presence closures below are only ever INVOKED later, at
+  // runtime, by which point controlChannel has been assigned -- same pattern
+  // this file already used for workerHost/gateway forward references.
+  let controlChannel: ControlChannel | undefined;
+
+  const log = (pluginId: string, level: 'info' | 'warn' | 'error', message: string) => {
+    console.log(`[${level}] ${pluginId}: ${message}`);
+    controlChannel?.forwardLog(pluginId, level, message);
+  };
+  const specs = buildPluginSpecs(config, pluginRegistry, (level, message) => log('core', level, message));
 
   const eventBus = new EventBus();
   const automationEngine = new AutomationEngine(buildAutomationRules(config), {
@@ -47,6 +57,7 @@ export function run() {
     (present) => eventBus.publish({ eventName: 'person_present', data: { present } }),
     (level, message) => log('presence', level, message),
     () => eventBus.publish({ eventName: 'presence.returned', data: {} }),
+    () => controlChannel?.pushSnapshot(),
   );
 
   const workerHost = new WorkerHost(specs, {
@@ -56,9 +67,18 @@ export function run() {
     onLog: log,
     onEventPublish: (raw) => eventBus.publish(raw),
     onWidgetPublish: (widgetId, widget) => gateway.broadcastWidgetUpdate(widgetId, widget as any),
+    onDenial: () => controlChannel?.recordDenial(),
   });
 
-  const watchdog = new Watchdog(WATCHDOG_TIMEOUT_MS, () => {
+  // config.watchdogTimeoutMs's default (30000ms) rationale: the phone now
+  // acks every server heartbeat (WsGateway broadcasts one every
+  // `heartbeatMs` = 5000ms; see app/src/wsClient.ts's onmessage handler),
+  // independent of sensor-edge activity -- this is what makes the watchdog
+  // safe to use as a genuine link-liveness signal even during a real, quiet
+  // absence (edge-only sensor emission legitimately produces zero traffic
+  // once a signal has settled). The default gives a comfortable ~6x margin
+  // over that 5s ack cadence before concluding the link is actually dead.
+  const watchdog = new Watchdog(config.watchdogTimeoutMs, () => {
     log('watchdog', 'error', 'phone appears to have stopped sending heartbeats');
     presenceEngine.onCameraState('error', 'watchdog-timeout');
   });
@@ -74,6 +94,7 @@ export function run() {
       }));
       return entries.flat();
     },
+    getVisibleWidgets: () => config.visibleWidgets,
     onEventPublish: (raw) => eventBus.publish(raw),
     onActionInvoke: (pluginId, action, args) => workerHost.invokeAction(pluginId, action, args),
     onClientMessage: () => {
@@ -88,8 +109,23 @@ export function run() {
     },
   });
 
-  const tunnelLog = (level: string, message: string) => log('tunnel', level, message);
+  const tunnelLog = (level: 'info' | 'warn' | 'error', message: string) => log('tunnel', level, message);
   const tunnelSupervisor = new TunnelSupervisor(createRealAdbRunner(tunnelLog), config.wsPort, tunnelLog);
+
+  if (opts.transport) {
+    const pluginPermissions = Object.fromEntries(Object.entries(pluginRegistry).map(([id, entry]) => [id, entry.permissions]));
+    controlChannel = new ControlChannel({
+      transport: opts.transport,
+      gateway,
+      tunnelSupervisor,
+      presenceEngine,
+      automationEngine,
+      wsPort: config.wsPort,
+      watchdogTimeoutMs: config.watchdogTimeoutMs,
+      pluginPermissions,
+      enabledPlugins: config.enabledPlugins,
+    });
+  }
 
   workerHost.start().then(() => boot({
     workerHost, gateway, tunnelSupervisor, eventBus, automationEngine, watchdog, presenceEngine,

@@ -38,6 +38,55 @@ describe('WsGateway', () => {
     expect((reply.payload as any).widgets).toEqual(snapshot);
   });
 
+  it('includes visibleWidgets in the hello-reply when getVisibleWidgets is provided', async () => {
+    const server = new FakeServer();
+    const gateway = new WsGateway({
+      port: 8787, heartbeatMs: 5000,
+      getSnapshot: async () => [],
+      getVisibleWidgets: () => ['clock', 'weather'],
+      onEventPublish: vi.fn(),
+      wssFactory: () => server,
+    });
+    gateway.start();
+    const client = connectClient(server);
+    client.emit('message', JSON.stringify(createFrame('hello', { clientVersion: '1.0.0' })));
+    await vi.waitFor(() => expect(client.sent.length).toBe(1));
+    const reply: Frame = JSON.parse(client.sent[0]);
+    expect((reply.payload as any).visibleWidgets).toEqual(['clock', 'weather']);
+  });
+
+  it('omits visibleWidgets from the hello-reply when getVisibleWidgets is not provided', async () => {
+    const server = new FakeServer();
+    const gateway = new WsGateway({
+      port: 8787, heartbeatMs: 5000,
+      getSnapshot: async () => [],
+      onEventPublish: vi.fn(),
+      wssFactory: () => server,
+    });
+    gateway.start();
+    const client = connectClient(server);
+    client.emit('message', JSON.stringify(createFrame('hello', { clientVersion: '1.0.0' })));
+    await vi.waitFor(() => expect(client.sent.length).toBe(1));
+    const reply: Frame = JSON.parse(client.sent[0]);
+    expect((reply.payload as any).visibleWidgets).toBeUndefined();
+  });
+
+  it('does not include visibleWidgets on a later single-widget push update (broadcastWidgetUpdate)', () => {
+    const server = new FakeServer();
+    const gateway = new WsGateway({
+      port: 8787, heartbeatMs: 5000,
+      getSnapshot: async () => [],
+      getVisibleWidgets: () => ['clock'],
+      onEventPublish: vi.fn(),
+      wssFactory: () => server,
+    });
+    gateway.start();
+    const client = connectClient(server);
+    gateway.broadcastWidgetUpdate('weather', { type: 'weather', props: {} });
+    const frame: Frame = JSON.parse(client.sent[0]);
+    expect((frame.payload as any).visibleWidgets).toBeUndefined();
+  });
+
   it('forwards event.publish payload to onEventPublish', () => {
     const server = new FakeServer();
     const onEventPublish = vi.fn();
@@ -145,6 +194,43 @@ describe('WsGateway', () => {
     });
     expect(() => server.emit('error', new Error('listen EADDRINUSE: address already in use 127.0.0.1:8787'))).not.toThrow();
     expect(onLog).toHaveBeenCalledWith('error', expect.stringContaining('EADDRINUSE'));
+  });
+
+  describe('getClientCount/getLastHelloAt (Phase 3 state-surface: Overview/Device "paired phone")', () => {
+    it('starts at zero connected clients and no hello yet', () => {
+      const server = new FakeServer();
+      const gateway = new WsGateway({
+        port: 8787, heartbeatMs: 5000, getSnapshot: async () => [], onEventPublish: vi.fn(), wssFactory: () => server,
+      });
+      expect(gateway.getClientCount()).toBe(0);
+      expect(gateway.getLastHelloAt()).toBeNull();
+    });
+
+    it('counts connected clients and decrements on close', () => {
+      const server = new FakeServer();
+      const gateway = new WsGateway({
+        port: 8787, heartbeatMs: 5000, getSnapshot: async () => [], onEventPublish: vi.fn(), wssFactory: () => server,
+      });
+      gateway.start();
+      const client1 = connectClient(server);
+      expect(gateway.getClientCount()).toBe(1);
+      connectClient(server);
+      expect(gateway.getClientCount()).toBe(2);
+      client1.emit('close');
+      expect(gateway.getClientCount()).toBe(1);
+    });
+
+    it('records the timestamp of the most recent hello frame', async () => {
+      const server = new FakeServer();
+      const snapshot = [{ widgetId: 'system-stats', widget: { type: 'system-stats', props: { cpu: 1 } } }];
+      const gateway = new WsGateway({
+        port: 8787, heartbeatMs: 5000, getSnapshot: async () => snapshot, onEventPublish: vi.fn(), wssFactory: () => server,
+      });
+      gateway.start();
+      const client = connectClient(server);
+      client.emit('message', JSON.stringify(createFrame('hello', { clientVersion: '1.0.0' })));
+      await vi.waitFor(() => expect(gateway.getLastHelloAt()).toEqual(expect.any(Number)));
+    });
   });
 
   it('broadcastWidgetUpdate sends a single-entry widgets array to all clients', () => {

@@ -23,8 +23,17 @@ describe('loadConfig', () => {
     expect(config.wsPort).toBe(9000);
   });
 
-  it('throws with a descriptive message when weather config is missing', () => {
-    expect(() => loadConfig({})).toThrow();
+  // Was "throws when weather config is missing" -- deliberately changed.
+  // weather.location now defaults (see @desk-agent/config-schema's own test
+  // suite for the schema-level reasoning): a config UI that lets the user
+  // disable the weather plugin must not also force them to supply a
+  // location for a plugin they've turned off, and a first-run config must
+  // be buildable from `{}` alone. loadConfig is a thin pass-through to
+  // ConfigSchema.parse -- this test only confirms that pass-through, not
+  // the schema's own defaulting rules.
+  it('produces a fully-defaulted config from an empty object', () => {
+    expect(() => loadConfig({})).not.toThrow();
+    expect(loadConfig({}).weather.location).toBe('Seattle');
   });
 
   it('applies sane defaults for the presence block when omitted', () => {
