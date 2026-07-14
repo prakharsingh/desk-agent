@@ -38,12 +38,23 @@ and auto-start when the phone is docked — no terminal required.
 
 ## Screenshots
 
+**Phone app**
+
 <table>
   <tr>
-    <td align="center"><img src="docs/design-review/screenshots/01-dashboard-home.png" width="200" alt="Dashboard home: clock, system stats, weather, presence, now playing, and chin light tiles"/><br/><sub>Dashboard</sub></td>
-    <td align="center"><img src="docs/design-review/screenshots/05-presence-detail.png" width="200" alt="Presence screen: raw sensor frame reporting UNKNOWN with detection off, failing safe to present"/><br/><sub>Presence (honest signals)</sub></td>
-    <td align="center"><img src="docs/design-review/screenshots/04-weather-detail.png" width="200" alt="Weather detail: current conditions and 7-day Open-Meteo forecast"/><br/><sub>Weather</sub></td>
-    <td align="center"><img src="docs/design-review/screenshots/03-system-detail.png" width="200" alt="System detail: live CPU and RAM sparklines streamed from the Mac"/><br/><sub>System stats</sub></td>
+    <td align="center"><img src="docs/assets/screenshots/phone-dashboard.png" width="200" alt="Dashboard home: clock, system stats, weather, presence, now playing, and chin light tiles"/><br/><sub>Dashboard</sub></td>
+    <td align="center"><img src="docs/assets/screenshots/phone-presence.png" width="200" alt="Presence screen: raw sensor frame reporting UNKNOWN with detection off, failing safe to present"/><br/><sub>Presence (honest signals)</sub></td>
+    <td align="center"><img src="docs/assets/screenshots/phone-weather.png" width="200" alt="Weather detail: current conditions and 7-day Open-Meteo forecast"/><br/><sub>Weather</sub></td>
+    <td align="center"><img src="docs/assets/screenshots/phone-system.png" width="200" alt="System detail: live CPU and RAM sparklines streamed from the Mac"/><br/><sub>System stats</sub></td>
+  </tr>
+</table>
+
+**Mac menu-bar app (settings window)**
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/assets/screenshots/mac-overview.png" width="420" alt="Mac settings window, Overview pane: plugin count, WS port, system status rows, and binary checks"/><br/><sub>Overview</sub></td>
+    <td align="center"><img src="docs/assets/screenshots/mac-plugins.png" width="420" alt="Mac settings window, Plugins pane: per-plugin enable toggles supervised live by the core"/><br/><sub>Plugins</sub></td>
   </tr>
 </table>
 
