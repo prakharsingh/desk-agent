@@ -72,6 +72,27 @@ Every release gets a [CHANGELOG.md](CHANGELOG.md) entry under
 the tag is cut, describing what shipped in terms someone who didn't watch the
 PRs land can follow.
 
+### Cutting a release (maintainers)
+
+1. Bump versions to the new `X.Y.Z`: `apps/mac/package.json` `"version"`,
+   and in `apps/android/android/app/build.gradle` set `versionName "X.Y.Z"`
+   and increment `versionCode` by 1. (CI fails the release if the tag and
+   these versions disagree.)
+2. Finalize the `CHANGELOG.md` section header for `X.Y.Z` — the release body
+   is extracted from it; CI fails if the section is missing.
+3. Commit, then tag and push:
+       git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin main vX.Y.Z
+4. CI (`release.yml`) runs the full test suite, packs the DMG, builds the
+   signed APK, and creates a **draft** release. Nothing publishes on a red
+   build.
+5. Verify the draft: install the DMG on a Mac, sideload the APK on the
+   reference phone (an upgrade over the previous version must not force an
+   uninstall — if it does, the signing keystore changed: stop and
+   investigate before publishing).
+6. Publish the draft.
+7. Update the Homebrew cask per `packaging/homebrew/README.md` (new
+   `version` + `sha256`).
+
 ## Reporting issues
 
 Open a GitHub issue. For anything presence/camera-related, please include

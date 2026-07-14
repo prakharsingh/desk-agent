@@ -4,6 +4,12 @@ From-zero instructions for building, testing, and running Desk Agent OS on
 real hardware: a Mac (the core agent) and a docked Android phone (the
 dashboard/sensor app).
 
+> **Not developing, just using it?** Prebuilt artifacts (Mac DMG + Android
+> APK) are on the [releases page](https://github.com/prakharsingh/desk-agent/releases)
+> — see the [Install section of the README](README.md#install-prebuilt).
+> You still need USB debugging enabled on the phone (the Mac drives it over
+> adb); the sections below cover that.
+
 ## Prerequisites
 
 | For | Need |

@@ -36,16 +36,29 @@ test('Overview, Device, and Logs panes show live data pushed from the core\'s Co
     }).toPass({ timeout: 10_000 });
 
     // Device: reflects the core's tunnel state and exposes the live
-    // reissueTunnel control action.
+    // reissueTunnel control action -- but only when a phone is actually
+    // docked. DevicePane legitimately disables the button when
+    // snapshot.device.serial is null (see its noDevicePaired guard: firing
+    // `adb reverse` with no device paired is ambiguous and unsafe), and a
+    // disabled <button> never dispatches a click event at all, so this
+    // machine -- and every CI runner, which never has adb or a phone --
+    // would otherwise hang here forever waiting for a click that can't
+    // happen. Assert whichever state is actually true instead of assuming a
+    // device is present.
     await window.getByRole('button', { name: 'Device' }).click();
     await expect(window.getByText('8787')).toBeVisible();
     const reissueButton = window.getByRole('button', { name: 'Re-issue' });
     await expect(reissueButton).toBeVisible();
-    await reissueButton.click();
-    // The button round-trips through a real IPC call (status:reissueTunnel);
-    // it re-enables once that promise resolves, proving the action reached
-    // the core and came back rather than hanging.
-    await expect(reissueButton).toBeEnabled({ timeout: 10_000 });
+    const deviceSnapshot = await window.evaluate(() => (window as any).deskAgent.getSnapshot());
+    if (deviceSnapshot.device.serial) {
+      await reissueButton.click();
+      // The button round-trips through a real IPC call (status:reissueTunnel);
+      // it re-enables once that promise resolves, proving the action reached
+      // the core and came back rather than hanging.
+      await expect(reissueButton).toBeEnabled({ timeout: 10_000 });
+    } else {
+      await expect(reissueButton).toBeDisabled();
+    }
   } finally {
     await isolated.close();
   }

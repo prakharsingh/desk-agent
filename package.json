@@ -1,6 +1,7 @@
 {
   "name": "desk-agent-os",
   "private": true,
+  "packageManager": "pnpm@11.0.9",
   "type": "module",
   "scripts": {
     "build": "pnpm -r build",

@@ -59,6 +59,15 @@ export class WsGateway {
 
   start() {
     this.heartbeatTimer = setInterval(() => this.broadcastHeartbeat(), this.opts.heartbeatMs);
+    // Unconditional, device-independent boot signal: every other log source
+    // in the core (tunnel supervisor's "re-issued" line, plugin init, worker
+    // crashes) only fires given a specific runtime event (a docked phone, a
+    // plugin choosing to log, a failure) that a headless/no-hardware
+    // environment (e.g. CI) may never produce. Logging the gateway's own
+    // "started" transition here guarantees the Logs pane -- and anything
+    // observing it, like the e2e suite -- has proof the core actually booted
+    // even when nothing else ever logs a line.
+    this.opts.onLog?.('info', `gateway listening on 127.0.0.1:${this.opts.port}`);
   }
 
   stop() {

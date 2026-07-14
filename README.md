@@ -56,6 +56,38 @@ That builds and tests the whole monorepo. For running the actual agent + app
 on real hardware (Node core on the Mac, React Native app on a docked Android
 phone) and the full manual verification checklist, see **[SETUP.md](SETUP.md)**.
 
+## Install (prebuilt)
+
+Grab both apps from the
+[latest release](https://github.com/prakharsingh/desk-agent/releases/latest).
+
+**Mac (menu-bar app)** — download `DeskAgent-<version>-mac-arm64.dmg`, drag
+to Applications. It's ad-hoc signed (free & open source — no Apple Developer
+membership), so on first launch **right-click the app → Open** to get past
+Gatekeeper, once. Or use Homebrew:
+
+    brew tap prakharsingh/tap
+    brew install --cask desk-agent
+
+The app checks GitHub daily and shows an "Update available" item in the tray
+menu — there is no auto-update (macOS forbids it for unsigned apps).
+
+**Android (phone app)** — download `desk-agent-<version>.apk` onto the phone
+and open it (allow "install unknown apps" when prompted). The phone must have
+**USB debugging enabled** — the Mac drives it over `adb`; that's the
+architecture, not an install shortcut (see [SETUP.md](SETUP.md)). For
+update notifications, add the repo to
+[Obtainium](https://github.com/ImranR98/Obtainium).
+
+### Why no App Store / Play Store / F-Droid?
+
+- **Mac App Store**: the sandbox forbids what the app *is* — spawning `adb`,
+  `pmset`, `caffeinate`, and supervising the core process.
+- **Google Play**: fees + testing-track rules, and since the phone needs USB
+  debugging anyway, Play adds no reach. Revisited if a Wi-Fi transport ships.
+- **F-Droid**: the presence sensor uses MLKit, a proprietary Google library.
+- **Paid code signing**: this project is free forever — no $99/yr membership.
+
 ## Documentation
 
 **Using it**

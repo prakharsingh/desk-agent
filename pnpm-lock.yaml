@@ -96,6 +96,9 @@ importers:
       '@types/react':
         specifier: ^19.2.0
         version: 19.2.17
+      hermes-compiler:
+        specifier: 250829098.0.14
+        version: 250829098.0.14
       jest:
         specifier: ^29.7.0
         version: 29.7.0(@types/node@26.1.1)

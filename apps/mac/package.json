@@ -12,7 +12,7 @@
     "preview": "electron-vite preview",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "pack": "pnpm build && electron-builder --mac dir --arm64"
+    "pack": "pnpm build && electron-builder --mac"
   },
   "dependencies": {
     "@desk-agent/config-schema": "workspace:*",
@@ -46,7 +46,8 @@
       { "from": "resources", "to": "resources" }
     ],
     "mac": {
-      "target": "dir",
+      "target": [{ "target": "dmg", "arch": ["arm64"] }],
+      "artifactName": "DeskAgent-${version}-mac-arm64.${ext}",
       "identity": null,
       "category": "public.app-category.utilities",
       "icon": "build/icon.icns"

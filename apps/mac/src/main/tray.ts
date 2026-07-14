@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { StatusSnapshot } from '@desk-agent/core';
 import type { CoreHealth } from './coreSupervisor.js';
+import type { ReleaseInfo } from './updateCheck.js';
 
 const ICON_BY_HEALTH: Record<CoreHealth, string> = {
   running: 'tray-green.png',
@@ -46,6 +47,9 @@ export interface TrayControllerOptions {
   onOpenSettings: () => void;
   /** Quick pause/resume from the tray dropdown, per the design mockup. Only offered once a snapshot exists (needs to know the current state to toggle it). */
   onToggleAutomation?: (enabled: boolean) => void;
+  /** Non-intrusive update surfacing per the release-distribution spec: a menu item, never a dialog. */
+  getUpdateAvailable?: () => ReleaseInfo | null;
+  onOpenUpdate?: (url: string) => void;
   onQuit: () => void;
 }
 
@@ -73,6 +77,13 @@ export class TrayController {
     const items: Electron.MenuItemConstructorOptions[] = [
       { label: LABEL_BY_HEALTH[this.opts.getHealth()], enabled: false },
     ];
+    const update = this.opts.getUpdateAvailable?.() ?? null;
+    if (update) {
+      items.push({
+        label: `Update available: v${update.version}…`,
+        click: () => this.opts.onOpenUpdate?.(update.url),
+      });
+    }
     if (snapshot) {
       items.push(
         { type: 'separator' },

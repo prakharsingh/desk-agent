@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { StatusSnapshot, ToApp, ToCore, LogEntry } from '@desk-agent/core';
@@ -10,6 +10,7 @@ import { debounce } from './debounce.js';
 import { LogBuffer } from './logBuffer.js';
 import { augmentedPath, checkBinaries } from './binaries.js';
 import * as dockWatch from './dockWatch.js';
+import { startUpdateChecker } from './updateCheck.js';
 import { TRAFFIC_LIGHT_POSITION } from '../shared/constants.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -27,6 +28,11 @@ if (!gotLock) {
   let latestSnapshot: StatusSnapshot | null = null;
   const configPath = defaultConfigPath();
   const logBuffer = new LogBuffer(500);
+
+  const updateChecker = startUpdateChecker({
+    currentVersion: app.getVersion(),
+    onUpdateAvailable: () => tray?.refresh(),
+  });
 
   // The core only reads config at boot (no live hot-reload), so "apply the
   // new config" means restarting it. Debounced so rapid successive edits
@@ -183,6 +189,8 @@ if (!gotLock) {
       getSnapshot: () => latestSnapshot,
       onOpenSettings: () => showSettingsWindow(),
       onToggleAutomation: (enabled) => sendToCore({ kind: 'setAutomationEnabled', enabled }),
+      getUpdateAvailable: () => updateChecker.getAvailable(),
+      onOpenUpdate: (url) => { void shell.openExternal(url); },
       onQuit: () => app.quit(),
     });
 
@@ -202,5 +210,6 @@ if (!gotLock) {
   app.on('before-quit', () => {
     supervisor?.stop();
     tray?.destroy();
+    updateChecker.stop();
   });
 }

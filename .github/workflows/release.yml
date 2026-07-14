@@ -1,0 +1,119 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch: {}   # dry run: build + test + pack, no release created
+
+permissions:
+  contents: write   # create the draft release
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4   # version comes from package.json "packageManager"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Guard — tag matches app versions
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          MAC_VERSION=$(node -p "require('./apps/mac/package.json').version")
+          GRADLE_VERSION=$(grep -m1 'versionName' apps/android/android/app/build.gradle | sed 's/.*"\(.*\)".*/\1/')
+          [ "$VERSION" = "$MAC_VERSION" ] || { echo "::error::tag $VERSION != apps/mac version $MAC_VERSION"; exit 1; }
+          [ "$VERSION" = "$GRADLE_VERSION" ] || { echo "::error::tag $VERSION != android versionName $GRADLE_VERSION"; exit 1; }
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Guard — hermes-compiler pin matches react-native
+        run: |
+          PIN=$(node -p "require('./apps/android/package.json').devDependencies['hermes-compiler']")
+          WANT=$(node -p "require('./apps/android/node_modules/react-native/package.json').dependencies['hermes-compiler']")
+          [ "$PIN" = "$WANT" ] || { echo "::error::hermes-compiler pin ($PIN) != react-native's resolved version ($WANT) — re-pin apps/android/package.json after the RN upgrade"; exit 1; }
+
+      - name: Build
+        run: pnpm build
+
+      - name: Test — monorepo vitest
+        run: pnpm test
+
+      - name: Test — phone app Jest components
+        run: pnpm --filter @desk-agent/android test:components
+
+      - name: Test — Android JUnit/Robolectric
+        working-directory: apps/android/android
+        run: ./gradlew :app:testDebugUnitTest
+
+      - name: Pack mac DMG
+        run: pnpm --filter @desk-agent/mac run pack
+
+      - name: Test — packaged e2e smoke (catches packaging/symlink breaks)
+        run: pnpm --filter @desk-agent/mac test:e2e
+
+      - name: Build release APK (debug-fallback dry run)
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        working-directory: apps/android/android
+        run: ./gradlew :app:assembleRelease
+
+      - name: Guard — all signing secrets present
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          for s in ANDROID_KEYSTORE_B64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            [ -n "${!s}" ] || { echo "::error::secret $s is not set — see packaging/ANDROID_SIGNING.md"; exit 1; }
+          done
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      - name: Decode Android keystore
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: echo "$ANDROID_KEYSTORE_B64" | base64 -d > apps/android/android/app/upload.keystore
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+
+      - name: Build signed release APK
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: apps/android/android
+        run: ./gradlew :app:assembleRelease
+        env:
+          DESK_AGENT_UPLOAD_STORE_FILE: upload.keystore   # resolved by file() relative to app/
+          DESK_AGENT_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          DESK_AGENT_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          DESK_AGENT_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      - name: Stage artifacts + extract changelog
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p dist
+          cp apps/mac/release/DeskAgent-${VERSION}-mac-arm64.dmg dist/
+          cp apps/android/android/app/build/outputs/apk/release/app-release.apk "dist/desk-agent-${VERSION}.apk"
+          awk -v ver="$VERSION" '$0 ~ ("^## \\[" ver "\\]") {flag=1; next} /^## \[/ {flag=0} flag' CHANGELOG.md > dist/release-notes.md
+          [ -s dist/release-notes.md ] || { echo "::error::no CHANGELOG.md section for ${VERSION} — finalize the changelog before tagging"; exit 1; }
+
+      - name: Create draft release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          body_path: dist/release-notes.md
+          files: |
+            dist/DeskAgent-*.dmg
+            dist/desk-agent-*.apk
