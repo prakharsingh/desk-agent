@@ -1,5 +1,5 @@
 import { WebSocketServer, WebSocket } from 'ws';
-import { parseFrame, createFrame, type WidgetEntry, type Widget } from '@desk-agent/protocol';
+import { parseFrame, createFrame, type WidgetEntry, type Widget, type ScreensaverConfig } from '@desk-agent/protocol';
 import type { LogLevel } from '@desk-agent/plugin-sdk';
 
 export interface WsClientLike {
@@ -100,6 +100,15 @@ export class WsGateway {
 
   broadcastWidgetUpdate(widgetId: string, widget: Widget) {
     const frame = createFrame('widget.update', { widgets: [{ widgetId, widget }] });
+    for (const client of this.clients) client.send(JSON.stringify(frame));
+  }
+
+  // Reserved sentinel pluginId (deliberately absent from resolvePluginRegistry())
+  // marks this as a phone-targeted command, not a plugin-worker action -- it
+  // never reaches WorkerHost.invokeAction's dispatch, which is keyed by real
+  // plugin ids. See docs/superpowers/specs/2026-07-14-phone-screensaver-toggle-design.md.
+  sendScreensaverConfig(config: ScreensaverConfig) {
+    const frame = createFrame('action.invoke', { pluginId: 'phone-display', action: 'setScreensaverConfig', args: config });
     for (const client of this.clients) client.send(JSON.stringify(frame));
   }
 

@@ -39,6 +39,8 @@ const api = {
   // after writing/loading or removing/unloading the LaunchAgent), same
   // reasoning as setLaunchAtLogin -- launchctl can fail silently too.
   setDockWatchEnabled: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke('dockwatch:setEnabled', enabled),
+  setScreensaverConfig: (enabled: boolean, graceMs: number): Promise<void> =>
+    ipcRenderer.invoke('status:setScreensaverConfig', enabled, graceMs),
   // Live push (snapshot after every mutation, log lines as they happen).
   // Returns an unsubscribe function, matching the cleanup shape a React
   // useEffect expects.

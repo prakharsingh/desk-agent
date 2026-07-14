@@ -51,6 +51,15 @@ export const EventPublishPayloadSchema = z.object({
 });
 export type EventPublishPayload = z.infer<typeof EventPublishPayloadSchema>;
 
+// Shared by the phone (source of truth, persisted via AsyncStorage) and
+// core/Mac (a live mirror, synced over action.invoke/event.publish) --
+// see docs/superpowers/specs/2026-07-14-phone-screensaver-toggle-design.md.
+export const ScreensaverConfigSchema = z.object({
+  enabled: z.boolean(),
+  graceMs: z.number().int().positive(),
+});
+export type ScreensaverConfig = z.infer<typeof ScreensaverConfigSchema>;
+
 export const FaceVisiblePayloadSchema = z.object({ visible: z.boolean() });
 export type FaceVisiblePayload = z.infer<typeof FaceVisiblePayloadSchema>;
 
@@ -121,6 +130,10 @@ export function parseWidget(raw: unknown): ParseResult<Widget> {
 
 export function parseEventPublishPayload(raw: unknown): ParseResult<EventPublishPayload> {
   return toResult(EventPublishPayloadSchema.safeParse(raw));
+}
+
+export function parseScreensaverConfig(raw: unknown): ParseResult<ScreensaverConfig> {
+  return toResult(ScreensaverConfigSchema.safeParse(raw));
 }
 
 type PayloadOf<T extends Frame['type']> = Extract<Frame, { type: T }>['payload'];

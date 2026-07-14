@@ -11,6 +11,7 @@ import { TunnelSupervisor } from './tunnelSupervisor.js';
 import { createRealAdbRunner } from './adbRunner.js';
 import { Watchdog } from './watchdog.js';
 import { ControlChannel, type ControlTransport } from './controlChannel.js';
+import { ScreensaverConfigStore } from './screensaverConfigStore.js';
 
 const require = createRequire(import.meta.url);
 
@@ -59,6 +60,8 @@ export function run(opts: RunOptions = {}) {
     () => eventBus.publish({ eventName: 'presence.returned', data: {} }),
     () => controlChannel?.pushSnapshot(),
   );
+
+  const screensaverConfigStore = new ScreensaverConfigStore(() => controlChannel?.pushSnapshot());
 
   const workerHost = new WorkerHost(specs, {
     maxOldGenerationSizeMb: 128,
@@ -120,6 +123,7 @@ export function run(opts: RunOptions = {}) {
       tunnelSupervisor,
       presenceEngine,
       automationEngine,
+      phoneDisplay: screensaverConfigStore,
       wsPort: config.wsPort,
       watchdogTimeoutMs: config.watchdogTimeoutMs,
       pluginPermissions,
@@ -129,6 +133,7 @@ export function run(opts: RunOptions = {}) {
 
   workerHost.start().then(() => boot({
     workerHost, gateway, tunnelSupervisor, eventBus, automationEngine, watchdog, presenceEngine,
+    screensaverConfigStore,
     onLog: (level, message) => log('core', level, message),
   })).catch((err) => {
     log('core', 'error', `startup failed: ${String(err)}`);

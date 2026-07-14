@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parseFrame, parseWidget, createFrame, PROTOCOL_VERSION, parseSensorEvent, WIDGET_IDS } from './index.js';
+import { parseScreensaverConfig } from './schema.js';
 
 describe('WIDGET_IDS', () => {
   it('is the single source of truth for known widget ids, shared by the Mac config schema and the phone app', () => {
@@ -111,5 +112,32 @@ describe('parseFrame with sensor eventNames', () => {
   it('accepts an event.publish frame carrying a sensor eventName (no schema change needed for the envelope)', () => {
     const raw = { v: 1, type: 'event.publish', id: 'a', ts: 1, payload: { eventName: 'sensor.motion', data: { active: true } } };
     expect(parseFrame(raw).ok).toBe(true);
+  });
+});
+
+describe('parseScreensaverConfig', () => {
+  it('accepts a valid config', () => {
+    const result = parseScreensaverConfig({ enabled: true, graceMs: 120000 });
+    expect(result).toEqual({ ok: true, value: { enabled: true, graceMs: 120000 } });
+  });
+
+  it('rejects a missing field', () => {
+    const result = parseScreensaverConfig({ enabled: true });
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects a non-boolean enabled', () => {
+    const result = parseScreensaverConfig({ enabled: 'yes', graceMs: 120000 });
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects a non-positive graceMs', () => {
+    const result = parseScreensaverConfig({ enabled: true, graceMs: 0 });
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects a non-integer graceMs', () => {
+    const result = parseScreensaverConfig({ enabled: true, graceMs: 1.5 });
+    expect(result.ok).toBe(false);
   });
 });

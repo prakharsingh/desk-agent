@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildFaceVisibleFrame, buildGazeFrame, buildMotionFrame, buildCameraStateFrame, buildOverrideFrame } from './presenceEvents.js';
+import { buildFaceVisibleFrame, buildGazeFrame, buildMotionFrame, buildCameraStateFrame, buildOverrideFrame, buildScreensaverConfigFrame } from './presenceEvents.js';
 
 describe('buildFaceVisibleFrame', () => {
   it('builds an event.publish frame for sensor.face_visible', () => {
@@ -40,5 +40,13 @@ describe('buildOverrideFrame', () => {
     const frame = buildOverrideFrame(true);
     expect(frame.type).toBe('event.publish');
     expect(frame.payload).toEqual({ eventName: 'automation.override', data: { enabled: true } });
+  });
+});
+
+describe('buildScreensaverConfigFrame', () => {
+  it('builds an event.publish frame for screensaver.config', () => {
+    const frame = buildScreensaverConfigFrame({ enabled: false, graceMs: 60000 });
+    expect(frame.type).toBe('event.publish');
+    expect(frame.payload).toEqual({ eventName: 'screensaver.config', data: { enabled: false, graceMs: 60000 } });
   });
 });

@@ -1,5 +1,5 @@
 import type { LogLevel, Permission } from '@desk-agent/plugin-sdk';
-import { parseSensorEvent, type SensorEventName } from '@desk-agent/protocol';
+import { parseSensorEvent, parseScreensaverConfig, type SensorEventName } from '@desk-agent/protocol';
 import type { Config } from './configLoader.js';
 import type { PluginSpec } from './workerHost.js';
 import type { AutomationRule } from './automationEngine.js';
@@ -10,6 +10,7 @@ import type { EventBus } from './eventBus.js';
 import type { AutomationEngine } from './automationEngine.js';
 import type { Watchdog } from './watchdog.js';
 import type { PresenceEngine, PresenceEngineConfig } from './presenceEngine.js';
+import type { ScreensaverConfigStore } from './screensaverConfigStore.js';
 
 export interface PluginRegistryEntry {
   modulePath: string;
@@ -77,6 +78,7 @@ export interface BootDeps {
   automationEngine: AutomationEngine;
   watchdog?: Watchdog;
   presenceEngine?: PresenceEngine;
+  screensaverConfigStore?: ScreensaverConfigStore;
   onLog?: (level: LogLevel, message: string) => void;
 }
 
@@ -85,6 +87,17 @@ export function boot(deps: BootDeps) {
   deps.eventBus.subscribe('person_present', (payload) => deps.automationEngine.handleEvent(payload.eventName, payload.data));
   deps.eventBus.subscribe('presence.returned', (payload) => deps.automationEngine.handleEvent(payload.eventName, payload.data));
   deps.eventBus.subscribe('automation.override', (payload) => deps.automationEngine.setEnabled(Boolean(payload.data.enabled)));
+  if (deps.screensaverConfigStore) {
+    const store = deps.screensaverConfigStore;
+    deps.eventBus.subscribe('screensaver.config', (payload) => {
+      const result = parseScreensaverConfig(payload.data);
+      if (!result.ok) {
+        onLog('error', `dropped malformed screensaver.config payload: ${result.error}`);
+        return;
+      }
+      store.setConfig(result.value);
+    });
+  }
   if (deps.presenceEngine) {
     const engine = deps.presenceEngine;
     const subscribeSensor = (eventName: SensorEventName, handle: (data: any) => void) => {

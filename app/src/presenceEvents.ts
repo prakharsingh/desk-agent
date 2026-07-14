@@ -1,4 +1,4 @@
-import { createFrame, type Frame, type CameraStatePayload } from '@desk-agent/protocol';
+import { createFrame, type Frame, type CameraStatePayload, type ScreensaverConfig } from '@desk-agent/protocol';
 
 export function buildFaceVisibleFrame(visible: boolean): Frame {
   return createFrame('event.publish', { eventName: 'sensor.face_visible', data: { visible } });
@@ -25,4 +25,8 @@ export function buildOverrideFrame(enabled: boolean): Frame {
 
 export function buildMediaActionFrame(action: 'togglePlayPause' | 'next' | 'previous'): Frame {
   return createFrame('action.invoke', { pluginId: 'system-stats', action });
+}
+
+export function buildScreensaverConfigFrame(config: ScreensaverConfig): Frame {
+  return createFrame('event.publish', { eventName: 'screensaver.config', data: config });
 }

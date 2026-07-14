@@ -21,7 +21,12 @@ type TestDeps = ReturnType<typeof buildBaseDeps> & { transport: FakeTransport };
 
 function buildBaseDeps() {
   return {
-    gateway: { getClientCount: vi.fn(() => 0), getLastHelloAt: vi.fn((): number | null => null) },
+    gateway: {
+      getClientCount: vi.fn(() => 0),
+      getLastHelloAt: vi.fn((): number | null => null),
+      sendScreensaverConfig: vi.fn(),
+    },
+    phoneDisplay: { getStatus: vi.fn((): { enabled: boolean; graceMs: number } | null => null) },
     tunnelSupervisor: {
       getStatus: vi.fn(() => ({
         serial: null as string | null,
@@ -199,5 +204,33 @@ describe('ControlChannel', () => {
     channel.forwardLog('presence', 'info', 'presence forced to present: active');
     const logMsg = deps.transport.sent.find((m: ToApp) => m.kind === 'log') as Extract<ToApp, { kind: 'log' }>;
     expect(logMsg.entry).toEqual({ ts: expect.any(Number), level: 'info', source: 'presence', message: 'presence forced to present: active' });
+  });
+
+  it('builds a snapshot including the phone-reported screensaver config', () => {
+    const deps = makeDeps({ phoneDisplay: { getStatus: vi.fn(() => ({ enabled: false, graceMs: 60000 })) } });
+    makeChannel(deps);
+    const snap = (deps.transport.sent[0] as Extract<ToApp, { kind: 'snapshot' }>).data;
+    expect(snap.screensaver).toEqual({ enabled: false, graceMs: 60000 });
+  });
+
+  it('screensaver is null in the snapshot before the phone has ever reported', () => {
+    const deps = makeDeps();
+    makeChannel(deps);
+    const snap = (deps.transport.sent[0] as Extract<ToApp, { kind: 'snapshot' }>).data;
+    expect(snap.screensaver).toBeNull();
+  });
+
+  it('setScreensaverConfig calls gateway.sendScreensaverConfig with the given config', () => {
+    const deps = makeDeps();
+    makeChannel(deps);
+    deps.transport.receive({ kind: 'setScreensaverConfig', enabled: false, graceMs: 60000 });
+    expect(deps.gateway.sendScreensaverConfig).toHaveBeenCalledWith({ enabled: false, graceMs: 60000 });
+  });
+
+  it('setScreensaverConfig does NOT push an optimistic snapshot -- the Mac only sees the phone-confirmed value on its next report', () => {
+    const deps = makeDeps();
+    makeChannel(deps);
+    deps.transport.receive({ kind: 'setScreensaverConfig', enabled: false, graceMs: 60000 });
+    expect(deps.transport.sent).toHaveLength(1); // just the initial snapshot, no extra push
   });
 });

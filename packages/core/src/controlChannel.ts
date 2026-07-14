@@ -2,6 +2,7 @@ import type { LogLevel, Permission } from '@desk-agent/plugin-sdk';
 import type { PresenceState } from './presenceEngine.js';
 import type { AutomationRuleView } from './automationEngine.js';
 import type { TunnelStatusSnapshot } from './tunnelSupervisor.js';
+import type { ScreensaverConfig } from '@desk-agent/protocol';
 
 export interface LogEntry {
   ts: number;
@@ -18,6 +19,9 @@ export interface StatusSnapshot {
   plugins: Record<string, { enabled: boolean; permissions: Permission[] }>;
   automation: { enabled: boolean; rules: AutomationRuleView[] };
   denialsToday: number;
+  // null until the phone has connected and reported its config at least
+  // once, ever -- see ScreensaverConfigStore's doc comment.
+  screensaver: ScreensaverConfig | null;
 }
 
 export type ToApp =
@@ -38,7 +42,8 @@ export type ToCore =
   | { kind: 'launchApp' }
   | { kind: 'setLaunchAppOnDock'; enabled: boolean }
   | { kind: 'setAutomationEnabled'; enabled: boolean }
-  | { kind: 'setRuleEnabled'; ruleId: string; enabled: boolean };
+  | { kind: 'setRuleEnabled'; ruleId: string; enabled: boolean }
+  | { kind: 'setScreensaverConfig'; enabled: boolean; graceMs: number };
 
 export interface ControlTransport {
   postMessage(msg: ToApp): void;
@@ -48,6 +53,11 @@ export interface ControlTransport {
 interface GatewayLike {
   getClientCount(): number;
   getLastHelloAt(): number | null;
+  sendScreensaverConfig(config: ScreensaverConfig): void;
+}
+
+interface PhoneDisplayLike {
+  getStatus(): ScreensaverConfig | null;
 }
 
 interface TunnelLike {
@@ -75,6 +85,7 @@ export interface ControlChannelDeps {
   tunnelSupervisor: TunnelLike;
   presenceEngine: PresenceLike;
   automationEngine: AutomationLike;
+  phoneDisplay: PhoneDisplayLike;
   wsPort: number;
   watchdogTimeoutMs: number;
   /** The full known plugin registry's permission grants, not just the enabled subset -- a disabled plugin's chips should still be visible. */
@@ -133,6 +144,8 @@ export class ControlChannel {
     } else if (msg.kind === 'setRuleEnabled') {
       this.deps.automationEngine.setRuleEnabled(msg.ruleId, msg.enabled);
       this.pushSnapshot();
+    } else if (msg.kind === 'setScreensaverConfig') {
+      this.deps.gateway.sendScreensaverConfig({ enabled: msg.enabled, graceMs: msg.graceMs });
     }
   }
 
@@ -149,6 +162,7 @@ export class ControlChannel {
       plugins,
       automation: { enabled: this.deps.automationEngine.isEnabled(), rules: this.deps.automationEngine.getRules() },
       denialsToday: this.denialsToday,
+      screensaver: this.deps.phoneDisplay.getStatus(),
     };
   }
 }

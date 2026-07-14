@@ -245,4 +245,34 @@ describe('WsGateway', () => {
     expect(frame.type).toBe('widget.update');
     expect((frame.payload as any).widgets).toEqual([{ widgetId: 'weather', widget: { type: 'weather', props: { tempF: 70 } } }]);
   });
+
+  it('sendScreensaverConfig broadcasts an action.invoke frame targeting the phone (pluginId: phone-display)', () => {
+    const server = new FakeServer();
+    const gateway = new WsGateway({
+      port: 8787, heartbeatMs: 5000, getSnapshot: async () => [], onEventPublish: vi.fn(), wssFactory: () => server,
+    });
+    gateway.start();
+    const client = connectClient(server);
+    gateway.sendScreensaverConfig({ enabled: false, graceMs: 60000 });
+    const frame: Frame = JSON.parse(client.sent[0]);
+    expect(frame.type).toBe('action.invoke');
+    expect(frame.payload).toEqual({
+      pluginId: 'phone-display',
+      action: 'setScreensaverConfig',
+      args: { enabled: false, graceMs: 60000 },
+    });
+  });
+
+  it('sendScreensaverConfig sends to every connected client', () => {
+    const server = new FakeServer();
+    const gateway = new WsGateway({
+      port: 8787, heartbeatMs: 5000, getSnapshot: async () => [], onEventPublish: vi.fn(), wssFactory: () => server,
+    });
+    gateway.start();
+    const client1 = connectClient(server);
+    const client2 = connectClient(server);
+    gateway.sendScreensaverConfig({ enabled: true, graceMs: 120000 });
+    expect(client1.sent).toHaveLength(1);
+    expect(client2.sent).toHaveLength(1);
+  });
 });

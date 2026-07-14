@@ -1,4 +1,4 @@
-export type Screen = 'idle' | 'home' | 'system' | 'weather' | 'playing' | 'presence' | 'clock' | 'standby' | 'light';
+export type Screen = 'idle' | 'home' | 'system' | 'weather' | 'playing' | 'presence' | 'clock' | 'standby' | 'light' | 'settings';
 
 export interface StandbyInfo {
   name: string;

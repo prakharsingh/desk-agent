@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Animated, StyleSheet } from 'react-native';
-import type { Widget } from '@desk-agent/protocol';
+import type { Widget, ScreensaverConfig } from '@desk-agent/protocol';
 import type { ConnectionState } from '../wsClient.js';
 import type { SensorFrame } from './sensorFrame.js';
 import { computePixelShiftOffset } from '../oledMitigation.js';
@@ -16,10 +16,11 @@ import { StandbyScreen } from './screens/StandbyScreen.js';
 import { SystemDetail } from './screens/SystemDetail.js';
 import { WeatherDetail } from './screens/WeatherDetail.js';
 import { LightScreen } from './screens/LightScreen.js';
+import { SettingsScreen } from './screens/SettingsScreen.js';
 import type { LightColorPreset } from './lightColor.js';
 import { readSystemStats, readWeather } from './widgetReaders.js';
 import { derivePresence } from './derivePresence.js';
-import { shouldAutoIdle } from './autoIdle.js';
+import { shouldAutoIdleWithConfig } from './autoIdle.js';
 import { pushHistory } from './sparkline.js';
 import { STANDBY_VOICE, type ScreenState } from './screens.js';
 import type { TemperatureUnit } from './temperature.js';
@@ -28,13 +29,6 @@ const AMPLITUDE_PX = 2;
 const PERIOD_MS = 60000;
 const HISTORY_MAX_LEN = 40;
 
-// Local-inactivity grace period before AppShell auto-idles the display on its
-// own (independent of any Mac-driven presence automation). Chosen as a
-// deliberately generous 2 minutes so a person reading/glancing at the screen
-// without touching it isn't punished with an unexpected sleep; short enough
-// that an actually-abandoned desk display still self-idles for OLED safety
-// well within a normal work session.
-const GRACE_MS = 120000;
 const ACTIVITY_CHECK_INTERVAL_MS = 2000;
 
 export interface AppShellProps {
@@ -74,6 +68,9 @@ export interface AppShellProps {
   onBack: () => void;
   onSleep: () => void;
   onWake: () => void;
+  screensaverConfig: ScreensaverConfig;
+  onChangeScreensaverConfig: (config: ScreensaverConfig) => void;
+  onGoSettings: () => void;
 }
 
 export function AppShell({
@@ -105,6 +102,9 @@ export function AppShell({
   onBack,
   onSleep,
   onWake,
+  screensaverConfig,
+  onChangeScreensaverConfig,
+  onGoSettings,
 }: AppShellProps) {
   const translate = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
 
@@ -142,12 +142,12 @@ export function AppShell({
   useEffect(() => {
     const interval = setInterval(() => {
       if (screenState.screen === 'idle') return; // already idle -- don't repeatedly call onSleep
-      if (shouldAutoIdle(Date.now() - lastActivityRef.current, GRACE_MS)) {
+      if (shouldAutoIdleWithConfig(Date.now() - lastActivityRef.current, screensaverConfig)) {
         onSleep();
       }
     }, ACTIVITY_CHECK_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, [screenState.screen, onSleep]);
+  }, [screenState.screen, onSleep, screensaverConfig]);
 
   // Sensor-driven wake: a fresh positive local signal (face or motion) while
   // idle should wake the display, in addition to IdleScreen's own
@@ -288,6 +288,8 @@ export function AppShell({
         return <ClockScreen now={now} startedAt={startedAt} onBack={onBack} />;
       case 'standby':
         return <StandbyScreen standby={screenState.standby ?? STANDBY_VOICE} onBack={onBack} />;
+      case 'settings':
+        return <SettingsScreen config={screensaverConfig} onChange={onChangeScreensaverConfig} onBack={onBack} />;
       case 'home':
       default:
         return (
@@ -328,7 +330,7 @@ export function AppShell({
       }}
     >
       {!chromeless && (
-        <Header connectionState={connectionState} presence={presence} onSleep={onSleep} />
+        <Header connectionState={connectionState} presence={presence} onSleep={onSleep} onGoSettings={onGoSettings} />
       )}
       <View style={styles.body}>{renderScreen()}</View>
 

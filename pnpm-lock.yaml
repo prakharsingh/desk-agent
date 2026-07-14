@@ -20,6 +20,9 @@ importers:
       '@desk-agent/protocol':
         specifier: workspace:*
         version: link:../packages/protocol
+      '@react-native-async-storage/async-storage':
+        specifier: ^2.1.2
+        version: 2.2.0(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@20.1.0(typescript@5.9.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.17)(react@19.2.3))
       react:
         specifier: 19.2.3
         version: 19.2.3
@@ -1410,6 +1413,11 @@ packages:
     resolution: {integrity: sha512-8nKv6+0RJSL9FE4jYOEGXnPeM/Hg12qZpmqzZjRh3qM0Y7c3z1mrOTfFLids72RDQYVh9WpLEfR5WdpNX4fkig==}
     engines: {node: '>=18'}
     hasBin: true
+
+  '@react-native-async-storage/async-storage@2.2.0':
+    resolution: {integrity: sha512-gvRvjR5JAaUZF8tv2Kcq/Gbt3JHwbKFYfmb445rhOj6NUMx3qPLixmDx5pZAyb9at1bYvJ4/eTUipU5aki45xw==}
+    peerDependencies:
+      react-native: ^0.0.0-0 || >=0.65 <1.0
 
   '@react-native-community/cli-clean@20.1.0':
     resolution: {integrity: sha512-77L4DifWfxAT8ByHnkypge7GBMYpbJAjBGV+toowt5FQSGaTBDcBHCX+FFqFRukD5fH6i8sZ41Gtw+nbfCTTIA==}
@@ -2895,6 +2903,10 @@ packages:
     resolution: {integrity: sha512-41Cifkg6e8TylSpdtTpeLVMqvSBEVzTttHvERD741+pnZ8ANv0004MRL43QKPDlK9cGvNp6NZWZUBlbGXYxxng==}
     engines: {node: '>=0.12.0'}
 
+  is-plain-obj@2.1.0:
+    resolution: {integrity: sha512-YWnfyRwxL/+SsrWYfOpUtz5b3YD+nyfkHvjbcanzk8zgyO4ASD67uVMRt8k5bM4lLMDnXfriRhOpemw+NfT1eA==}
+    engines: {node: '>=8'}
+
   is-stream@2.0.1:
     resolution: {integrity: sha512-hFoiJiTl63nn+kstHGBtewWSKnQLpyb155KHheA1l39uvtO9nWIop1p3udqPcUd/xbF1VLMO4n7OI6p7RbngDg==}
     engines: {node: '>=8'}
@@ -3244,6 +3256,10 @@ packages:
 
   memoize-one@5.2.1:
     resolution: {integrity: sha512-zYiwtZUcYyXKo/np96AGZAckk+FWWsUdJ3cHGGmld7+AhvcWmQyGCYUh1hc4Q/pkOhb65dQR/pqCyK0cOaHz4Q==}
+
+  merge-options@3.0.4:
+    resolution: {integrity: sha512-2Sug1+knBjkaMsMgf1ctR1Ujx+Ayku4EdJN4Z+C2+JzoeF7A3OZ9KM2GY0CpQS51NR61LTurMJrRKPhSs3ZRTQ==}
+    engines: {node: '>=10'}
 
   merge-stream@2.0.0:
     resolution: {integrity: sha512-abv/qOcuPfk3URPfDzmZU1LKmuw8kT+0nIHvKrKgFrwifol/doWcdA4ZqsWQ8ENrFKkd67Mfpo/LovbIUsbt3w==}
@@ -5870,6 +5886,11 @@ snapshots:
     dependencies:
       playwright: 1.61.1
 
+  '@react-native-async-storage/async-storage@2.2.0(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@20.1.0(typescript@5.9.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.17)(react@19.2.3))':
+    dependencies:
+      merge-options: 3.0.4
+      react-native: 0.86.0(@babel/core@7.29.7)(@react-native-community/cli@20.1.0(typescript@5.9.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.17)(react@19.2.3)
+
   '@react-native-community/cli-clean@20.1.0':
     dependencies:
       '@react-native-community/cli-tools': 20.1.0
@@ -7655,6 +7676,8 @@ snapshots:
 
   is-number@7.0.0: {}
 
+  is-plain-obj@2.1.0: {}
+
   is-stream@2.0.1: {}
 
   is-unicode-supported@0.1.0: {}
@@ -8183,6 +8206,10 @@ snapshots:
   media-typer@0.3.0: {}
 
   memoize-one@5.2.1: {}
+
+  merge-options@3.0.4:
+    dependencies:
+      is-plain-obj: 2.1.0
 
   merge-stream@2.0.0: {}
 

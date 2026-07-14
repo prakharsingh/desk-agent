@@ -14,6 +14,7 @@ export function DevicePane({ snapshot }: { snapshot: StatusSnapshot | null }) {
   const [launchAtLoginError, setLaunchAtLoginError] = useState(false);
   const [dockWatchEnabled, setDockWatchEnabledState] = useState<boolean | null>(null);
   const [dockWatchError, setDockWatchError] = useState(false);
+  const [screensaverPending, setScreensaverPending] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -99,6 +100,15 @@ export function DevicePane({ snapshot }: { snapshot: StatusSnapshot | null }) {
     }
   }
 
+  async function handleScreensaverChange(enabled: boolean, graceMs: number) {
+    setScreensaverPending(true);
+    try {
+      await window.deskAgent.setScreensaverConfig(enabled, graceMs);
+    } finally {
+      setScreensaverPending(false);
+    }
+  }
+
   const lastHello = snapshot.clients.lastHelloAt ? new Date(snapshot.clients.lastHelloAt).toLocaleTimeString() : 'never';
   const tunnelValue = `${snapshot.device.tunnelStatus}${snapshot.device.lastReissueAt ? ` · ${new Date(snapshot.device.lastReissueAt).toLocaleTimeString()}` : ''}`;
   // Both actions run a bare adb command with no device disambiguation when
@@ -106,6 +116,10 @@ export function DevicePane({ snapshot }: { snapshot: StatusSnapshot | null }) {
   // selection, which is ambiguous/wrong if another adb device happens to be
   // attached. Disable rather than let that fire silently.
   const noDevicePaired = !snapshot.device.serial;
+  // The phone must have an open WebSocket connection to receive a
+  // setScreensaverConfig command at all -- distinct from noDevicePaired,
+  // which is a USB/adb-attachment signal, not a WS-liveness one.
+  const phoneNotConnected = snapshot.clients.connected === 0;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 22, maxWidth: 720 }}>
@@ -266,6 +280,62 @@ export function DevicePane({ snapshot }: { snapshot: StatusSnapshot | null }) {
             macOS didn't apply that change — showing the actual current setting.
           </p>
         )}
+      </section>
+
+      <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <GroupLabel>PHONE SCREENSAVER</GroupLabel>
+        <Group>
+          {snapshot.screensaver === null ? (
+            <div style={{ padding: '13px 16px' }}>
+              <span style={{ fontSize: 13, color: 'var(--text3)' }}>Loading…</span>
+            </div>
+          ) : (
+            <>
+              <Row
+                label="Enabled"
+                action={
+                  <Switch
+                    checked={snapshot.screensaver.enabled}
+                    onChange={(enabled) => handleScreensaverChange(enabled, snapshot.screensaver!.graceMs)}
+                    label=""
+                    disabled={screensaverPending || phoneNotConnected}
+                  />
+                }
+              />
+              <Row
+                label="Idle timeout"
+                value={`${snapshot.screensaver.graceMs / 60000} min`}
+                action={
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {[1, 2, 5, 10, 30].map((min) => {
+                      const active = snapshot.screensaver!.graceMs === min * 60000;
+                      return (
+                        <button
+                          key={min}
+                          type="button"
+                          onClick={() => handleScreensaverChange(snapshot.screensaver!.enabled, min * 60000)}
+                          disabled={screensaverPending || phoneNotConnected}
+                          style={{
+                            background: active ? accent.blue : 'none',
+                            border: '0.5px solid var(--fieldBorder)',
+                            borderRadius: 6,
+                            padding: '3px 8px',
+                            fontSize: 11,
+                            color: active ? '#fff' : screensaverPending || phoneNotConnected ? 'var(--text3)' : 'var(--text2)',
+                            cursor: screensaverPending || phoneNotConnected ? 'default' : 'pointer',
+                          }}
+                        >
+                          {min}m
+                        </button>
+                      );
+                    })}
+                  </div>
+                }
+                last
+              />
+            </>
+          )}
+        </Group>
       </section>
     </div>
   );

@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import type { Frame, Widget } from '@desk-agent/protocol';
+import { parseScreensaverConfig, type Frame, type ScreensaverConfig, type Widget } from '@desk-agent/protocol';
 import { WsClient, type ConnectionState } from './wsClient.js';
 import { AppShell } from './display/AppShell.js';
 import { INITIAL_SCREEN_STATE, STANDBY_DECK, STANDBY_VOICE, back, goTo, goToStandby, sleep, wake } from './display/screens.js';
 import { UNKNOWN_SENSOR_FRAME, mergeSensorFrame, resetSensorFrame, type SensorFrame } from './display/sensorFrame.js';
-import { buildMediaActionFrame, buildOverrideFrame } from './presenceEvents.js';
+import { DEFAULT_SCREENSAVER_CONFIG, loadScreensaverConfig, saveScreensaverConfig } from './display/screensaverConfig.js';
+import { buildMediaActionFrame, buildOverrideFrame, buildScreensaverConfigFrame } from './presenceEvents.js';
 
 const WS_URL = 'ws://localhost:8787';
 const HEARTBEAT_TIMEOUT_MS = 15000;
@@ -22,6 +23,20 @@ export default function App() {
   const [sensorFrame, setSensorFrame] = useState<SensorFrame>(UNKNOWN_SENSOR_FRAME);
   const [screenState, setScreenState] = useState(INITIAL_SCREEN_STATE);
   const [now, setNow] = useState(() => Date.now());
+  // null until the AsyncStorage load below resolves; AppShell/SettingsScreen
+  // always receive DEFAULT_SCREENSAVER_CONFIG as a fallback in the meantime
+  // (see the JSX below), matching today's pre-feature hardcoded behavior.
+  const [screensaverConfig, setScreensaverConfig] = useState<ScreensaverConfig | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadScreensaverConfig().then((config) => {
+      if (!cancelled) setScreensaverConfig(config);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const client = useMemo(
     () =>
@@ -33,6 +48,14 @@ export default function App() {
           setConnectionState(state);
         },
         onFrame: (frame: Frame) => {
+          if (frame.type === 'action.invoke' && frame.payload.pluginId === 'phone-display' && frame.payload.action === 'setScreensaverConfig') {
+            const result = parseScreensaverConfig(frame.payload.args);
+            if (result.ok) {
+              setScreensaverConfig(result.value);
+              void saveScreensaverConfig(result.value);
+            }
+            return;
+          }
           if (frame.type !== 'widget.update') return;
           setWidgets((prev: Record<string, Widget>) => {
             const next = { ...prev };
@@ -61,6 +84,25 @@ export default function App() {
   // every unrelated render instead of only on genuine lifecycle/reconnect
   // transitions.
   const sendFrame = useCallback((json: string) => client.send(json), [client]);
+
+  // Publishes the phone's current screensaver config to the Mac whenever it
+  // changes for ANY reason (local edit via SettingsScreen, or a remote
+  // change just applied above) AND on every fresh reconnect (connectionEpoch)
+  // -- both requirements from the design doc collapse into one effect. If
+  // this fires before the socket is actually open, WsClient.send() silently
+  // drops it (see wsClient.ts's doc comment) and the NEXT connectionEpoch
+  // change re-fires this effect and sends successfully -- no message that
+  // matters here is ever truly lost.
+  useEffect(() => {
+    if (screensaverConfig) sendFrame(JSON.stringify(buildScreensaverConfigFrame(screensaverConfig)));
+  }, [screensaverConfig, connectionEpoch, sendFrame]);
+
+  const onChangeScreensaverConfig = useCallback((config: ScreensaverConfig) => {
+    setScreensaverConfig(config);
+    void saveScreensaverConfig(config);
+  }, []);
+
+  const onGoSettings = useCallback(() => setScreenState((s) => goTo(s, 'settings')), []);
 
   // Real automation-override state, moved up from CameraPrivacySwitch (Slice
   // 1d on-device fix): flips local state and sends the same
@@ -151,9 +193,12 @@ export default function App() {
       onGoVoice={onGoVoice}
       onGoDeck={onGoDeck}
       onGoLight={onGoLight}
+      onGoSettings={onGoSettings}
       onBack={onBack}
       onSleep={onSleep}
       onWake={onWake}
+      screensaverConfig={screensaverConfig ?? DEFAULT_SCREENSAVER_CONFIG}
+      onChangeScreensaverConfig={onChangeScreensaverConfig}
     />
   );
 }

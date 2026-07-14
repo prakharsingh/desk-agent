@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@desk-agent/protocol": "workspace:*",
+    "@react-native-async-storage/async-storage": "^2.1.2",
     "react": "19.2.3",
     "react-native": "0.86.0",
     "react-native-nitro-image": "^0.15.1",

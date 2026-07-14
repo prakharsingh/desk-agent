@@ -38,4 +38,8 @@ describe('screens reducer', () => {
     const idle = sleep(INITIAL_SCREEN_STATE);
     expect(wake(idle).screen).toBe('home');
   });
+
+  it('goTo navigates to the settings screen', () => {
+    expect(goTo(INITIAL_SCREEN_STATE, 'settings').screen).toBe('settings');
+  });
 });

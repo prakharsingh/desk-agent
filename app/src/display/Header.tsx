@@ -9,6 +9,7 @@ export interface HeaderProps {
   connectionState: ConnectionState;
   presence: PresenceView;
   onSleep: () => void;
+  onGoSettings: () => void;
 }
 
 // Cosmetic build label only -- not read from package.json to avoid coupling
@@ -16,7 +17,7 @@ export interface HeaderProps {
 // alongside real release milestones.
 const VERSION_LABEL = 'v0.2.0';
 
-export function Header({ connectionState, presence, onSleep }: HeaderProps) {
+export function Header({ connectionState, presence, onSleep, onGoSettings }: HeaderProps) {
   const chip = connectionChip(connectionState);
 
   return (
@@ -38,6 +39,10 @@ export function Header({ connectionState, presence, onSleep }: HeaderProps) {
           <View style={[styles.dot, { backgroundColor: presence.color }]} />
           <Text style={[styles.chipLabel, { color: presence.color }]}>{presence.label}</Text>
         </View>
+
+        <Pressable onPress={onGoSettings} hitSlop={8}>
+          <Text style={styles.sleepGlyph}>⚙</Text>
+        </Pressable>
 
         <Pressable onPress={onSleep} hitSlop={8}>
           <Text style={styles.sleepGlyph}>◑</Text>

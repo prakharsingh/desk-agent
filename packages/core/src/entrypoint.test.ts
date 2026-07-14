@@ -216,3 +216,31 @@ describe('boot with presenceEngine', () => {
     expect(onLog).not.toHaveBeenCalled();
   });
 });
+
+describe('boot with screensaverConfigStore', () => {
+  it('does not throw when no screensaverConfigStore is provided (standalone node path)', () => {
+    const deps = makeMinimalBootDeps();
+    expect(() => {
+      boot(deps);
+      deps.eventBus.publish({ eventName: 'screensaver.config', data: { enabled: true, graceMs: 120000 } });
+    }).not.toThrow();
+  });
+
+  it('forwards a valid screensaver.config payload to the store', () => {
+    const deps = makeMinimalBootDeps();
+    const screensaverConfigStore = { setConfig: vi.fn(), getStatus: vi.fn(() => null) } as any;
+    boot({ ...deps, screensaverConfigStore });
+    deps.eventBus.publish({ eventName: 'screensaver.config', data: { enabled: false, graceMs: 60000 } });
+    expect(screensaverConfigStore.setConfig).toHaveBeenCalledWith({ enabled: false, graceMs: 60000 });
+  });
+
+  it('drops a malformed screensaver.config payload and logs it, without calling the store', () => {
+    const deps = makeMinimalBootDeps();
+    const screensaverConfigStore = { setConfig: vi.fn(), getStatus: vi.fn(() => null) } as any;
+    const onLog = vi.fn();
+    boot({ ...deps, screensaverConfigStore, onLog });
+    deps.eventBus.publish({ eventName: 'screensaver.config', data: { enabled: 'not-a-boolean' } });
+    expect(screensaverConfigStore.setConfig).not.toHaveBeenCalled();
+    expect(onLog).toHaveBeenCalledWith('error', expect.stringContaining('screensaver.config'));
+  });
+});

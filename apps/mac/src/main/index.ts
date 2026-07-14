@@ -153,6 +153,8 @@ if (!gotLock) {
   // the renderer trusts isInstalled()'s answer, not an assumed success.
   ipcMain.handle('dockwatch:getEnabled', () => dockWatch.isInstalled());
   ipcMain.handle('dockwatch:setEnabled', (_event, enabled: boolean) => (enabled ? dockWatch.install() : dockWatch.uninstall()));
+  ipcMain.handle('status:setScreensaverConfig', (_event, enabled: boolean, graceMs: number) =>
+    sendToCore({ kind: 'setScreensaverConfig', enabled, graceMs }));
 
   function sendToCore(msg: ToCore) {
     supervisor?.sendToCore(msg);
