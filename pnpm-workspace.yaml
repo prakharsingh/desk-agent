@@ -5,3 +5,5 @@ packages:
 allowBuilds:
   electron-winstaller: false
   esbuild: true
+overrides:
+  fast-xml-parser: '>=5.7.0'
