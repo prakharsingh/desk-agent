@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Desk Agent OS — README banner</title>
+<!-- Source for docs/assets/banner.png. Regenerate with:
+     npx playwright screenshot --viewport-size=1600,800 docs/assets/banner.html docs/assets/banner.png -->
+<meta name="hz:slide-selector" content=".banner" />
+<meta name="hz:canvas-width" content="1600" />
+<meta name="hz:canvas-height" content="800" />
+<link rel="stylesheet" href="https://use.typekit.net/dqx2ghy.css">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; }
+
+  .banner {
+    position: relative;
+    width: 1600px;
+    height: 800px;
+    background:
+      radial-gradient(1100px 700px at 78% 30%, #101710 0%, #070a07 55%, #050705 100%);
+    overflow: hidden;
+    font-family: "input-mono", monospace;
+    color: #e6efe6;
+  }
+
+  /* faint terminal grid */
+  .grid {
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(74, 222, 128, 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(74, 222, 128, 0.05) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+
+  /* app-style header bar */
+  .hdr {
+    position: absolute; top: 44px; left: 90px; right: 570px;
+    display: flex; align-items: center; gap: 28px;
+    font-size: 17px; letter-spacing: 5px; color: #9fb49f;
+  }
+  .hdr .brand { color: #e6efe6; font-weight: 700; }
+  .hdr .ver { color: #55665a; letter-spacing: 2px; }
+  .hdr .spacer { flex: 1; }
+  .dot { display: inline-block; width: 11px; height: 11px; border-radius: 50%; margin-right: 9px; vertical-align: 1px; }
+  .dot.green { background: #4ade80; box-shadow: 0 0 12px rgba(74,222,128,.8); }
+  .dot.dim { background: #4ade80; opacity: .45; }
+  .live { color: #4ade80; }
+
+  .title {
+    position: absolute; top: 158px; left: 84px;
+    font-family: "tchig-mono", monospace;
+    font-weight: 900;
+    font-size: 148px;
+    line-height: .94;
+    letter-spacing: 2px;
+    color: #f2f7f2;
+    text-shadow: 0 0 44px rgba(74, 222, 128, 0.28);
+  }
+  .title .accent { color: #4ade80; }
+
+  .tagline {
+    position: absolute; top: 348px; left: 90px; width: 760px;
+    font-size: 25px; line-height: 1.55; color: #b7c6b7;
+  }
+  .tagline b { color: #e6efe6; font-weight: 700; }
+
+  /* protocol flow diagram */
+  .flow {
+    position: absolute; top: 494px; left: 90px; width: 800px;
+    font-size: 18px; color: #7d917d;
+  }
+  .flow .node {
+    display: inline-block; padding: 12px 22px;
+    border: 1px solid #2c3a2c; border-radius: 8px;
+    background: rgba(10, 16, 10, 0.9);
+    color: #dbe7db; font-weight: 700; letter-spacing: 3px; font-size: 17px;
+  }
+  .flow .wires { display: inline-block; vertical-align: middle; margin: 0 20px; text-align: center; }
+  .flow .wire { display: block; letter-spacing: 0; line-height: 1.9; white-space: nowrap; }
+  .flow .wire .fn { color: #4ade80; }
+
+  /* bottom chip strip, audit-packs style */
+  .strip {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 96px;
+    background: #0a120a;
+    border-top: 1px solid #1f2d1f;
+    display: flex; align-items: center; justify-content: center; gap: 22px;
+    padding: 0 40px;
+  }
+  .chip {
+    padding: 12px 24px;
+    border: 1px solid #2f4a2f; border-radius: 999px;
+    color: #9fdf9f; font-size: 17px; letter-spacing: 1px; white-space: nowrap;
+    background: rgba(74, 222, 128, 0.06);
+  }
+
+  /* phone mockup with the real dashboard screenshot */
+  .phone {
+    position: absolute; top: 64px; right: 118px;
+    width: 292px; height: 620px;
+    border-radius: 40px;
+    border: 3px solid #2a352a;
+    background: #000;
+    box-shadow: 0 30px 80px rgba(0,0,0,.75), 0 0 70px rgba(74,222,128,.12);
+    overflow: hidden;
+    transform: rotate(-2.5deg);
+  }
+  .phone img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
+
+  /* usb cable hint from flow to phone */
+  .cable {
+    position: absolute; top: 560px; right: 428px; width: 210px;
+    border-top: 2px dashed #34503a; transform: rotate(-14deg);
+  }
+  .cable::after {
+    content: "usb"; position: absolute; top: -30px; right: 66px;
+    color: #55785d; font-size: 15px; letter-spacing: 4px;
+    font-family: "input-mono", monospace;
+  }
+</style>
+</head>
+<body>
+  <div class="banner" data-canvas-width="1600" data-canvas-height="800">
+    <div class="grid"></div>
+
+    <div class="hdr">
+      <span class="brand">DESK · AGENT</span><span class="ver">OS</span>
+      <span class="spacer"></span>
+      <span class="live"><span class="dot green"></span>LIVE</span>
+      <span><span class="dot dim"></span>PRESENT</span>
+    </div>
+
+    <h1 class="title">DESK<span class="accent">·</span>AGENT</h1>
+
+    <p class="tagline">An old Android phone, docked next to a Mac, becomes a
+    <b>live desk dashboard</b> and an <b>honest presence sensor</b> — the
+    display sleeps when you leave, wakes when you're back.</p>
+
+    <div class="flow">
+      <span class="node">MAC CORE</span><span class="wires">
+        <span class="wire"><span class="fn">widget.update</span> ──────▶</span>
+        <span class="wire">◀────── <span class="fn">sensor.face_visible</span></span>
+      </span><span class="node">PHONE</span>
+    </div>
+
+    <div class="cable"></div>
+
+    <div class="phone"><img src="../design-review/screenshots/01-dashboard-home.png"
+         width="292" height="620" alt="Desk Agent dashboard on a docked phone" /></div>
+
+    <div class="strip">
+      <span class="chip">honest signals</span>
+      <span class="chip">on-device MLKit</span>
+      <span class="chip">hysteresis auto-sleep</span>
+      <span class="chip">websocket over usb</span>
+      <span class="chip">MIT · free forever</span>
+    </div>
+  </div>
+</body>
+</html>

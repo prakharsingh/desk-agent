@@ -2,6 +2,10 @@
 
 **v0.3.0** · 516 vitest + 57 Jest component + 9 JUnit/Robolectric tests passing · [Changelog](CHANGELOG.md)
 
+<p align="center">
+  <img src="docs/assets/banner.png" alt="Desk Agent OS — an old Android phone, docked next to a Mac, becomes a live desk dashboard and an honest presence sensor" width="100%" />
+</p>
+
 An old Android phone, docked next to a Mac, becomes a live desk dashboard and
 an honest presence sensor. A Mac-side Node "brain" drives what the phone shows
 and reacts to what the phone honestly reports seeing — starting with
