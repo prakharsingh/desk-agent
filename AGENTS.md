@@ -69,8 +69,6 @@ apps/
   mac/                     Electron menu-bar app: forks the core as a supervised
                            utilityProcess, tray + settings window, talks to the
                            core over controlChannel.ts (never over the phone WS)
-  spike-electron/          kept-for-reference Phase 0 packaging spike — superseded
-                           by apps/mac, don't build on it
 ```
 
 ## Data flow (the one loop everything hangs off)

@@ -47,7 +47,6 @@ Three design commitments explain most of the code you'll read:
 | `packages/core` | The Mac-side brain: gateway, event bus, worker host, presence + automation engines, tunnel supervisor, watchdog. | [→](../packages/core/README.md) |
 | `app/` | The React Native phone app: dashboard UI + camera pipeline. | [→](../app/README.md) |
 | `apps/mac` | The Electron menu-bar app that runs the core for you. | [→](../apps/mac/README.md) |
-| `apps/spike-electron` | A kept-for-reference Phase 0 spike. Superseded — don't build on it. | [→](../apps/spike-electron/README.md) |
 
 Suggested first reading session (~1 hour): `protocol/src/schema.ts` →
 `plugin-sdk/src/types.ts` → `plugins/weather/src/index.ts` →

@@ -23,9 +23,10 @@ version for the whole monorepo, not per-package — see
   lock so a second launch can't collide on the gateway port, atomic
   Zod-validated config writes with a debounced core restart on change, and
   unsigned arm64 packaging via electron-builder
-  (`pnpm --filter @desk-agent/mac pack`). The Phase 0 de-risking spike that
-  proved the core boots inside a packaged Electron `utilityProcess` is kept
-  as `apps/spike-electron` for reference only.
+  (`pnpm --filter @desk-agent/mac pack`). Built on a Phase 0 de-risking
+  spike (`apps/spike-electron`, since removed — retrievable from git
+  history) that proved the core boots inside a packaged Electron
+  `utilityProcess`.
 - **`@desk-agent/config-schema` package**: the core's Zod config schema
   extracted into a Node-free package so the Electron renderer (a browser
   context with no `fs`) can validate and edit the same schema the core

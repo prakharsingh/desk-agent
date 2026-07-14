@@ -152,19 +152,6 @@ importers:
         specifier: ^2.1.0
         version: 2.1.9(@types/node@26.1.1)(terser@5.49.0)
 
-  apps/spike-electron:
-    dependencies:
-      '@desk-agent/core':
-        specifier: workspace:*
-        version: link:../../packages/core
-    devDependencies:
-      electron:
-        specifier: ^43.1.0
-        version: 43.1.0
-      electron-builder:
-        specifier: ^26.15.3
-        version: 26.15.3(electron-builder-squirrel-windows@26.15.3)
-
   packages/config-schema:
     dependencies:
       '@desk-agent/protocol':
