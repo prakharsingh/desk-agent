@@ -45,13 +45,13 @@ Three design commitments explain most of the code you'll read:
 | `packages/plugins/*` | The three shipped plugins — smallest real examples of the whole model. | [→](../packages/plugins/README.md) |
 | `packages/config-schema` | Node-free config schema shared by core and the Mac renderer. | [→](../packages/config-schema/README.md) |
 | `packages/core` | The Mac-side brain: gateway, event bus, worker host, presence + automation engines, tunnel supervisor, watchdog. | [→](../packages/core/README.md) |
-| `app/` | The React Native phone app: dashboard UI + camera pipeline. | [→](../app/README.md) |
+| `apps/android/` | The React Native phone app: dashboard UI + camera pipeline. | [→](../apps/android/README.md) |
 | `apps/mac` | The Electron menu-bar app that runs the core for you. | [→](../apps/mac/README.md) |
 
 Suggested first reading session (~1 hour): `protocol/src/schema.ts` →
 `plugin-sdk/src/types.ts` → `plugins/weather/src/index.ts` →
 `core/src/entrypoint.ts` → `core/src/presenceEngine.ts` (skim the tests —
-they're the spec) → `app/src/App.tsx`.
+they're the spec) → `apps/android/src/App.tsx`.
 
 ## Working without the hardware
 
@@ -61,7 +61,7 @@ You don't need a OnePlus 6T to contribute. What runs where:
   plugins, config-schema, and all of the app's pure logic) runs anywhere
   Node 20+ does. This is where presence logic, protocol changes, plugin
   work, and most display logic get developed and proven.
-- **`cd app && pnpm test:components`** — Jest RN component tests, also
+- **`cd apps/android && pnpm test:components`** — Jest RN component tests, also
   hardware-free.
 - **Core agent standalone** — `node packages/core/dist/main.js` runs fine on
   any Mac; you'll see widgets update in the logs even with no phone.
@@ -79,8 +79,8 @@ You don't need a OnePlus 6T to contribute. What runs where:
 | Runner | Files | Run | Why separate |
 |---|---|---|---|
 | Vitest (root) | all `*.test.ts` | `pnpm test` | pure logic everywhere; can't parse RN's Flow source, so never `.tsx` |
-| Jest (`app/`) | `app/src/**/*.test.tsx` | `cd app && pnpm test:components` | real RN component rendering; `render`/`fireEvent` are async — always `await` |
-| Gradle (`app/android/`) | Kotlin JUnit/MockK/Robolectric | `./gradlew test` | the two in-repo native modules |
+| Jest (`apps/android/`) | `apps/android/src/**/*.test.tsx` | `cd apps/android && pnpm test:components` | real RN component rendering; `render`/`fireEvent` are async — always `await` |
+| Gradle (`apps/android/android/`) | Kotlin JUnit/MockK/Robolectric | `./gradlew :app:testDebugUnitTest` | the two in-repo native modules |
 
 Vitest resolves cross-package imports against **built `dist/`** — run
 `pnpm build` after touching a package others import, or tests see stale
@@ -93,7 +93,7 @@ Good first contributions, roughly in ascending ambition:
 1. **Docs/wiki** — hardware compatibility notes if you run this on a
    different phone/Mac are explicitly wanted.
 2. **A pure-logic fix or test** — formatters, readers, geometry, thresholds
-   under `app/src/display/` and `app/src/presence/` are all pure `.ts` with
+   under `apps/android/src/display/` and `apps/android/src/presence/` are all pure `.ts` with
    focused tests.
 3. **A new plugin** — the most self-contained real feature. Follow
    [guides/writing-a-plugin.md](guides/writing-a-plugin.md).

@@ -80,7 +80,7 @@ phone) and the full manual verification checklist, see **[SETUP.md](SETUP.md)**.
   [plugin-sdk](packages/plugin-sdk/README.md) ·
   [plugins](packages/plugins/README.md) ·
   [config-schema](packages/config-schema/README.md) ·
-  [phone app](app/README.md) · [macOS app](apps/mac/README.md).
+  [phone app](apps/android/README.md) · [macOS app](apps/mac/README.md).
 
 **Project**
 

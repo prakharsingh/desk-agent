@@ -8,7 +8,7 @@ Desk Agent OS is a TypeScript pnpm monorepo split across two processes:
    "brain." A WebSocket gateway, a typed event bus, a `worker_threads`-based
    plugin host with a capability-object permission model, an automation
    engine, and (since Slice 1b) a presence-fusion state machine.
-2. **The phone app** (`app/`, React Native, runs on a docked Android phone) —
+2. **The phone app** (`apps/android/`, React Native, runs on a docked Android phone) —
    a thin sensor + display. Renders dashboard widgets the core pushes to it,
    and reports honest, on-device-derived signals back.
 

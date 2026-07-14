@@ -47,7 +47,8 @@ packages/
     weather/       polled weather widget (net:api.weather)
     energy-saver/  subscribes to person_present, calls `pmset displaysleepnow`
                    (sys:control-display)
-app/
+apps/
+ android/        The phone app (React Native):
   src/
     App.tsx              top-level RN component, WS client wiring
     wsClient.ts           WebSocket client, heartbeat ACK, reconnect/backoff
@@ -65,8 +66,7 @@ app/
                            AppShell, HomeScreen, screens/, ui/ primitives)
   android/                 native Android project (foreground service, manifest,
                            Brightness + PresenceService Kotlin modules)
-apps/
-  mac/                     Electron menu-bar app: forks the core as a supervised
+ mac/                      Electron menu-bar app: forks the core as a supervised
                            utilityProcess, tray + settings window, talks to the
                            core over controlChannel.ts (never over the phone WS)
 ```
@@ -104,8 +104,8 @@ the bar for a change to be considered done.
 `*.test.ts`, never `*.test.tsx` — Vitest's Rollup/esbuild pipeline can't
 parse `react-native`'s raw Flow source at all. `.tsx` component tests
 (render + interaction, via `@testing-library/react-native`) live in
-`app/`'s own `jest.config.js`/`app/package.json`'s `test:components` script
-(`cd app && pnpm test:components`), a second, `app/`-scoped runner that
+`apps/android/`'s own `jest.config.js`/`apps/android/package.json`'s `test:components` script
+(`cd apps/android && pnpm test:components`), a second, `apps/android/`-scoped runner that
 never overlaps with Vitest's file glob. Two API quirks worth knowing before
 writing one: `render()` and `fireEvent.press()` are both **async** in the
 installed `@testing-library/react-native` version — forgetting `await`
@@ -167,14 +167,14 @@ reach for a `.tsx` Jest test only for genuinely view-level behavior
 | Change presence fusion/hysteresis logic | `packages/core/src/presenceEngine.ts` |
 | Change an automation rule | `packages/core/src/automationEngine.ts` |
 | Add a new plugin | `packages/plugins/<name>/`, register in `configLoader.ts`'s `enabledPlugins` default |
-| Change camera signal derivation (gaze/motion thresholds) | `app/src/presence/signalDeriver.ts` |
-| Change how/when sensor events are emitted | `app/src/presence/edgeEmitter.ts` |
-| Touch Android foreground-service / manifest | `app/android/app/src/main/` |
+| Change camera signal derivation (gaze/motion thresholds) | `apps/android/src/presence/signalDeriver.ts` |
+| Change how/when sensor events are emitted | `apps/android/src/presence/edgeEmitter.ts` |
+| Touch Android foreground-service / manifest | `apps/android/android/apps/android/src/main/` |
 | Add/change a config field | `packages/config-schema/src/index.ts` (+ `config.example.json`) |
 | Change the Mac app's settings UI | `apps/mac/src/renderer/src/panes/` |
 | Change app↔core status/commands | `packages/core/src/controlChannel.ts` + `apps/mac/src/main/index.ts` + `preload` |
 | Touch macOS permission handling | `packages/core/macos-notes/PERMISSIONS.md` |
-| Touch Android keep-awake/battery/OEM setup | `app/android-notes/RELIABILITY.md` |
+| Touch Android keep-awake/battery/OEM setup | `apps/android/android-notes/RELIABILITY.md` |
 
 ## What not to touch without a strong reason
 

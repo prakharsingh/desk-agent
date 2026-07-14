@@ -28,7 +28,7 @@ pnpm test          # full vitest suite, all packages (watch mode: `pnpm vitest`)
 ```
 
 If `pnpm test` fails on a fresh clone, run `pnpm build` first — Vitest
-resolves cross-package imports (e.g. `app` importing `@desk-agent/protocol`)
+resolves cross-package imports (e.g. the phone app importing `@desk-agent/protocol`)
 against built `dist/` output, not source.
 
 ## 2. Configure the core agent
@@ -97,7 +97,7 @@ MLKit face-detection frame processor) is a native build — there's no
 Metro-only JS path for testing presence detection; you need it on a device.
 
 ```bash
-cd app
+cd apps/android
 pnpm install          # if not already covered by the root install
 pnpm android           # react-native run-android — builds & installs the debug APK
 ```
@@ -112,7 +112,7 @@ Grant the Camera permission when prompted. Once running:
 
 **Before trusting this on OxygenOS (or any aggressive-background-kill OEM
 ROM) long-term**, do the manual, non-programmatic setup steps in
-**[app/android-notes/RELIABILITY.md](app/android-notes/RELIABILITY.md)**:
+**[apps/android/android-notes/RELIABILITY.md](apps/android/android-notes/RELIABILITY.md)**:
 disabling battery optimization for the app and enabling OEM
 autostart/protected-app allowlisting. Neither can be set from code; skipping
 them means the OS can silently kill the app and you'll only find out via the

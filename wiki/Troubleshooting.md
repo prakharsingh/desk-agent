@@ -56,7 +56,7 @@
 - This is expected on aggressive OEM ROMs (OxygenOS in particular) unless
   you've done the manual, non-programmatic setup: disabling battery
   optimization for the app and enabling OEM autostart/protected-app
-  allowlisting. See `app/android-notes/RELIABILITY.md` in the main repo —
+  allowlisting. See `apps/android/android-notes/RELIABILITY.md` in the main repo —
   these steps genuinely cannot be set from code, and skipping them is the
   #1 cause of "it worked yesterday, now it's dead" reports.
 - The Mac-side watchdog can't revive a killed app — it can only detect and
@@ -87,12 +87,12 @@
 ## Build issues
 
 **`vitest run` fails on a fresh clone**
-- Run `pnpm build` first. Vitest resolves cross-package imports (e.g. `app`
+- Run `pnpm build` first. Vitest resolves cross-package imports (e.g. the phone app
   importing `@desk-agent/protocol`) against built `dist/` output.
 
 **Native build fails on the VisionCamera / Nitro Modules chain**
 - This dependency chain is a three-package version-alignment story
   (`react-native-vision-camera`, `react-native-nitro-modules`, the worklets
   package) — a version mismatch across those three is the most likely cause
-  of a native build failure. Check `app/package.json` for the currently
+  of a native build failure. Check `apps/android/package.json` for the currently
   pinned, known-working combination before bisecting versions yourself.

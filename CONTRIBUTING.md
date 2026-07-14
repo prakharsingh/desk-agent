@@ -8,7 +8,7 @@ opinionated project — please read this before opening a PR.
 See [SETUP.md](SETUP.md) for a from-zero build/run guide, and
 [AGENTS.md](AGENTS.md) for the architecture map and the conventions that are
 load-bearing rather than stylistic — read that before touching
-`presenceEngine.ts`, the protocol schema, or anything under `app/src/presence/`.
+`presenceEngine.ts`, the protocol schema, or anything under `apps/android/src/presence/`.
 
 New to the codebase? **[docs/ONBOARDING.md](docs/ONBOARDING.md)** is the
 guided tour (including how to contribute without the reference hardware),

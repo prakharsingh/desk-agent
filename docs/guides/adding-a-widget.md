@@ -36,34 +36,34 @@ Adding a widget id/type is **additive** — do not bump `PROTOCOL_VERSION`.
 
 ## 3. Render it (phone side)
 
-In `app/src/`:
+In `apps/android/src/`:
 
 1. **Reader** — add a `read<YourWidget>()` to
-   `app/src/display/widgetReaders.ts`: pull typed values out of
+   `apps/android/src/display/widgetReaders.ts`: pull typed values out of
    `widget.props` defensively (`null`/`—` on anything missing). Write its
    Vitest test first; the existing readers show the pattern, including
    details like "an absent weather widget is treated as stale" — never claim
    LIVE for data you don't have.
 2. **Renderer resolution** — add your `widget.type` to `KNOWN_KINDS` in
-   `app/src/widgets/renderWidget.ts` so it stops resolving to `'broken'`.
-3. **Home card** — add a card in `app/src/display/HomeScreen.tsx`, gated by
+   `apps/android/src/widgets/renderWidget.ts` so it stops resolving to `'broken'`.
+3. **Home card** — add a card in `apps/android/src/display/HomeScreen.tsx`, gated by
    `isVisible('<your-id>')` like the existing cards, using the `ui/`
    primitives (`Card`, `Badge`, `IconChip`, `Sparkline`, …) and the shared
    `theme.ts` — don't invent new colors/spacing.
 4. **Detail screen (optional)** — if the card should tap through, add a
-   screen under `app/src/display/screens/`, a `Screen` union member +
+   screen under `apps/android/src/display/screens/`, a `Screen` union member +
    transitions in `screens.ts`, and the switch case in `AppShell.tsx`.
 
 Testing split (see `AGENTS.md`): pure logic (readers, formatters,
 geometry) → `.ts` + Vitest; genuinely view-level behavior (conditional
-rendering, tap wiring) → `.tsx` + Jest in `app/` (`pnpm test:components`,
+rendering, tap wiring) → `.tsx` + Jest in `apps/android/` (`pnpm test:components`,
 and remember `render()`/`fireEvent.press()` are async there).
 
 ## 4. Verify end to end
 
 ```bash
 pnpm build && pnpm test        # Vitest green
-cd app && pnpm test:components # Jest green
+cd apps/android && pnpm test:components # Jest green
 pnpm android                   # on-device: card renders with live values,
                                # toggles off from the Mac Widgets pane,
                                # unknown data degrades to — not garbage

@@ -61,4 +61,4 @@ body:
       label: Before filing
       options:
         - label: I checked the [Troubleshooting wiki page](https://github.com/prakharsingh/desk-agent/wiki/Troubleshooting)
-        - label: For background-kill issues, I did the manual steps in app/android-notes/RELIABILITY.md
+        - label: For background-kill issues, I did the manual steps in apps/android/android-notes/RELIABILITY.md

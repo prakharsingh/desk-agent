@@ -8,7 +8,7 @@
 
 - [ ] Tests written first; new behavior has a failing-then-passing test
 - [ ] `pnpm build && pnpm test` clean (there is no CI — this local run is the gate)
-- [ ] `cd app && pnpm test:components` clean, if `app/` `.tsx` was touched
+- [ ] `cd apps/android && pnpm test:components` clean, if `apps/android/` `.tsx` was touched
 - [ ] Conventional-commit style messages (`feat:`, `fix:`, `docs:`, …)
 
 ## Extra-scrutiny surfaces (delete if untouched)

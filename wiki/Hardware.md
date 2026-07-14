@@ -41,7 +41,7 @@ if you're running this on different hardware, budget time for:
 - **OEM background-kill behavior** — battery-optimization exemption and
   autostart/protected-app allowlisting are manual, OEM-specific steps (see
   [SETUP.md](https://github.com/prakharsingh/desk-agent/blob/main/SETUP.md)
-  and `app/android-notes/RELIABILITY.md`) that vary across Xiaomi, Samsung,
+  and `apps/android/android-notes/RELIABILITY.md`) that vary across Xiaomi, Samsung,
   Huawei, Oppo, and others. There's no way to set these programmatically.
 - **MLKit accuracy/threshold tuning** — the gaze-at-screen yaw/pitch
   thresholds in `signalDeriver.ts` were tightened based on MLKit's documented
