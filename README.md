@@ -32,6 +32,17 @@ The Mac side runs either as a plain Node process or inside the native
 a settings window for config/plugins/widgets/automation, launch-at-login,
 and auto-start when the phone is docked — no terminal required.
 
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/design-review/screenshots/01-dashboard-home.png" width="200" alt="Dashboard home: clock, system stats, weather, presence, now playing, and chin light tiles"/><br/><sub>Dashboard</sub></td>
+    <td align="center"><img src="docs/design-review/screenshots/05-presence-detail.png" width="200" alt="Presence screen: raw sensor frame reporting UNKNOWN with detection off, failing safe to present"/><br/><sub>Presence (honest signals)</sub></td>
+    <td align="center"><img src="docs/design-review/screenshots/04-weather-detail.png" width="200" alt="Weather detail: current conditions and 7-day Open-Meteo forecast"/><br/><sub>Weather</sub></td>
+    <td align="center"><img src="docs/design-review/screenshots/03-system-detail.png" width="200" alt="System detail: live CPU and RAM sparklines streamed from the Mac"/><br/><sub>System stats</sub></td>
+  </tr>
+</table>
+
 ## Roadmap
 
 | Slice | Status | Delivers |
