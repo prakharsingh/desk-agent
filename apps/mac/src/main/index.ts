@@ -124,6 +124,8 @@ if (!gotLock) {
   ipcMain.handle('status:getSnapshot', () => latestSnapshot);
   ipcMain.handle('status:getLogs', () => logBuffer.getAll());
   ipcMain.handle('status:reissueTunnel', () => sendToCore({ kind: 'reissueTunnel' }));
+  ipcMain.handle('status:launchApp', () => sendToCore({ kind: 'launchApp' }));
+  ipcMain.handle('status:setLaunchAppOnDock', (_event, enabled: boolean) => sendToCore({ kind: 'setLaunchAppOnDock', enabled }));
   ipcMain.handle('status:setAutomationEnabled', (_event, enabled: boolean) => sendToCore({ kind: 'setAutomationEnabled', enabled }));
   ipcMain.handle('status:setRuleEnabled', (_event, ruleId: string, enabled: boolean) => sendToCore({ kind: 'setRuleEnabled', ruleId, enabled }));
   // A main-process-only concern (see binaries.ts): whether adb/nowplaying-cli

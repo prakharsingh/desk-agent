@@ -59,10 +59,6 @@ local LLMs/multi-device → marketplace):
   `worker_threads`, since a plugin can `require()` `child_process`/`net`
   directly and bypass the capability object today. Not safe for untrusted
   third-party plugin code until that's addressed.
-- Auto-launch the app on USB dock — today the tunnel supervisor only
-  re-issues `adb reverse` on device attach; the app itself has to be opened
-  manually every time (discovered during Slice 1c hardware verification,
-  2026-07-12).
 
 ## Design philosophy
 

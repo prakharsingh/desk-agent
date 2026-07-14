@@ -17,6 +17,14 @@ const api = {
   getSnapshot: (): Promise<StatusSnapshot | null> => ipcRenderer.invoke('status:getSnapshot'),
   getLogs: (): Promise<LogEntry[]> => ipcRenderer.invoke('status:getLogs'),
   reissueTunnel: (): Promise<void> => ipcRenderer.invoke('status:reissueTunnel'),
+  // Manual "Launch now" (Device pane) and the on-dock auto-launch toggle --
+  // both live, session-scoped core state surfaced via the snapshot's
+  // device.appLaunchStatus/launchAppOnDock fields, same pattern as
+  // reissueTunnel/setAutomationEnabled (not a separate get/set-with-readback
+  // pair like the OS-backed login/dockwatch toggles below, since this can't
+  // be silently refused by the OS).
+  launchApp: (): Promise<void> => ipcRenderer.invoke('status:launchApp'),
+  setLaunchAppOnDock: (enabled: boolean): Promise<void> => ipcRenderer.invoke('status:setLaunchAppOnDock', enabled),
   setAutomationEnabled: (enabled: boolean): Promise<void> => ipcRenderer.invoke('status:setAutomationEnabled', enabled),
   setRuleEnabled: (ruleId: string, enabled: boolean): Promise<void> => ipcRenderer.invoke('status:setRuleEnabled', ruleId, enabled),
   getBinaryStatus: (): Promise<BinaryStatus> => ipcRenderer.invoke('binaries:getStatus'),

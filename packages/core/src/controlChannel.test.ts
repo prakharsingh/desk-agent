@@ -23,8 +23,17 @@ function buildBaseDeps() {
   return {
     gateway: { getClientCount: vi.fn(() => 0), getLastHelloAt: vi.fn((): number | null => null) },
     tunnelSupervisor: {
-      getStatus: vi.fn(() => ({ serial: null as string | null, tunnelStatus: 'idle' as const, lastReissueAt: null as number | null })),
+      getStatus: vi.fn(() => ({
+        serial: null as string | null,
+        tunnelStatus: 'idle' as const,
+        lastReissueAt: null as number | null,
+        launchAppOnDock: true,
+        appLaunchStatus: 'idle' as const,
+        lastAppLaunchAt: null as number | null,
+      })),
       reissue: vi.fn(async () => {}),
+      launchApp: vi.fn(async () => {}),
+      setLaunchAppOnDock: vi.fn(),
     },
     presenceEngine: { getState: vi.fn(() => 'present' as const), getStateSince: vi.fn(() => 1000) },
     automationEngine: {
@@ -65,7 +74,14 @@ describe('ControlChannel', () => {
     makeChannel(deps);
     const snap = (deps.transport.sent[0] as Extract<ToApp, { kind: 'snapshot' }>).data;
     expect(snap.core).toEqual({ uptimeMs: 0, wsPort: 8787, watchdogTimeoutMs: 30000 });
-    expect(snap.device).toEqual({ serial: null, tunnelStatus: 'idle', lastReissueAt: null });
+    expect(snap.device).toEqual({
+      serial: null,
+      tunnelStatus: 'idle',
+      lastReissueAt: null,
+      launchAppOnDock: true,
+      appLaunchStatus: 'idle',
+      lastAppLaunchAt: null,
+    });
     expect(snap.clients).toEqual({ connected: 0, lastHelloAt: null });
     expect(snap.presence).toEqual({ state: 'present', since: 1000 });
     expect(snap.plugins).toEqual({ 'system-stats': { enabled: true, permissions: ['sys:read-stats'] } });
@@ -101,6 +117,30 @@ describe('ControlChannel', () => {
     makeChannel(deps);
     deps.transport.receive({ kind: 'reissueTunnel' });
     expect(deps.tunnelSupervisor.reissue).toHaveBeenCalledTimes(1);
+  });
+
+  it('launchApp calls tunnelSupervisor.launchApp()', () => {
+    const deps = makeDeps();
+    makeChannel(deps);
+    deps.transport.receive({ kind: 'launchApp' });
+    expect(deps.tunnelSupervisor.launchApp).toHaveBeenCalledTimes(1);
+  });
+
+  it('launchApp pushes an updated snapshot once tunnelSupervisor.launchApp() resolves, so the Device pane sees the real result instead of waiting for the next periodic tick', async () => {
+    const deps = makeDeps();
+    makeChannel(deps);
+    deps.transport.receive({ kind: 'launchApp' });
+    expect(deps.transport.sent).toHaveLength(1); // no push yet -- launchApp() hasn't resolved
+    await (deps.tunnelSupervisor.launchApp as ReturnType<typeof vi.fn>).mock.results[0].value;
+    expect(deps.transport.sent).toHaveLength(2);
+  });
+
+  it('setLaunchAppOnDock calls through and pushes an updated snapshot', () => {
+    const deps = makeDeps();
+    makeChannel(deps);
+    deps.transport.receive({ kind: 'setLaunchAppOnDock', enabled: false });
+    expect(deps.tunnelSupervisor.setLaunchAppOnDock).toHaveBeenCalledWith(false);
+    expect(deps.transport.sent).toHaveLength(2);
   });
 
   it('setAutomationEnabled calls through and pushes an updated snapshot', () => {

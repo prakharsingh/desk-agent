@@ -92,13 +92,13 @@ describe('full integration loop', () => {
     });
 
     const invokedActions: Array<{ pluginId: string; action: string }> = [];
-    const config: Config = { enabledPlugins: [], weather: { location: 'x', intervalMs: 600_000 }, systemStats: { pollIntervalMs: 2000 }, energySaver: { idleAction: 'displaysleepnow' }, watchdogTimeoutMs: 30000, visibleWidgets: ['clock', 'system', 'weather', 'presence', 'playing', 'light'], presenceDebounceMs: 1000, wsPort: 8787, presence: { absenceTimeoutMs: 300000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 300000, wakeEnabled: true } };
+    const config: Config = { enabledPlugins: [], weather: { location: 'x', intervalMs: 600_000 }, systemStats: { pollIntervalMs: 2000 }, energySaver: { idleAction: 'displaysleepnow' }, watchdogTimeoutMs: 30000, visibleWidgets: ['clock', 'system', 'weather', 'presence', 'playing', 'light'], presenceDebounceMs: 1000, wsPort: 8787, launchAppOnDock: true, presence: { absenceTimeoutMs: 300000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 300000, wakeEnabled: true } };
     const automationEngine = new AutomationEngine(buildAutomationRules(config), {
       invoke: (pluginId, action) => { invokedActions.push({ pluginId, action }); workerHost.invokeAction(pluginId, action); },
     }, vi.fn());
 
     eventBus = new EventBus();
-    const adb: AdbRunner = { reverse: vi.fn(async () => {}), trackDevices: (onEvent) => { onEvent({ type: 'attach', serial: 'p1' }); return { stop: vi.fn() }; } };
+    const adb: AdbRunner = { reverse: vi.fn(async () => {}), launchApp: vi.fn(async () => {}), trackDevices: (onEvent) => { onEvent({ type: 'attach', serial: 'p1' }); return { stop: vi.fn() }; } };
     const tunnelSupervisor = new TunnelSupervisor(adb, 8787, vi.fn());
 
     boot({ workerHost, gateway, tunnelSupervisor, eventBus, automationEngine });
@@ -171,6 +171,7 @@ describe('full integration loop', () => {
     let handler: ((event: { type: 'attach' | 'detach'; serial: string }) => void) | undefined;
     const adb: AdbRunner = {
       reverse: vi.fn(async () => {}),
+      launchApp: vi.fn(async () => {}),
       trackDevices: (onEvent) => { handler = onEvent; return { stop: vi.fn() }; },
     };
     const supervisor = new TunnelSupervisor(adb, 8787, vi.fn());
@@ -195,7 +196,7 @@ describe('full integration loop', () => {
 
     const invokedActions: Array<{ pluginId: string; action: string }> = [];
     const config: Config = {
-      enabledPlugins: [], weather: { location: 'x', intervalMs: 600_000 }, systemStats: { pollIntervalMs: 2000 }, energySaver: { idleAction: 'displaysleepnow' }, watchdogTimeoutMs: 30000, visibleWidgets: ['clock', 'system', 'weather', 'presence', 'playing', 'light'], presenceDebounceMs: 1000, wsPort: 8787,
+      enabledPlugins: [], weather: { location: 'x', intervalMs: 600_000 }, systemStats: { pollIntervalMs: 2000 }, energySaver: { idleAction: 'displaysleepnow' }, watchdogTimeoutMs: 30000, visibleWidgets: ['clock', 'system', 'weather', 'presence', 'playing', 'light'], presenceDebounceMs: 1000, wsPort: 8787, launchAppOnDock: true,
       presence: { absenceTimeoutMs: 2000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 2000, wakeEnabled: true },
     };
     const automationEngine = new AutomationEngine(buildAutomationRules(config), {
@@ -236,7 +237,7 @@ describe('full integration loop', () => {
 
     const invokedActions: Array<{ pluginId: string; action: string }> = [];
     const config: Config = {
-      enabledPlugins: [], weather: { location: 'x', intervalMs: 600_000 }, systemStats: { pollIntervalMs: 2000 }, energySaver: { idleAction: 'displaysleepnow' }, watchdogTimeoutMs: 30000, visibleWidgets: ['clock', 'system', 'weather', 'presence', 'playing', 'light'], presenceDebounceMs: 1000, wsPort: 8787,
+      enabledPlugins: [], weather: { location: 'x', intervalMs: 600_000 }, systemStats: { pollIntervalMs: 2000 }, energySaver: { idleAction: 'displaysleepnow' }, watchdogTimeoutMs: 30000, visibleWidgets: ['clock', 'system', 'weather', 'presence', 'playing', 'light'], presenceDebounceMs: 1000, wsPort: 8787, launchAppOnDock: true,
       presence: { absenceTimeoutMs: 2000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 2000, wakeEnabled: true },
     };
     const automationEngine = new AutomationEngine(buildAutomationRules(config), {
@@ -279,7 +280,7 @@ describe('full integration loop', () => {
 
     const invokedActions: Array<{ pluginId: string; action: string }> = [];
     const config: Config = {
-      enabledPlugins: [], weather: { location: 'x', intervalMs: 600_000 }, systemStats: { pollIntervalMs: 2000 }, energySaver: { idleAction: 'displaysleepnow' }, watchdogTimeoutMs: 30000, visibleWidgets: ['clock', 'system', 'weather', 'presence', 'playing', 'light'], presenceDebounceMs: 1000, wsPort: 8787,
+      enabledPlugins: [], weather: { location: 'x', intervalMs: 600_000 }, systemStats: { pollIntervalMs: 2000 }, energySaver: { idleAction: 'displaysleepnow' }, watchdogTimeoutMs: 30000, visibleWidgets: ['clock', 'system', 'weather', 'presence', 'playing', 'light'], presenceDebounceMs: 1000, wsPort: 8787, launchAppOnDock: true,
       presence: { absenceTimeoutMs: 2000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 2000, wakeEnabled: true },
     };
     const automationEngine = new AutomationEngine(buildAutomationRules(config), {
@@ -330,7 +331,7 @@ describe('full integration loop', () => {
 
     const invokedActions: Array<{ pluginId: string; action: string }> = [];
     const config: Config = {
-      enabledPlugins: [], weather: { location: 'x', intervalMs: 600_000 }, systemStats: { pollIntervalMs: 2000 }, energySaver: { idleAction: 'displaysleepnow' }, watchdogTimeoutMs: 30000, visibleWidgets: ['clock', 'system', 'weather', 'presence', 'playing', 'light'], presenceDebounceMs: 1000, wsPort: 8787,
+      enabledPlugins: [], weather: { location: 'x', intervalMs: 600_000 }, systemStats: { pollIntervalMs: 2000 }, energySaver: { idleAction: 'displaysleepnow' }, watchdogTimeoutMs: 30000, visibleWidgets: ['clock', 'system', 'weather', 'presence', 'playing', 'light'], presenceDebounceMs: 1000, wsPort: 8787, launchAppOnDock: true,
       presence: { absenceTimeoutMs: 2000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 2000, wakeEnabled: true },
     };
     const automationEngine = new AutomationEngine(buildAutomationRules(config), {

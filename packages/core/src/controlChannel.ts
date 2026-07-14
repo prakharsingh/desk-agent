@@ -35,6 +35,8 @@ export type ToApp =
 export type ToCore =
   | { kind: 'getSnapshot' }
   | { kind: 'reissueTunnel' }
+  | { kind: 'launchApp' }
+  | { kind: 'setLaunchAppOnDock'; enabled: boolean }
   | { kind: 'setAutomationEnabled'; enabled: boolean }
   | { kind: 'setRuleEnabled'; ruleId: string; enabled: boolean };
 
@@ -51,6 +53,8 @@ interface GatewayLike {
 interface TunnelLike {
   getStatus(): TunnelStatusSnapshot;
   reissue(): Promise<void>;
+  launchApp(): Promise<void>;
+  setLaunchAppOnDock(enabled: boolean): void;
 }
 
 interface PresenceLike {
@@ -118,6 +122,11 @@ export class ControlChannel {
       this.pushSnapshot();
     } else if (msg.kind === 'reissueTunnel') {
       void this.deps.tunnelSupervisor.reissue();
+    } else if (msg.kind === 'launchApp') {
+      void this.deps.tunnelSupervisor.launchApp().then(() => this.pushSnapshot());
+    } else if (msg.kind === 'setLaunchAppOnDock') {
+      this.deps.tunnelSupervisor.setLaunchAppOnDock(msg.enabled);
+      this.pushSnapshot();
     } else if (msg.kind === 'setAutomationEnabled') {
       this.deps.automationEngine.setEnabled(msg.enabled);
       this.pushSnapshot();

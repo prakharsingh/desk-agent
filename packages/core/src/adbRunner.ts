@@ -5,6 +5,12 @@ import type { AdbRunner } from './tunnelSupervisor.js';
 
 const execFileAsync = promisify(execFile);
 
+// The Android app's package/launcher-activity component id (validated launch
+// command: app/android-notes/SLICE1B_SPIKE1.md). MainActivity is
+// singleTask, so re-running `am start` against an already-running app just
+// brings it to front -- safe to call unconditionally on every dock event.
+const APP_COMPONENT = 'com.deskagentapp/.MainActivity';
+
 export function createRealAdbRunner(
   onLog: (level: LogLevel, message: string) => void = () => {},
   adbPath = 'adb',
@@ -12,6 +18,10 @@ export function createRealAdbRunner(
   return {
     async reverse(localPort, remotePort) {
       await execFileAsync(adbPath, ['reverse', `tcp:${localPort}`, `tcp:${remotePort}`]);
+    },
+    async launchApp(serial) {
+      const serialArgs = serial ? ['-s', serial] : [];
+      await execFileAsync(adbPath, [...serialArgs, 'shell', 'am', 'start', '-n', APP_COMPONENT]);
     },
     trackDevices(onEvent) {
       const child = spawn(adbPath, ['track-devices']);

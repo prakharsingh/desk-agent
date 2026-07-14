@@ -8,6 +8,25 @@ version for the whole monorepo, not per-package — see
 
 ## [Unreleased]
 
+### Added
+
+- **Auto-launch the phone app on USB dock**: `TunnelSupervisor` now awaits
+  `adb reverse` actually completing before running
+  `adb shell am start -n com.deskagentapp/.MainActivity` on every
+  device-attach event, so the phone app no longer has to be opened by hand
+  each time it's docked (closes the backlog item discovered during Slice 1c
+  hardware verification, 2026-07-12). `MainActivity` is `singleTask`, so this
+  is safe to fire unconditionally — an already-running app is just brought to
+  the front. A new `config.launchAppOnDock` field (default `true`) sets the
+  boot-time default; a live, session-scoped Device pane toggle ("Launch app
+  on phone when docked") can disable it without restarting the core,
+  mirroring the automation-engine toggle. A "Launch now" button (Device pane,
+  disabled with "Re-issue" when no phone is paired) triggers it manually
+  regardless of the toggle, and its result is reflected in the pane
+  immediately rather than waiting for the next periodic snapshot. 13 new
+  vitest tests across `tunnelSupervisor.test.ts`, `adbRunner.test.ts`, and
+  `controlChannel.test.ts`.
+
 ## [0.3.0] — Slice 1c: wake-from-sleep + Slice 1d: phone display UI — 2026-07-12
 
 Two slices, released together since both landed on `main` before either was

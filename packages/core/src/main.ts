@@ -110,7 +110,7 @@ export function run(opts: RunOptions = {}) {
   });
 
   const tunnelLog = (level: 'info' | 'warn' | 'error', message: string) => log('tunnel', level, message);
-  const tunnelSupervisor = new TunnelSupervisor(createRealAdbRunner(tunnelLog), config.wsPort, tunnelLog);
+  const tunnelSupervisor = new TunnelSupervisor(createRealAdbRunner(tunnelLog), config.wsPort, tunnelLog, config.launchAppOnDock);
 
   if (opts.transport) {
     const pluginPermissions = Object.fromEntries(Object.entries(pluginRegistry).map(([id, entry]) => [id, entry.permissions]));

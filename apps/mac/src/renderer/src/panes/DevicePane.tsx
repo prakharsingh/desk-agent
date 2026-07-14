@@ -8,6 +8,8 @@ import { Group } from '../ui/Group.js';
 
 export function DevicePane({ snapshot }: { snapshot: StatusSnapshot | null }) {
   const [reissuing, setReissuing] = useState(false);
+  const [launchingApp, setLaunchingApp] = useState(false);
+  const [launchAppOnDockPending, setLaunchAppOnDockPending] = useState(false);
   const [launchAtLogin, setLaunchAtLoginState] = useState<boolean | null>(null);
   const [launchAtLoginError, setLaunchAtLoginError] = useState(false);
   const [dockWatchEnabled, setDockWatchEnabledState] = useState<boolean | null>(null);
@@ -34,6 +36,29 @@ export function DevicePane({ snapshot }: { snapshot: StatusSnapshot | null }) {
       await window.deskAgent.reissueTunnel();
     } finally {
       setReissuing(false);
+    }
+  }
+
+  async function handleLaunchApp() {
+    setLaunchingApp(true);
+    try {
+      await window.deskAgent.launchApp();
+    } finally {
+      setLaunchingApp(false);
+    }
+  }
+
+  // No optimistic local toggle state (unlike launchAtLogin/dockWatch below):
+  // this is live core state mirrored straight from the snapshot, same as the
+  // automation-engine toggle -- ControlChannel pushes a fresh snapshot right
+  // after setLaunchAppOnDock, so `checked` just tracks
+  // snapshot.device.launchAppOnDock directly and can't drift.
+  async function handleLaunchAppOnDockChange(enabled: boolean) {
+    setLaunchAppOnDockPending(true);
+    try {
+      await window.deskAgent.setLaunchAppOnDock(enabled);
+    } finally {
+      setLaunchAppOnDockPending(false);
     }
   }
 
@@ -76,6 +101,11 @@ export function DevicePane({ snapshot }: { snapshot: StatusSnapshot | null }) {
 
   const lastHello = snapshot.clients.lastHelloAt ? new Date(snapshot.clients.lastHelloAt).toLocaleTimeString() : 'never';
   const tunnelValue = `${snapshot.device.tunnelStatus}${snapshot.device.lastReissueAt ? ` · ${new Date(snapshot.device.lastReissueAt).toLocaleTimeString()}` : ''}`;
+  // Both actions run a bare adb command with no device disambiguation when
+  // no phone is paired -- adb then falls through to its own default-device
+  // selection, which is ambiguous/wrong if another adb device happens to be
+  // attached. Disable rather than let that fire silently.
+  const noDevicePaired = !snapshot.device.serial;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 22, maxWidth: 720 }}>
@@ -152,15 +182,15 @@ export function DevicePane({ snapshot }: { snapshot: StatusSnapshot | null }) {
               <button
                 type="button"
                 onClick={handleReissue}
-                disabled={reissuing}
+                disabled={reissuing || noDevicePaired}
                 style={{
                   background: 'none',
                   border: 'none',
                   padding: 0,
                   font: 'inherit',
                   fontSize: 12,
-                  color: reissuing ? 'var(--text3)' : accent.blue,
-                  cursor: reissuing ? 'default' : 'pointer',
+                  color: reissuing || noDevicePaired ? 'var(--text3)' : accent.blue,
+                  cursor: reissuing || noDevicePaired ? 'default' : 'pointer',
                 }}
               >
                 {reissuing ? 'Re-issuing…' : 'Re-issue'}
@@ -168,16 +198,25 @@ export function DevicePane({ snapshot }: { snapshot: StatusSnapshot | null }) {
             }
           />
           <Row
-            label="Auto re-issue on device attach"
-            value="not yet implemented"
+            label="Launch app on phone"
+            value={`${snapshot.device.appLaunchStatus}${snapshot.device.lastAppLaunchAt ? ` · ${new Date(snapshot.device.lastAppLaunchAt).toLocaleTimeString()}` : ''}`}
             action={
-              // Not wired to a real setting yet -- TunnelSupervisor has no
-              // config field or IPC action for this (mirrors AutomationPane's
-              // "+ Add Rule" honest-non-functional pattern). Disabled so it
-              // can't be toggled into a false promise. The "not yet
-              // implemented" value makes that explicit instead of silently
-              // rendering a switch that looks broken.
-              <Switch checked={false} onChange={() => {}} label="" disabled />
+              <button
+                type="button"
+                onClick={handleLaunchApp}
+                disabled={launchingApp || noDevicePaired}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  padding: 0,
+                  font: 'inherit',
+                  fontSize: 12,
+                  color: launchingApp || noDevicePaired ? 'var(--text3)' : accent.blue,
+                  cursor: launchingApp || noDevicePaired ? 'default' : 'pointer',
+                }}
+              >
+                {launchingApp ? 'Launching…' : 'Launch now'}
+              </button>
             }
           />
           <Row label="Watchdog timeout" value={`${snapshot.core.watchdogTimeoutMs / 1000}s`} last />
@@ -195,16 +234,27 @@ export function DevicePane({ snapshot }: { snapshot: StatusSnapshot | null }) {
             <Row label="Launch Desk Agent at login" action={<Switch checked={launchAtLogin} onChange={handleLaunchAtLoginChange} label="" />} />
           )}
           {dockWatchEnabled === null ? (
-            <div style={{ padding: '13px 16px' }}>
+            <div style={{ padding: '13px 16px', borderBottom: '0.5px solid var(--sep)' }}>
               <span style={{ fontSize: 13, color: 'var(--text3)' }}>Loading…</span>
             </div>
           ) : (
             <Row
               label="Launch Desk Agent when phone is docked"
               action={<Switch checked={dockWatchEnabled} onChange={handleDockWatchChange} label="" />}
-              last
             />
           )}
+          <Row
+            label="Launch app on phone when docked"
+            action={
+              <Switch
+                checked={snapshot.device.launchAppOnDock}
+                onChange={handleLaunchAppOnDockChange}
+                label=""
+                disabled={launchAppOnDockPending}
+              />
+            }
+            last
+          />
         </Group>
         {launchAtLoginError && (
           <p style={{ fontSize: 12, color: accent.red, margin: '4px 0 0' }}>

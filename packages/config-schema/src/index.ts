@@ -60,6 +60,13 @@ export const ConfigSchema = z.object({
   // -- the exact "silently-killed phone causes a false-absent sleep"
   // scenario this exists to catch.
   watchdogTimeoutMs: z.number().min(10_000).max(300_000).default(30000),
+  // Whether TunnelSupervisor should launch the Android app (adb shell am
+  // start) after re-issuing adb reverse on device attach -- see
+  // TunnelSupervisor's constructor default. Session-scoped like
+  // enabledPlugins's runtime counterpart automationEngine.isEnabled(): the
+  // Device pane toggle mutates this live via ControlChannel, not by writing
+  // config.json, so this field is only the value at core-boot time.
+  launchAppOnDock: z.boolean().default(true),
   // Which phone-dashboard tiles are shown, per the Widgets pane. Sent to the
   // phone in the hello-reply's widget.update frame (see
   // packages/core/src/wsGateway.ts); app/src/display/HomeScreen.tsx
