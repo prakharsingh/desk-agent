@@ -22,9 +22,9 @@ payload shape together.
 |---|---|---|---|
 | `hello` | phone → Mac | `{ clientVersion: string }` | Initial handshake on connect; Mac replies with the full dashboard layout + widget snapshot. |
 | `heartbeat` | Mac → phone | `{}` | Periodic liveness ping; the phone ACKs it (echoes a `heartbeat` frame back), which the Mac's `Watchdog` uses as a sensor-activity-independent liveness signal. |
-| `widget.update` | Mac → phone | `{ widgets: [{ widgetId, widget: { type, props } }] }` | Patches one or more dashboard widgets. |
-| `action.invoke` | phone → Mac | `{ pluginId, action, args? }` | Phone-initiated action call into a plugin (e.g. manual override). |
-| `event.publish` | either direction | `{ eventName, data }` | Generic typed event envelope — carries the `sensor.*` events below and `person_present`/`automation.override`. |
+| `widget.update` | Mac → phone | `{ widgets: [{ widgetId, widget: { type, props } }], visibleWidgets?: string[] }` | Patches one or more dashboard widgets. `visibleWidgets` (which Home-screen tiles to show, ids from `WIDGET_IDS`) is present **only** on the `hello`-reply snapshot — its absence on later pushes means "no visibility change". |
+| `action.invoke` | phone → Mac, and Mac → phone | `{ pluginId, action, args? }` | Phone-initiated action call into a plugin (e.g. media transport → `system-stats`). Also the Mac→phone command channel: an `action.invoke` with the sentinel `pluginId: 'phone-display'` and `action: 'setScreensaverConfig'` (payload validated by `ScreensaverConfigSchema`, `{ enabled, graceMs }`) is handled by the app itself and never reaches a plugin worker. |
+| `event.publish` | either direction | `{ eventName, data }` | Generic typed event envelope — carries the `sensor.*` events below, `person_present`/`automation.override`, and `screensaver.config` (the phone reporting its applied screensaver config back; the phone is the source of truth, the Mac mirrors it). |
 
 ## Sensor events (Slice 1b, carried inside `event.publish`)
 
@@ -50,7 +50,9 @@ Not sent by the phone directly — produced Mac-side and carried the same way:
 | `eventName` | Payload | Producer |
 |---|---|---|
 | `person_present` | `{ present: boolean }` | `PresenceEngine` (fusion of the four sensor events above) |
+| `presence.returned` | — (Mac-internal only, never on the wire) | `PresenceEngine`, on a genuine sensor-driven absent→present edge; drives wake-on-return |
 | `automation.override` | manual-override payload | phone (user toggles automation on/off) |
+| `screensaver.config` | `{ enabled: boolean, graceMs: number }` | phone (reports its applied screensaver config, on change and on every reconnect) |
 
 ## Adding a new event
 

@@ -10,6 +10,12 @@ See [SETUP.md](SETUP.md) for a from-zero build/run guide, and
 load-bearing rather than stylistic — read that before touching
 `presenceEngine.ts`, the protocol schema, or anything under `app/src/presence/`.
 
+New to the codebase? **[docs/ONBOARDING.md](docs/ONBOARDING.md)** is the
+guided tour (including how to contribute without the reference hardware),
+and there are step-by-step guides for the two most common contributions:
+[writing a plugin](docs/guides/writing-a-plugin.md) and
+[adding a widget](docs/guides/adding-a-widget.md).
+
 ## Workflow
 
 1. Fork the repo and branch off `main`. Branch names aren't enforced, but
@@ -74,7 +80,14 @@ device/OEM-specific (see [AGENTS.md](AGENTS.md) and the
 [wiki Hardware page](https://github.com/prakharsingh/desk-agent/wiki/Hardware)),
 and "works on my 6T" bugs are a known category here.
 
+## Security issues
+
+Don't report vulnerabilities as public issues — see
+[SECURITY.md](SECURITY.md) for the private reporting channel and an honest
+statement of the project's trust model.
+
 ## Code of conduct
 
-Be respectful and assume good faith. This project doesn't (yet) have a formal
-code of conduct doc; if that becomes necessary, it'll be added here.
+This project follows the Contributor Covenant — see
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Be respectful and assume good
+faith.

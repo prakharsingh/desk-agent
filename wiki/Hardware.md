@@ -48,9 +48,12 @@ if you're running this on different hardware, budget time for:
   eye-open-probability reliability envelope for near-frontal faces; a
   different camera's field of view or mounting angle may need different
   thresholds.
-- **External-display wake behavior** (Slice 1c, when it lands) — this is
-  explicitly called out as monitor/cable-dependent, not something to assume
-  transfers from one HDMI setup to another.
+- **External-display wake behavior** (Slice 1c) — explicitly
+  monitor/cable-dependent, not something to assume transfers from one HDMI
+  setup to another. Verified on the reference Mac + external HDMI monitor
+  (2026-07-12); SETUP.md's checklist includes a by-hand `caffeinate -u -t 2`
+  spike to run on your own setup first, and `presence.wakeEnabled: false`
+  keeps auto-sleep while disabling wake if yours doesn't cooperate.
 
 If you validate this on different hardware, consider opening a PR to extend
 this page — hardware compatibility notes are exactly the kind of thing this

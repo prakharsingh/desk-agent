@@ -6,8 +6,10 @@ away — no camera footage ever leaves the phone.
 
 Start with the [README](https://github.com/prakharsingh/desk-agent#readme)
 and [SETUP.md](https://github.com/prakharsingh/desk-agent/blob/main/SETUP.md)
-in the main repo for install/run instructions. This wiki covers the deeper
-"why" that doesn't belong in day-to-day docs.
+in the main repo for install/run instructions. Contributors should start at
+[docs/ONBOARDING.md](https://github.com/prakharsingh/desk-agent/blob/main/docs/ONBOARDING.md)
+— a guided codebase tour. This wiki covers the deeper "why" that doesn't
+belong in day-to-day docs.
 
 ## Pages
 

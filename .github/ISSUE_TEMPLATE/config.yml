@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Troubleshooting guide
+    url: https://github.com/prakharsingh/desk-agent/wiki/Troubleshooting
+    about: Common failure modes (tunnel, camera permissions, OEM background-kill, TCC) and their fixes.
+  - name: Security issue
+    url: https://github.com/prakharsingh/desk-agent/blob/main/SECURITY.md
+    about: Please report security vulnerabilities privately, not as public issues.

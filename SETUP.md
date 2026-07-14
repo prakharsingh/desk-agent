@@ -9,6 +9,7 @@ dashboard/sensor app).
 | For | Need |
 |---|---|
 | Core agent | macOS, Node.js ≥ 20, pnpm 9+ (`corepack enable`, or `npm i -g pnpm`) |
+| Now Playing widget (optional) | `brew install nowplaying-cli` — without it the System Stats widget shows `nowPlaying: unavailable`, everything else works |
 | React Native app | JDK 17 (React Native 0.86's floor), Android SDK + platform tools (`adb` on `PATH`), an Android device with USB debugging enabled |
 | Everything | `git` |
 
@@ -22,8 +23,8 @@ client). Building the app does not require Xcode.
 git clone https://github.com/prakharsingh/desk-agent.git
 cd desk-agent
 pnpm install
-pnpm build       # runs tsc across protocol, plugin-sdk, plugins, core
-pnpm test          # 175 tests, all packages (watch mode: `pnpm vitest`)
+pnpm build       # runs tsc across every workspace package
+pnpm test          # full vitest suite, all packages (watch mode: `pnpm vitest`)
 ```
 
 If `pnpm test` fails on a fresh clone, run `pnpm build` first — Vitest
@@ -40,17 +41,39 @@ Edit `config.json` — set `weather.location` to a real city name so the
 Weather widget (backed by Open-Meteo, no API key needed) returns real
 current conditions and a 7-day forecast. It degrades to a `stale`
 last-known-value state on any API/geocoding failure, so a bad location won't
-crash the agent, just leave that widget stale. See
-`packages/core/src/configLoader.ts` for the full schema, defaults, and the
-`presence` block Slice 1b added (`absenceTimeoutMs`, `gazeIsKeepAwake`,
-`bootConfirmationTimeoutMs`) plus Slice 1c's `presence.wakeEnabled`
-(default `true`) — set it to `false` to keep auto-sleep while disabling
-programmatic wake-on-return, e.g. if `caffeinate -u` proves unreliable on
-your hardware.
+crash the agent, just leave that widget stale.
+
+Every field has a sane default — see the full annotated schema table in
+**[packages/config-schema/README.md](packages/config-schema/README.md)**.
+The ones you're most likely to touch: the `presence` block
+(`absenceTimeoutMs`, `gazeIsKeepAwake`, `bootConfirmationTimeoutMs`, and
+`wakeEnabled` — set `false` to keep auto-sleep while disabling programmatic
+wake-on-return, e.g. if `caffeinate -u` proves unreliable on your hardware),
+`launchAppOnDock` (auto-launch the phone app on USB attach, default `true`),
+and `visibleWidgets` (which widget tiles the phone shows).
 
 `config.json` is gitignored — never commit real API keys.
 
 ## 3. Run the core agent
+
+Two ways to run the Mac side — pick one:
+
+**A. The macOS menu-bar app** (recommended for daily use):
+
+```bash
+pnpm --filter @desk-agent/mac dev    # development, live reload
+pnpm --filter @desk-agent/mac pack   # unsigned arm64 .app → apps/mac/release/
+```
+
+The app runs and supervises the core for you (crash-restart included) and
+gives you a tray icon plus a settings window (config, plugins, widgets,
+presence, automation, device, logs). It also offers launch-at-login and an
+optional "start when the phone is docked" LaunchAgent. Don't run the app and
+a terminal core simultaneously — they'd fight over port 8787 (the app itself
+holds a single-instance lock for exactly this reason). See
+**[apps/mac/README.md](apps/mac/README.md)**.
+
+**B. Standalone terminal process:**
 
 ```bash
 node packages/core/dist/main.js
@@ -61,11 +84,11 @@ first run it spawns one `worker_thread` per plugin in `enabledPlugins`, starts
 the WebSocket gateway (`wsPort`, default `8787`), and starts the tunnel
 supervisor.
 
-**Before running unattended** (e.g. via `launchd`): the `system-stats`
-plugin's now-playing read triggers a macOS Automation (Apple Events) TCC
-prompt the first time it runs, and that prompt can only be answered from a
-real UI session. See **[packages/core/macos-notes/PERMISSIONS.md](packages/core/macos-notes/PERMISSIONS.md)**
-and do the one-time onboarding there before configuring headless startup.
+Either way, install `nowplaying-cli` (`brew install nowplaying-cli`) if you
+want the Now Playing widget — it reads macOS's system-wide MediaRemote
+registration and needs no TCC/Automation permission. Without it the widget
+honestly reports `unavailable`. Details and packaging caveats:
+**[packages/core/macos-notes/PERMISSIONS.md](packages/core/macos-notes/PERMISSIONS.md)**.
 
 ## 4. Build and run the phone app
 
@@ -83,7 +106,8 @@ Grant the Camera permission when prompted. Once running:
 
 - Dock the phone via USB with the core agent already running; the tunnel
   supervisor issues `adb reverse tcp:8787 tcp:8787` automatically on device
-  attach (re-issued automatically on every replug — no manual step).
+  attach (re-issued automatically on every replug — no manual step), then —
+  unless you've disabled `launchAppOnDock` — launches the phone app for you.
 - The app connects to `ws://localhost:8787` through that reverse tunnel.
 
 **Before trusting this on OxygenOS (or any aggressive-background-kill OEM
@@ -109,8 +133,8 @@ background-kill behavior, and real thermal/timing behavior.
 - [ ] Unplug and replug the USB cable → tunnel supervisor re-issues
       `adb reverse` → app reconnects and re-syncs a fresh snapshot, without
       restarting either process.
-- [ ] Deny the Automation (Apple Events) TCC prompt for now-playing → System
-      Stats widget shows `nowPlaying: unavailable`, agent stays up (no crash).
+- [ ] With `nowplaying-cli` not installed → System Stats widget shows
+      `nowPlaying: unavailable`, agent stays up (no crash).
 - [ ] Leave both processes running overnight → next morning, either the phone
       is still sending heartbeats, or the Mac-side watchdog log shows it
       flagged the silence.

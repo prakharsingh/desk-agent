@@ -1,0 +1,43 @@
+name: Feature request
+description: Propose a new capability, plugin, or widget
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This project ships in deliberate end-to-end slices — see the
+        [Roadmap wiki page](https://github.com/prakharsingh/desk-agent/wiki/Roadmap)
+        for what's already planned before proposing.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: The desk-level outcome, not the implementation. "When X happens at my desk, I want Y."
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed approach (optional)
+      description: |
+        If you have one. Note the house constraints: the phone stays a thin honest
+        sensor (no phone-side judgment), presence logic fails toward "present",
+        and plugins only reach the OS/network through declared, allowlisted
+        capabilities.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options:
+        - New plugin (Mac-side capability)
+        - New widget (phone dashboard)
+        - Presence / automation behavior
+        - macOS app
+        - Developer experience / tooling
+        - Other
+  - type: checkboxes
+    id: willing
+    attributes:
+      label: Contribution
+      options:
+        - label: I'm willing to implement this myself (see docs/guides/ for plugin & widget how-tos)

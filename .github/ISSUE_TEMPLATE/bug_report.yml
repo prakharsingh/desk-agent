@@ -1,0 +1,64 @@
+name: Bug report
+description: Something doesn't work the way the docs say it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Behavior here is documented to be device/OEM-specific —
+        the hardware fields below aren't bureaucracy, they're usually the answer.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what actually happened.
+      placeholder: |
+        1. Docked the phone with the core running
+        2. Left the desk for 10 minutes
+        3. Expected the display to sleep; it never did
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Presence detection / auto-sleep / wake
+        - Tunnel / connectivity (adb reverse, reconnect)
+        - Phone dashboard UI / widgets
+        - macOS app (apps/mac)
+        - Core agent / plugins
+        - Build / tests
+        - Docs
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: phone
+    attributes:
+      label: Phone model + Android/OEM version
+      description: Required for anything presence/camera related — e.g. "OnePlus 6T, Android 11 / OxygenOS 11".
+      placeholder: OnePlus 6T, Android 11 / OxygenOS 11
+  - type: input
+    id: mac
+    attributes:
+      label: Mac model + macOS version
+      placeholder: Mac mini M5, macOS 26
+  - type: input
+    id: version
+    attributes:
+      label: Desk Agent version / commit
+      placeholder: v0.3.0, or a commit SHA
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Core agent log lines (or the Mac app's Logs pane) around the failure. For presence bugs, watchdog / camera_state / fail-to-present lines are gold.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before filing
+      options:
+        - label: I checked the [Troubleshooting wiki page](https://github.com/prakharsingh/desk-agent/wiki/Troubleshooting)
+        - label: For background-kill issues, I did the manual steps in app/android-notes/RELIABILITY.md

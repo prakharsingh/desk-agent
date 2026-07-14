@@ -64,15 +64,25 @@
   fail-to-present triggers in the core log, that's the watchdog doing its
   job, not a bug in the watchdog itself.
 
-## macOS permissions
+## macOS
 
 **`nowPlaying: 'unavailable'` in the System Stats widget**
-- The Automation (Apple Events) TCC prompt for now-playing must be granted
-  through a real UI session before the agent is ever started headless — see
-  `packages/core/macos-notes/PERMISSIONS.md`. If you're stuck denied, run
-  `tccutil reset AppleEvents` and re-run the agent from a Terminal with a UI
-  session active to get the prompt again.
-- This is a degraded state, not a crash — the agent keeps running either way.
+- Install `nowplaying-cli` (`brew install nowplaying-cli`) — the now-playing
+  read shells out to it (macOS's system-wide MediaRemote registration; no
+  TCC/Automation permission involved). Missing binary → this honest degraded
+  state, not a crash; the agent keeps running either way.
+- If it's installed but still `unavailable`, check whether any known
+  player/browser process is actually running — the plugin deliberately skips
+  the read otherwise, because a non-interactive `nowplaying-cli get` with
+  nothing registered can relaunch Music.app as a side effect. See
+  `packages/core/macos-notes/PERMISSIONS.md`.
+
+**Core won't start / `EADDRINUSE` on port 8787**
+- You're probably running the menu-bar app and a terminal
+  `node packages/core/dist/main.js` at the same time — they both host the
+  gateway on `127.0.0.1:8787`. Quit one. (The app protects against a second
+  copy of *itself* via a single-instance lock, but it can't stop a manually
+  started terminal core.)
 
 ## Build issues
 

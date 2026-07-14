@@ -10,6 +10,33 @@ version for the whole monorepo, not per-package — see
 
 ### Added
 
+- **macOS menu-bar app** (`apps/mac`): a native Electron shell that runs the
+  core agent so you no longer need a terminal. It forks `@desk-agent/core` as
+  a supervised `utilityProcess` (crash-restart with the same exponential
+  backoff the plugin host uses), shows a tray icon whose color tracks core
+  health, and provides a settings window with seven panes (Overview, Plugins,
+  Widgets, Presence, Automation, Device, Logs) fed by a typed ControlChannel
+  over the UtilityProcess port — the app never touches the phone's WebSocket.
+  Includes launch-at-login (macOS login item), an optional launchd
+  LaunchAgent that starts the app itself when a phone is docked
+  (`adb wait-for-device` → `open -b com.deskagent.mac`), a single-instance
+  lock so a second launch can't collide on the gateway port, atomic
+  Zod-validated config writes with a debounced core restart on change, and
+  unsigned arm64 packaging via electron-builder
+  (`pnpm --filter @desk-agent/mac pack`). The Phase 0 de-risking spike that
+  proved the core boots inside a packaged Electron `utilityProcess` is kept
+  as `apps/spike-electron` for reference only.
+- **`@desk-agent/config-schema` package**: the core's Zod config schema
+  extracted into a Node-free package so the Electron renderer (a browser
+  context with no `fs`) can validate and edit the same schema the core
+  boots from. `packages/core/src/configLoader.ts` now re-exports it and
+  keeps only the file-reading wrapper.
+- **Widget-visibility sync**: a new `visibleWidgets` config field (default:
+  all of `WIDGET_IDS`) controls which widget tiles the phone's Home screen
+  renders. The Mac app's Widgets pane edits it; the core includes the list
+  in the `hello`-reply `widget.update` snapshot; the phone renders tiles
+  conditionally. Later `widget.update` pushes omit the field, meaning "no
+  visibility change".
 - **Auto-launch the phone app on USB dock**: `TunnelSupervisor` now awaits
   `adb reverse` actually completing before running
   `adb shell am start -n com.deskagentapp/.MainActivity` on every
@@ -26,6 +53,30 @@ version for the whole monorepo, not per-package — see
   immediately rather than waiting for the next periodic snapshot. 13 new
   vitest tests across `tunnelSupervisor.test.ts`, `adbRunner.test.ts`, and
   `controlChannel.test.ts`.
+- **Phone screensaver on/off + duration toggle**: the ambient idle
+  screensaver (previously a fixed 2-minute timer) is now configurable from a
+  new phone Settings screen and mirrored in the Mac app's Device pane. The
+  phone is the source of truth (persisted in AsyncStorage); the Mac side is
+  a read-back mirror. This shipped the first core→phone command channel:
+  the core sends an `action.invoke` frame to the sentinel plugin id
+  `phone-display` with a Zod-validated `ScreensaverConfigSchema`
+  (`{ enabled, graceMs }`) payload, and the phone reports the applied config
+  back via `event.publish`.
+
+### Changed
+
+- **Phone display visual-polish pass**: the dashboard adopted the
+  `docs/design-review/mockups` visual language — per-widget accent bars,
+  icon chips, status badges, axis-labeled area charts — via new tested
+  primitives (`IconChip`, `Badge`, `AreaChart`) and pure helpers
+  (`loadColor`, `formatBattery`, `windowStats`), without fabricating any
+  data the core didn't actually send. Includes an OLED ghost-bleed fix.
+  Verified on-device (OnePlus 6T).
+
+### Fixed
+
+- A JNI reference-table leak crash: `CameraPresence` is now memoized so
+  Home-screen re-renders no longer re-mount the camera pipeline.
 
 ## [0.3.0] — Slice 1c: wake-from-sleep + Slice 1d: phone display UI — 2026-07-12
 

@@ -23,19 +23,27 @@ packages/
                   for the wire format — imported by both core and app.
   plugin-sdk/     Plugin interface, capability-object (`ctx`) types, a fake
                   host test harness for plugin-contract tests.
+  config-schema/  The Zod config schema, Node-free so the Electron renderer
+                  can import it too. configLoader.ts re-exports it.
   core/           The Mac-side agent (Node, main thread):
                     wsGateway.ts        WebSocket server, frame validation
                     eventBus.ts         typed pub/sub between subsystems
                     workerHost.ts       spawns/supervises plugin worker_threads
+                    permissionEnforcer.ts gates ctx.fetch/exec per permission
                     automationEngine.ts rule evaluation (person_present → action)
                     presenceEngine.ts   hysteresis fusion of sensor.* → person_present
                     watchdog.ts         detects missed phone heartbeats
-                    tunnelSupervisor.ts re-issues `adb reverse` on device attach
-                    configLoader.ts     Zod-validated config schema
+                    tunnelSupervisor.ts re-issues `adb reverse` on device attach,
+                                        auto-launches the phone app on dock
+                    controlChannel.ts   status/command channel to the Electron
+                                        host (inert when running standalone)
+                    screensaverConfigStore.ts mirror of phone-owned screensaver config
+                    configLoader.ts     config file loading + friendly errors
                     entrypoint.ts       wires everything together (boot())
                     main.ts             real-clock, real-I/O process entry
   plugins/
-    system-stats/  CPU/RAM/battery/now-playing widget (sys:read-stats)
+    system-stats/  CPU/RAM/battery/now-playing widget (sys:read-stats,
+                   sys:control-media)
     weather/       polled weather widget (net:api.weather)
     energy-saver/  subscribes to person_present, calls `pmset displaysleepnow`
                    (sys:control-display)
@@ -53,7 +61,16 @@ app/
       CameraIndicator.tsx  persistent "camera active" indicator
     CameraPrivacySwitch.tsx  on/off toggle that unmounts the camera entirely
     widgets/               dashboard widget renderers
-  android/                 native Android project (foreground service, manifest)
+    display/               multi-screen dashboard UI (screens.ts reducer,
+                           AppShell, HomeScreen, screens/, ui/ primitives)
+  android/                 native Android project (foreground service, manifest,
+                           Brightness + PresenceService Kotlin modules)
+apps/
+  mac/                     Electron menu-bar app: forks the core as a supervised
+                           utilityProcess, tray + settings window, talks to the
+                           core over controlChannel.ts (never over the phone WS)
+  spike-electron/          kept-for-reference Phase 0 packaging spike — superseded
+                           by apps/mac, don't build on it
 ```
 
 ## Data flow (the one loop everything hangs off)
@@ -155,6 +172,9 @@ reach for a `.tsx` Jest test only for genuinely view-level behavior
 | Change camera signal derivation (gaze/motion thresholds) | `app/src/presence/signalDeriver.ts` |
 | Change how/when sensor events are emitted | `app/src/presence/edgeEmitter.ts` |
 | Touch Android foreground-service / manifest | `app/android/app/src/main/` |
+| Add/change a config field | `packages/config-schema/src/index.ts` (+ `config.example.json`) |
+| Change the Mac app's settings UI | `apps/mac/src/renderer/src/panes/` |
+| Change app↔core status/commands | `packages/core/src/controlChannel.ts` + `apps/mac/src/main/index.ts` + `preload` |
 | Touch macOS permission handling | `packages/core/macos-notes/PERMISSIONS.md` |
 | Touch Android keep-awake/battery/OEM setup | `app/android-notes/RELIABILITY.md` |
 

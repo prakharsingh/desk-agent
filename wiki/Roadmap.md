@@ -42,10 +42,26 @@ same v0.3.0 release as Slice 1c since both landed on `main` before either
 was tagged — see [CHANGELOG.md](https://github.com/prakharsingh/desk-agent/blob/main/CHANGELOG.md)
 for the full breakdown.
 
+## In progress — on `main`, unreleased
+
+The Mac side is growing from a terminal process into a native app (see
+CHANGELOG's Unreleased section for detail):
+
+- **macOS menu-bar app** (`apps/mac`, Electron) — runs and supervises the
+  core (UtilityProcess + crash-restart), tray health icon, a settings window
+  (config, plugins, widgets, presence, automation, device, logs),
+  launch-at-login, and an optional start-on-phone-dock LaunchAgent.
+- **Widget-visibility sync** — choose which phone tiles render, from the Mac.
+- **Auto-launch the phone app on USB dock** (Mac-driven via `adb shell am
+  start`; there's deliberately no phone-side intent filter).
+- **Phone screensaver controls** — on/off + duration, from the phone's
+  Settings screen or the Mac Device pane; first core→phone command channel.
+- A phone-display visual-polish pass.
+
 ## Planned
 
-Nothing currently scoped into a named slice — see "Later" below for the
-backlog.
+Nothing further currently scoped into a named slice — see "Later" below for
+the backlog.
 
 ### Later (not yet sliced)
 From the original four-version vision (dashboard → voice/presence/AI →

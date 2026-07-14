@@ -81,6 +81,25 @@ A false auto-sleep while someone is at their desk is a much worse failure
 than an occasional missed auto-sleep — the fail-safe direction is
 deliberate and asymmetric.
 
+## The macOS app shell
+
+The core runs either standalone (`node packages/core/dist/main.js`) or
+inside the menu-bar app (`apps/mac`, Electron). The app forks the core as a
+supervised `utilityProcess` (same exponential-backoff restart policy the
+plugin host uses on workers) and talks to it over a typed **ControlChannel**
+on the UtilityProcess port — status snapshots out, commands (pause
+automation, re-issue tunnel, launch phone app, screensaver config) in. Two
+deliberate boundaries:
+
+- **The app never touches the phone's WebSocket.** The core owns the gateway
+  on `127.0.0.1:8787` in both modes; the app is a supervisor + settings UI,
+  not a second protocol peer. A single-instance lock prevents two app copies
+  from colliding on the port.
+- **Config stays one Zod schema.** `packages/config-schema` is Node-free so
+  the Electron renderer can validate the same schema the core boots from;
+  the app writes config atomically and restarts the core (debounced),
+  because the core reads config only at boot.
+
 ## Plugin isolation
 
 Plugins run in their own `worker_thread`, declare `id` + a `permissions`
