@@ -29,10 +29,10 @@ apps/mac/build/*
 !apps/mac/build/icon.icns
 
 # Android (React Native native project)
-app/android/.gradle/
-app/android/local.properties
-app/android/**/.cxx/
-app/android/.kotlin/
+apps/android/android/.gradle/
+apps/android/android/local.properties
+apps/android/android/**/.cxx/
+apps/android/android/.kotlin/
 *.keystore
 !debug.keystore
 

@@ -13,14 +13,14 @@ mobile client. There is no iOS project and building doesn't need Xcode.
 
 ```bash
 # from the repo root, once: pnpm install && pnpm build
-cd app
+cd apps/android
 pnpm android        # react-native run-android — builds & installs the debug APK
 ```
 
 The app connects to `ws://localhost:8787`, which reaches the Mac through the
 `adb reverse` tunnel the core's tunnel supervisor maintains — dock the phone
 with the core running and it connects (and, by default, the core auto-launches
-the app on dock). Full hardware walkthrough: **[SETUP.md](../SETUP.md)**.
+the app on dock). Full hardware walkthrough: **[SETUP.md](../../SETUP.md)**.
 Before trusting it long-term on an aggressive OEM ROM, do the manual steps in
 **[android-notes/RELIABILITY.md](android-notes/RELIABILITY.md)** — battery
 optimization and autostart allowlisting cannot be set from code.
@@ -89,9 +89,9 @@ config is reported back via `event.publish`.
 Three runners, split on purpose — see AGENTS.md for the full rationale:
 
 ```bash
-pnpm test                 # repo root — Vitest, all pure-logic .test.ts (incl. app/src/**)
-cd app && pnpm test:components   # Jest, RN component .test.tsx (render/interaction)
-cd app/android && ./gradlew test # JUnit + MockK + Robolectric for the Kotlin modules
+pnpm test                 # repo root — Vitest, all pure-logic .test.ts (incl. apps/android/src/**)
+cd apps/android && pnpm test:components   # Jest, RN component .test.tsx (render/interaction)
+cd apps/android/android && ./gradlew :app:testDebugUnitTest # JUnit + MockK + Robolectric for the Kotlin modules
 ```
 
 Pure logic belongs in a `.ts` + Vitest test; reach for a `.tsx` Jest test

@@ -15,11 +15,11 @@ importers:
         specifier: ^2.1.0
         version: 2.1.9(@types/node@26.1.1)(terser@5.49.0)
 
-  app:
+  apps/android:
     dependencies:
       '@desk-agent/protocol':
         specifier: workspace:*
-        version: link:../packages/protocol
+        version: link:../../packages/protocol
       '@react-native-async-storage/async-storage':
         specifier: ^2.1.2
         version: 2.2.0(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@20.1.0(typescript@5.9.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.17)(react@19.2.3))
