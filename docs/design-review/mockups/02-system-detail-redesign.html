@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Desk Agent — System Detail Redesign</title>
+<meta name="hz:slide-selector" content=".mockup" />
+<meta name="hz:canvas-width" content="1080" />
+<meta name="hz:canvas-height" content="2340" />
+<link rel="stylesheet" href="https://use.typekit.net/odv6isp.css">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#05070a; display:flex; justify-content:center; padding:40px 0; }
+
+  .mockup {
+    position:relative;
+    width:1080px;
+    height:2340px;
+    background:#08090c;
+    background-image: radial-gradient(circle at 50% -10%, rgba(110,231,160,0.06), transparent 45%);
+    overflow:hidden;
+    color:#F3F5F7;
+    font-family:"input-mono",monospace;
+    display:flex;
+    flex-direction:column;
+  }
+
+  .header {
+    height:150px;
+    flex-shrink:0;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:0 44px;
+    border-bottom:1px solid rgba(255,255,255,0.07);
+  }
+  .brand { display:flex; align-items:baseline; gap:14px; }
+  .brand-name { font-family:"degular-mono",sans-serif; font-weight:700; font-size:34px; letter-spacing:4px; color:#F7F9FA; }
+  .brand-dot { color:#6EE7A0; }
+  .brand-version { font-family:"ubuntu-mono",monospace; font-size:17px; color:#4B535C; letter-spacing:1px; }
+  .status-row { display:flex; align-items:center; gap:26px; }
+  .status-pill { display:flex; align-items:center; gap:10px; font-family:"ubuntu-mono",monospace; font-size:18px; letter-spacing:2px; color:#8B95A1; }
+  .dot { width:10px; height:10px; border-radius:50%; }
+  .dot.live { background:#6EE7A0; box-shadow:0 0 12px rgba(110,231,160,0.7); }
+  .status-pill.on { color:#D8FCE6; }
+  .theme-toggle { width:38px; height:38px; border-radius:50%; border:1px solid rgba(255,255,255,0.14); display:flex; align-items:center; justify-content:center; }
+
+  .nav { flex-shrink:0; display:flex; align-items:center; gap:22px; padding:34px 44px 0 44px; }
+  .back { font-family:"ubuntu-mono",monospace; font-size:19px; letter-spacing:2px; color:#6EE7A0; }
+  .nav-title { font-family:"degular-mono",sans-serif; font-weight:700; font-size:30px; letter-spacing:3px; color:#F7F9FA; }
+
+  .range-tabs { flex-shrink:0; display:flex; gap:10px; padding:30px 44px 0 44px; }
+  .range-tab { font-family:"ubuntu-mono",monospace; font-size:16px; letter-spacing:2px; color:#6C7580; padding:10px 20px; border-radius:100px; border:1px solid rgba(255,255,255,0.09); }
+  .range-tab.active { color:#08090c; background:#6EE7A0; border-color:#6EE7A0; font-weight:700; }
+
+  .overview-row { flex-shrink:0; display:flex; gap:22px; padding:30px 44px 0 44px; }
+  .stat-chip { flex:1; background:#101319; border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:22px 26px; }
+  .stat-chip-label { font-family:"ubuntu-mono",monospace; font-size:14px; letter-spacing:2px; color:#6C7580; margin-bottom:10px; }
+  .stat-chip-value { font-family:"degular-mono",sans-serif; font-weight:700; font-size:28px; color:#F3F5F7; }
+
+  .content { flex:1; padding:34px 44px 40px 44px; display:flex; flex-direction:column; gap:30px; }
+
+  .metric-card { flex:1; position:relative; background:#101319; border:1px solid rgba(255,255,255,0.07); border-radius:22px; padding:36px 40px; display:flex; flex-direction:column; }
+  .metric-card::before { content:""; position:absolute; left:0; top:0; bottom:0; width:3px; opacity:0.55; }
+  .metric-card.cpu::before { background:#6EE7A0; }
+  .metric-card.ram::before { background:#7DB8F5; }
+
+  .metric-top { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:24px; }
+  .metric-label { font-family:"degular-mono",sans-serif; font-weight:700; font-size:20px; letter-spacing:3px; color:#B9F5CE; }
+  .metric-card.ram .metric-label { color:#C7E0FA; }
+  .metric-value { font-family:"mono45-headline",monospace; font-weight:700; font-size:52px; }
+  .metric-card.cpu .metric-value { color:#6EE7A0; }
+  .metric-card.ram .metric-value { color:#7DB8F5; }
+
+  .chart-wrap { position:relative; flex:1; min-height:220px; }
+  .chart-wrap svg { width:100%; height:100%; }
+  .grid-line { stroke:rgba(255,255,255,0.06); stroke-width:1; }
+  .axis-label { font-family:"ubuntu-mono",monospace; font-size:13px; fill:#4B535C; }
+
+  .metric-foot { display:flex; justify-content:space-between; padding-top:24px; margin-top:24px; border-top:1px solid rgba(255,255,255,0.07); }
+  .foot-stat { text-align:center; }
+  .foot-stat-label { font-family:"ubuntu-mono",monospace; font-size:13px; letter-spacing:2px; color:#586069; margin-bottom:6px; }
+  .foot-stat-value { font-family:"degular-mono",sans-serif; font-weight:700; font-size:19px; color:#C7CDD4; }
+
+  .footer-strip { flex-shrink:0; margin:0 44px 40px 44px; display:flex; justify-content:space-between; align-items:center; padding:22px 30px; border-radius:100px; background:rgba(110,231,160,0.06); border:1px solid rgba(110,231,160,0.18); }
+  .footer-strip-left { display:flex; align-items:center; gap:12px; font-family:"ubuntu-mono",monospace; font-size:16px; letter-spacing:1px; color:#9AA3AD; }
+  .footer-strip-left .dot { width:8px; height:8px; border-radius:50%; background:#6EE7A0; }
+  .footer-strip-right { font-family:"ubuntu-mono",monospace; font-size:16px; color:#586069; }
+</style>
+</head>
+<body>
+<div class="mockup" data-canvas-width="1080" data-canvas-height="2340">
+
+  <div class="header">
+    <div class="brand">
+      <div class="brand-name">DESK <span class="brand-dot">·</span> AGENT</div>
+      <div class="brand-version">v0.2.0</div>
+    </div>
+    <div class="status-row">
+      <div class="status-pill on"><div class="dot live"></div>LIVE</div>
+      <div class="theme-toggle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#8B95A1" stroke-width="2" width="18" height="18"><circle cx="12" cy="12" r="9"/></svg>
+      </div>
+    </div>
+  </div>
+
+  <div class="nav">
+    <div class="back">‹ BACK</div>
+    <div class="nav-title">SYSTEM</div>
+  </div>
+
+  <div class="range-tabs">
+    <div class="range-tab active">1H</div>
+    <div class="range-tab">6H</div>
+    <div class="range-tab">24H</div>
+    <div class="range-tab">7D</div>
+  </div>
+
+  <div class="overview-row">
+    <div class="stat-chip"><div class="stat-chip-label">CPU AVG</div><div class="stat-chip-value">22%</div></div>
+    <div class="stat-chip"><div class="stat-chip-label">RAM AVG</div><div class="stat-chip-value">96%</div></div>
+    <div class="stat-chip"><div class="stat-chip-label">UPTIME</div><div class="stat-chip-value">00:03:29</div></div>
+  </div>
+
+  <div class="content">
+
+    <div class="metric-card cpu">
+      <div class="metric-top">
+        <div class="metric-label">CPU</div>
+        <div class="metric-value">24%</div>
+      </div>
+      <div class="chart-wrap">
+        <svg viewBox="0 0 900 260" preserveAspectRatio="none">
+          <line class="grid-line" x1="0" y1="10" x2="900" y2="10"/>
+          <line class="grid-line" x1="0" y1="87" x2="900" y2="87"/>
+          <line class="grid-line" x1="0" y1="164" x2="900" y2="164"/>
+          <line class="grid-line" x1="0" y1="240" x2="900" y2="240"/>
+          <text class="axis-label" x="0" y="6">100%</text>
+          <text class="axis-label" x="0" y="160">50%</text>
+          <text class="axis-label" x="0" y="236">0%</text>
+          <defs>
+            <linearGradient id="cpuFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#6EE7A0" stop-opacity="0.28"/>
+              <stop offset="100%" stop-color="#6EE7A0" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <polygon points="60,190 120,140 180,168 240,80 300,150 360,100 420,180 480,90 540,155 600,60 660,140 720,190 780,115 840,165 900,90 900,240 60,240" fill="url(#cpuFill)"/>
+          <polyline points="60,190 120,140 180,168 240,80 300,150 360,100 420,180 480,90 540,155 600,60 660,140 720,190 780,115 840,165 900,90" fill="none" stroke="#6EE7A0" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="metric-foot">
+        <div class="foot-stat"><div class="foot-stat-label">MIN</div><div class="foot-stat-value">6%</div></div>
+        <div class="foot-stat"><div class="foot-stat-label">AVG</div><div class="foot-stat-value">22%</div></div>
+        <div class="foot-stat"><div class="foot-stat-label">PEAK</div><div class="foot-stat-value">61%</div></div>
+      </div>
+    </div>
+
+    <div class="metric-card ram">
+      <div class="metric-top">
+        <div class="metric-label">RAM</div>
+        <div class="metric-value">98%</div>
+      </div>
+      <div class="chart-wrap">
+        <svg viewBox="0 0 900 260" preserveAspectRatio="none">
+          <line class="grid-line" x1="0" y1="10" x2="900" y2="10"/>
+          <line class="grid-line" x1="0" y1="87" x2="900" y2="87"/>
+          <line class="grid-line" x1="0" y1="164" x2="900" y2="164"/>
+          <line class="grid-line" x1="0" y1="240" x2="900" y2="240"/>
+          <text class="axis-label" x="0" y="6">100%</text>
+          <text class="axis-label" x="0" y="160">50%</text>
+          <text class="axis-label" x="0" y="236">0%</text>
+          <defs>
+            <linearGradient id="ramFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#7DB8F5" stop-opacity="0.28"/>
+              <stop offset="100%" stop-color="#7DB8F5" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <polygon points="60,40 120,45 180,150 240,140 300,140 360,40 420,42 480,205 540,200 600,95 660,42 720,150 780,175 840,70 900,45 900,240 60,240" fill="url(#ramFill)"/>
+          <polyline points="60,40 120,45 180,150 240,140 300,140 360,40 420,42 480,205 540,200 600,95 660,42 720,150 780,175 840,70 900,45" fill="none" stroke="#7DB8F5" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="metric-foot">
+        <div class="foot-stat"><div class="foot-stat-label">MIN</div><div class="foot-stat-value">14%</div></div>
+        <div class="foot-stat"><div class="foot-stat-label">AVG</div><div class="foot-stat-value">96%</div></div>
+        <div class="foot-stat"><div class="foot-stat-label">PEAK</div><div class="foot-stat-value">99%</div></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="footer-strip">
+    <div class="footer-strip-left"><div class="dot"></div>BATTERY N/A · DESKTOP DEVICE</div>
+    <div class="footer-strip-right">UPDATED JUST NOW</div>
+  </div>
+
+</div>
+</body>
+</html>
