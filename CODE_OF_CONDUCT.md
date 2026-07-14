@@ -49,7 +49,7 @@ representing the project in public spaces.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the maintainer at **hello@dubaideals.live**. All complaints will
+reported to the maintainer at **prakharsingh007@gmail.com**. All complaints will
 be reviewed and investigated promptly and fairly, and the privacy of the
 reporter will be respected.
 
