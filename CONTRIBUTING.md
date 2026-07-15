@@ -67,31 +67,37 @@ this project is built and shipped in — is a minor release: Slice 1a is
 `v0.1.0`, Slice 1b is `v0.2.0`, and so on. Patch releases are reserved for
 fixes that don't add a new slice's scope.
 
-Every release gets a [CHANGELOG.md](CHANGELOG.md) entry under
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) conventions before
-the tag is cut, describing what shipped in terms someone who didn't watch the
-PRs land can follow.
+Every release gets a [CHANGELOG.md](CHANGELOG.md) section generated from the
+conventional commit messages since the previous release (see "Cutting a
+release" below) — so write commit subjects someone who didn't watch the PRs
+land can follow. Sections for v0.4.0 and earlier are hand-written history.
 
 ### Cutting a release (maintainers)
 
-1. Bump versions to the new `X.Y.Z`: `apps/mac/package.json` `"version"`,
-   and in `apps/android/android/app/build.gradle` set `versionName "X.Y.Z"`
-   and increment `versionCode` by 1. (CI fails the release if the tag and
-   these versions disagree.)
-2. Finalize the `CHANGELOG.md` section header for `X.Y.Z` — the release body
-   is extracted from it; CI fails if the section is missing.
-3. Commit, then tag and push:
-       git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin main vX.Y.Z
-4. CI (`release.yml`) runs the full test suite, packs the DMG, builds the
-   signed APK, and creates a **draft** release. Nothing publishes on a red
-   build.
-5. Verify the draft: install the DMG on a Mac, sideload the APK on the
+Releases are automated by [semantic-release](https://semantic-release.gitbook.io/)
+(config: `.releaserc.json`); versions, the changelog, the tag, and the draft
+release all derive from conventional commit messages on `main` — `feat:` is
+a minor bump (a slice), `fix:` is a patch.
+
+1. Run the **release** workflow (Actions → release → Run workflow). Tick
+   *dry run* first if you want to preview the computed version and notes
+   without releasing anything.
+2. The workflow runs the full test suite, then semantic-release: bumps
+   `apps/mac/package.json` and the Android `versionName`/`versionCode`,
+   prepends the new section to `CHANGELOG.md`, commits those back to `main`,
+   tags `vX.Y.Z`, and creates a **draft** GitHub release with the DMG and
+   signed APK attached. Nothing publishes on a red build.
+3. Verify the draft: install the DMG on a Mac, sideload the APK on the
    reference phone (an upgrade over the previous version must not force an
    uninstall — if it does, the signing keystore changed: stop and
    investigate before publishing).
-6. Publish the draft.
-7. Update the Homebrew cask per `packaging/homebrew/README.md` (new
+4. Publish the draft.
+5. Update the Homebrew cask per `packaging/homebrew/README.md` (new
    `version` + `sha256`).
+
+Hand-written changelog entries are no longer needed (or picked up) for new
+releases — write it in the commit message instead. Sections for v0.4.0 and
+earlier remain hand-written history.
 
 ## Reporting issues
 
