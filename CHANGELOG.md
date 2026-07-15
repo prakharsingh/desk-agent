@@ -78,6 +78,9 @@ version for the whole monorepo, not per-package — see
 
 - A JNI reference-table leak crash: `CameraPresence` is now memoized so
   Home-screen re-renders no longer re-mount the camera pipeline.
+- The macOS settings window no longer flashes white when opened or closed:
+  the native window surface is painted the dark theme's background and the
+  window stays hidden until the renderer's first paint (`ready-to-show`).
 
 ## [0.3.0] — Slice 1c: wake-from-sleep + Slice 1d: phone display UI — 2026-07-12
 
