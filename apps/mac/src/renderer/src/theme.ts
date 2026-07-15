@@ -3,11 +3,16 @@
 // Applied as inline custom properties on the app root so every component
 // can reference var(--text) etc, exactly as the mockup's own inline styles
 // do -- this keeps the port mechanical rather than reinterpreted.
+import { WINDOW_BACKGROUND_COLOR } from '../../shared/constants.js';
+
 export type ThemeVars = Record<string, string>;
 
 export const darkTheme: ThemeVars = {
   '--sidebar': '#242426',
-  '--content': '#1c1c1e',
+  // Same value as the mockup's #1c1c1e, sourced from the shared constant so
+  // the native BrowserWindow backgroundColor can't drift from it (a mismatch
+  // reintroduces the open/close flash).
+  '--content': WINDOW_BACKGROUND_COLOR,
   '--group': '#2c2c2e',
   '--groupHi': '#333336',
   '--border': 'rgba(255,255,255,0.08)',

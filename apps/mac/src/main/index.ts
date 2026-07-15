@@ -11,7 +11,7 @@ import { LogBuffer } from './logBuffer.js';
 import { augmentedPath, checkBinaries } from './binaries.js';
 import * as dockWatch from './dockWatch.js';
 import { startUpdateChecker } from './updateCheck.js';
-import { TRAFFIC_LIGHT_POSITION } from '../shared/constants.js';
+import { TRAFFIC_LIGHT_POSITION, WINDOW_BACKGROUND_COLOR } from '../shared/constants.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -90,6 +90,13 @@ if (!gotLock) {
       // and not fake traffic-light dots -- those are real, OS-drawn ones).
       titleBarStyle: 'hiddenInset',
       trafficLightPosition: TRAFFIC_LIGHT_POSITION,
+      // Electron's default native surface is white; it shows for the frames
+      // before the renderer's first paint (open) and after its teardown
+      // (close), flashing white against the dark UI. Paint it the theme's
+      // --content instead, and don't show the window at all until the
+      // renderer has produced its first frame.
+      backgroundColor: WINDOW_BACKGROUND_COLOR,
+      show: false,
       webPreferences: {
         preload: path.join(__dirname, '../preload/index.cjs'),
         contextIsolation: true,
@@ -99,6 +106,9 @@ if (!gotLock) {
     });
     mainWindow.on('closed', () => {
       mainWindow = null;
+    });
+    mainWindow.once('ready-to-show', () => {
+      mainWindow?.show();
     });
 
     // electron-vite sets ELECTRON_RENDERER_URL in `dev` mode (renderer served

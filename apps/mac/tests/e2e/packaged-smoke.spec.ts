@@ -24,3 +24,20 @@ test('packaged app launches, shows the settings window, and boots the supervised
     await isolated.close();
   }
 });
+
+test('settings window native background matches the dark theme (no white flash on open/close)', async () => {
+  const isolated = await launchIsolatedApp();
+  try {
+    await isolated.electronApp.firstWindow();
+    // The native window surface is what shows for the frames before the
+    // renderer's first paint (open) and after its teardown (close). If it's
+    // Electron's default white instead of the dark theme's --content, both
+    // moments flash white.
+    const bg = await isolated.electronApp.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()[0].getBackgroundColor(),
+    );
+    expect(bg.toLowerCase()).toBe('#1c1c1e');
+  } finally {
+    await isolated.close();
+  }
+});
