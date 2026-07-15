@@ -1,0 +1,43 @@
+{
+  "branches": ["main"],
+  "tagFormat": "v${version}",
+  "plugins": [
+    ["@semantic-release/commit-analyzer", { "preset": "conventionalcommits" }],
+    ["@semantic-release/release-notes-generator", {
+      "preset": "conventionalcommits",
+      "presetConfig": {
+        "types": [
+          { "type": "feat", "section": "Added" },
+          { "type": "fix", "section": "Fixed" },
+          { "type": "refactor", "section": "Changed" },
+          { "type": "perf", "section": "Changed" },
+          { "type": "docs", "hidden": true },
+          { "type": "chore", "hidden": true },
+          { "type": "test", "hidden": true },
+          { "type": "ci", "hidden": true },
+          { "type": "build", "hidden": true },
+          { "type": "style", "hidden": true }
+        ]
+      }
+    }],
+    ["@semantic-release/changelog", {
+      "changelogFile": "CHANGELOG.md",
+      "changelogTitle": "# Changelog\n\nAll notable changes to Desk Agent OS are documented here. The format follows\n[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project\nfollows [Semantic Versioning](https://semver.org/) at the product level (one\nversion for the whole monorepo, not per-package — see\n[CONTRIBUTING.md](CONTRIBUTING.md#versioning--releases))."
+    }],
+    ["@semantic-release/exec", {
+      "prepareCmd": "node scripts/set-version.mjs ${nextRelease.version} && bash scripts/build-release-artifacts.sh ${nextRelease.version}"
+    }],
+    ["@semantic-release/git", {
+      "assets": ["CHANGELOG.md", "apps/mac/package.json", "apps/android/android/app/build.gradle"],
+      "message": "chore(release): v${nextRelease.version} [skip ci]"
+    }],
+    ["@semantic-release/github", {
+      "draftRelease": true,
+      "assets": [
+        { "path": "dist/DeskAgent-*.dmg" },
+        { "path": "dist/*.blockmap" },
+        { "path": "dist/desk-agent-*.apk" }
+      ]
+    }]
+  ]
+}
