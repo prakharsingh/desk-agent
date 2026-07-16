@@ -219,6 +219,15 @@ importers:
         specifier: workspace:*
         version: link:../protocol
 
+  packages/plugins/deck:
+    dependencies:
+      '@desk-agent/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../plugin-sdk
+      '@desk-agent/protocol':
+        specifier: workspace:*
+        version: link:../../protocol
+
   packages/plugins/energy-saver:
     dependencies:
       '@desk-agent/plugin-sdk':
