@@ -12,6 +12,7 @@
     "@desk-agent/plugin-system-stats": "workspace:*",
     "@desk-agent/plugin-weather": "workspace:*",
     "@desk-agent/plugin-energy-saver": "workspace:*",
+    "@desk-agent/plugin-deck": "workspace:*",
     "ws": "^8.18.0",
     "zod": "^3.23.0"
   },

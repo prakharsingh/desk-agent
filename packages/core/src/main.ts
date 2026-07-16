@@ -20,6 +20,7 @@ function resolvePluginRegistry(): Record<string, PluginRegistryEntry> {
     'system-stats': { modulePath: require.resolve('@desk-agent/plugin-system-stats'), permissions: ['sys:read-stats', 'sys:control-media'] },
     'weather': { modulePath: require.resolve('@desk-agent/plugin-weather'), permissions: ['net:api.weather'], configKey: 'weather' },
     'energy-saver': { modulePath: require.resolve('@desk-agent/plugin-energy-saver'), permissions: ['sys:control-display'] },
+    'deck': { modulePath: require.resolve('@desk-agent/plugin-deck'), permissions: ['sys:run-shortcuts', 'sys:open'], configKey: 'deck' },
   };
 }
 
