@@ -2,7 +2,7 @@ import React from 'react';
 import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
 import { theme } from '../theme.js';
 
-export type SectionIconKind = 'clock' | 'system' | 'presence' | 'playing' | 'voice' | 'deck' | 'light';
+export type SectionIconKind = 'clock' | 'system' | 'presence' | 'playing' | 'voice' | 'steamdeck' | 'light';
 
 export function SectionIcon({ kind, size = 14, color }: { kind: SectionIconKind; size?: number; color?: string }) {
   const accent = color ?? theme.colors.accent;
@@ -50,7 +50,7 @@ export function SectionIcon({ kind, size = 14, color }: { kind: SectionIconKind;
           <Line x1={10} y1={16} x2={10} y2={18.5} stroke={accent} strokeWidth={1.4} strokeLinecap="round" />
         </Svg>
       );
-    case 'deck':
+    case 'steamdeck':
       return (
         <Svg width={size} height={size} viewBox="0 0 20 20">
           <Rect x={1.5} y={6.5} width={17} height={9} rx={4} stroke={accent} strokeWidth={1.4} fill="none" />

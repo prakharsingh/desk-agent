@@ -38,7 +38,7 @@ export interface HomeScreenProps {
   onGoPresence: () => void;
   onGoClock: () => void;
   onGoVoice: () => void;
-  onGoDeck: () => void;
+  onGoSteamDeck: () => void;
   onGoLight: () => void;
 }
 
@@ -58,7 +58,7 @@ export function HomeScreen({
   onGoPresence,
   onGoClock,
   onGoVoice,
-  onGoDeck,
+  onGoSteamDeck,
   onGoLight,
 }: HomeScreenProps) {
   const { timeHHMM, timeSS } = formatClock(now);
@@ -199,9 +199,9 @@ export function HomeScreen({
           <Badge label="ROADMAP" tone="neutral" style={styles.roadmapBadge} />
           <Text style={styles.standbyCaption}>MODULE STANDBY</Text>
         </Card>
-        <Card onPress={onGoDeck} variant="roadmap" style={styles.halfCard}>
+        <Card onPress={onGoSteamDeck} variant="roadmap" style={styles.halfCard}>
           <View style={styles.labelRow}>
-            <IconChip kind="deck" tone="dim" />
+            <IconChip kind="steamdeck" tone="dim" />
             <Text style={styles.standbyLabel}>STEAM DECK</Text>
           </View>
           <Badge label="ROADMAP" tone="neutral" style={styles.roadmapBadge} />

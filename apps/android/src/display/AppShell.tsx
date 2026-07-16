@@ -63,7 +63,7 @@ export interface AppShellProps {
   onGoPresence: () => void;
   onGoClock: () => void;
   onGoVoice: () => void;
-  onGoDeck: () => void;
+  onGoSteamDeck: () => void;
   onGoLight: () => void;
   onBack: () => void;
   onSleep: () => void;
@@ -97,7 +97,7 @@ export function AppShell({
   onGoPresence,
   onGoClock,
   onGoVoice,
-  onGoDeck,
+  onGoSteamDeck,
   onGoLight,
   onBack,
   onSleep,
@@ -309,7 +309,7 @@ export function AppShell({
             onGoPresence={onGoPresence}
             onGoClock={onGoClock}
             onGoVoice={onGoVoice}
-            onGoDeck={onGoDeck}
+            onGoSteamDeck={onGoSteamDeck}
             onGoLight={onGoLight}
           />
         );

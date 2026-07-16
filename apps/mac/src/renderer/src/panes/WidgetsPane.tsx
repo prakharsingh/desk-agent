@@ -26,7 +26,7 @@ const SUBLABELS: Record<(typeof WIDGET_IDS)[number], string> = {
 
 const ROADMAP_ITEMS = [
   { label: 'Voice', sublabel: 'Assistant module' },
-  { label: 'Steam Deck', sublabel: 'Companion module' },
+  { label: 'Steam Deck (companion)', sublabel: 'Companion module' },
 ];
 
 function RoadmapBadge() {

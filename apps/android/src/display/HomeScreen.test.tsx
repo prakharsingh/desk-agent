@@ -48,7 +48,7 @@ const BASE_PROPS = {
   onGoPresence: NOOP,
   onGoClock: NOOP,
   onGoVoice: NOOP,
-  onGoDeck: NOOP,
+  onGoSteamDeck: NOOP,
   onGoLight: NOOP,
 };
 

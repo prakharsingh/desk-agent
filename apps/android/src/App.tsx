@@ -160,7 +160,7 @@ export default function App() {
   const onGoPresence = useCallback(() => setScreenState((s) => goTo(s, 'presence')), []);
   const onGoClock = useCallback(() => setScreenState((s) => goTo(s, 'clock')), []);
   const onGoVoice = useCallback(() => setScreenState((s) => goToStandby(s, STANDBY_VOICE)), []);
-  const onGoDeck = useCallback(() => setScreenState((s) => goToStandby(s, STANDBY_DECK)), []);
+  const onGoSteamDeck = useCallback(() => setScreenState((s) => goToStandby(s, STANDBY_DECK)), []);
   const onGoLight = useCallback(() => setScreenState((s) => goTo(s, 'light')), []);
   const onBack = useCallback(() => setScreenState(back), []);
   const onSleep = useCallback(() => setScreenState(sleep), []);
@@ -191,7 +191,7 @@ export default function App() {
       onGoPresence={onGoPresence}
       onGoClock={onGoClock}
       onGoVoice={onGoVoice}
-      onGoDeck={onGoDeck}
+      onGoSteamDeck={onGoSteamDeck}
       onGoLight={onGoLight}
       onGoSettings={onGoSettings}
       onBack={onBack}
