@@ -31,7 +31,15 @@ async function main() {
     exec: {
       run: async (command, args) => {
         try {
-          const { stdout, stderr } = await execFileAsync(command, args);
+          const pending = execFileAsync(command, args);
+          // Close the child's stdin immediately: execFile gives the child an
+          // open stdin pipe, and some allowlisted binaries block reading it
+          // until EOF -- `shortcuts run` hangs forever this way (it accepts
+          // piped input), which wedged deck shortcut presses in 'pending'.
+          // None of the allowlisted commands take input from us, so EOF is
+          // always correct.
+          pending.child.stdin?.end();
+          const { stdout, stderr } = await pending;
           return { stdout, stderr, code: 0 };
         } catch (err: any) {
           return { stdout: '', stderr: String(err), code: err.code ?? 1 };
