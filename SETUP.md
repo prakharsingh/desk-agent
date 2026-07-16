@@ -177,6 +177,17 @@ were required.
 - [x] Set `presence.wakeEnabled: false`, restart the core, return from a real
       absence → display stays asleep until a keypress (auto-sleep unaffected).
 
+**Deck (Slice 9):**
+- [ ] **Deck**: add the example `deck.buttons` to config.json, restart the core.
+      The DECK tile appears on the phone home screen; tapping it opens the grid.
+- [ ] Tap a `shortcut` button → the Shortcut runs on the Mac; the button pulses
+      (pending) then flashes green (ok). Check the core log for
+      `deck press ... latencyMs=` and record the number in the wiki.
+- [ ] Tap an `open` button → the app/URL opens on the Mac.
+- [ ] Kill the core mid-session, tap any button → the button shows the red
+      error treatment after ~1.5s (ack timeout), not a silent no-op.
+- [ ] Configure a shortcut name that doesn't exist → error blip + core log line.
+
 ## Troubleshooting
 
 See the [wiki Troubleshooting page](https://github.com/prakharsingh/desk-agent/wiki/Troubleshooting)

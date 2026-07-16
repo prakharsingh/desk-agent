@@ -67,6 +67,7 @@ and auto-start when the phone is docked — no terminal required.
 | **1c** | ✅ shipped | Programmatic wake of the external HDMI monitor when presence returns (no physical keypress), `caffeinate -u -t 2`. Hardware-verified on a OnePlus 6T + target Mac/monitor. `presence.wakeEnabled: false` disables it independently of auto-sleep. |
 | **1d** | ✅ shipped | Designed multi-screen phone dashboard, live camera preview + face-box overlay on the Presence screen, Open-Meteo weather rework, and the Chin Light fullscreen fill-light widget |
 | — | 🚧 on `main`, unreleased | macOS menu-bar app (Electron) that runs and supervises the core, widget-visibility sync from the Mac, auto-launch of the phone app on USB dock, phone screensaver on/off + duration controls, and a display visual-polish pass |
+| **9** | 🚧 on `main`, unreleased | Deck: phone-as-stream-deck button grid (shortcut/open/builtin), per-press honest acks |
 
 See [CHANGELOG.md](CHANGELOG.md) for what shipped in each slice.
 

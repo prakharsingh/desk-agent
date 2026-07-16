@@ -45,3 +45,13 @@ the gateway binding beyond loopback unexpectedly) are exactly what we want
 to hear about. "The WebSocket has no auth" on its own is the documented
 trust model rather than a vulnerability — but a report showing it's
 reachable beyond the USB tunnel in a default setup absolutely is one.
+
+### Deck buttons
+
+The Deck feature lets the USB-attached phone trigger Mac-side actions. The
+exec surface is allowlisted per permission, not open-ended: `sys:run-shortcuts`
+grants exactly `shortcuts run <name>` (pinned to the `run` subcommand) and
+`sys:open` grants the `open` binary; argv is always built by the deck plugin
+from structured config.json entries — raw shell never crosses the wire or the
+config. This is the same trust boundary as USB debugging itself: a device that
+can already `adb shell` into the phone is trusted to press buttons on it.
