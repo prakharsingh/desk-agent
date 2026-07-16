@@ -45,7 +45,7 @@ describe('DeckScreen', () => {
 
   it('applies the alert border treatment for a matching-seq error ack', async () => {
     const onPressButton = jest.fn().mockReturnValue(5);
-    const { rerender, toJSON } = await render(
+    const { rerender, toJSON, unmount } = await render(
       <DeckScreen buttons={BUTTONS} onPressButton={onPressButton} onBack={() => {}} />,
     );
     // Press first so the component records the in-flight seq=5 press --
@@ -61,5 +61,11 @@ describe('DeckScreen', () => {
       />,
     );
     expect(hasStyledNode(toJSON(), 'borderColor', theme.colors.alert)).toBe(true);
+    // The ack-driven decay effect schedules a real setTimeout (OK_BLIP_MS) to
+    // clear the pressed state back to idle; unmount explicitly so its
+    // cleanup clears that timer now instead of leaving it to fire ~600ms
+    // later against a torn-down tree, which previously left Jest's process
+    // unable to exit cleanly at the end of the run.
+    await unmount();
   });
 });

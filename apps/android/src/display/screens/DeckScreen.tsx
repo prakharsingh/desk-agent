@@ -27,13 +27,26 @@ export function DeckScreen({
   const [pressed, setPressed] = useState<InFlightPress | null>(null);
   const [, forceTick] = useState(0);
   const clearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastPressRef = useRef<DeckAck | undefined>(lastPress);
+  useEffect(() => { lastPressRef.current = lastPress; }, [lastPress]);
 
   // Re-render once at the ack deadline so a never-acked press flips to the
-  // error treatment, and once more shortly after to decay ok/error back to idle.
+  // error treatment, then -- if it's still un-acked at that point -- decay it
+  // back to idle shortly after (OK_BLIP_MS) instead of leaving it wedged.
   useEffect(() => {
     if (!pressed) return;
     if (clearTimer.current) clearTimeout(clearTimer.current);
-    clearTimer.current = setTimeout(() => forceTick((n) => n + 1), DECK_ACK_TIMEOUT_MS + 50);
+    const timeoutSeq = pressed.seq;
+    clearTimer.current = setTimeout(() => {
+      forceTick((n) => n + 1);
+      clearTimer.current = setTimeout(() => {
+        const ack = lastPressRef.current;
+        const stillUnacked = !ack || ack.seq !== timeoutSeq || ack.state === 'pending';
+        if (stillUnacked) {
+          setPressed((current) => (current && current.seq === timeoutSeq ? null : current));
+        }
+      }, OK_BLIP_MS);
+    }, DECK_ACK_TIMEOUT_MS + 50);
     return () => { if (clearTimer.current) clearTimeout(clearTimer.current); };
   }, [pressed]);
 
