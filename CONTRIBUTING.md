@@ -60,7 +60,7 @@ the CHANGELOG is written and it makes `git log` skimmable.
 
 ## Versioning & releases
 
-The whole monorepo is versioned together as one product, via annotated git
+The whole monorepo is versioned together as one product, via git
 tags (`vMAJOR.MINOR.PATCH`), independent of the individual (unpublished)
 package.json versions under `packages/*`. Each roadmap "slice" — the unit
 this project is built and shipped in — is a minor release: Slice 1a is

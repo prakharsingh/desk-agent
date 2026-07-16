@@ -40,6 +40,10 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      - name: Guard — release baseline tag exists
+        run: |
+          [ -n "$(git tag -l 'v*')" ] || { echo "::error::no v* tags found — semantic-release would release the full history as v1.0.0. Push the baseline tags (see CONTRIBUTING.md) before running this workflow."; exit 1; }
+
       - name: Guard — hermes-compiler pin matches react-native
         run: |
           PIN=$(node -p "require('./apps/android/package.json').devDependencies['hermes-compiler']")
