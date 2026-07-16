@@ -30,3 +30,11 @@ export function buildMediaActionFrame(action: 'togglePlayPause' | 'next' | 'prev
 export function buildScreensaverConfigFrame(config: ScreensaverConfig): Frame {
   return createFrame('event.publish', { eventName: 'screensaver.config', data: config });
 }
+
+export function buildDeckPressFrame(buttonId: string, seq: number): Frame {
+  return createFrame('action.invoke', { pluginId: 'deck', action: 'press', args: { buttonId, seq } });
+}
+
+export function buildDeckBuiltinFrame(pluginId: string, action: string, args?: Record<string, unknown>): Frame {
+  return createFrame('action.invoke', { pluginId, action, ...(args ? { args } : {}) });
+}

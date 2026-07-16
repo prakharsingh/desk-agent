@@ -12,7 +12,7 @@ describe('IconChip', () => {
   });
 
   it('renders every section icon kind without crashing', async () => {
-    const kinds = ['clock', 'system', 'presence', 'playing', 'voice', 'steamdeck', 'light'] as const;
+    const kinds = ['clock', 'system', 'presence', 'playing', 'voice', 'steamdeck', 'light', 'deck'] as const;
     for (const kind of kinds) {
       await render(<IconChip kind={kind} />);
     }

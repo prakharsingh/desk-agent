@@ -40,6 +40,7 @@ export interface HomeScreenProps {
   onGoVoice: () => void;
   onGoSteamDeck: () => void;
   onGoLight: () => void;
+  onGoDeck: () => void;
 }
 
 export function HomeScreen({
@@ -60,6 +61,7 @@ export function HomeScreen({
   onGoVoice,
   onGoSteamDeck,
   onGoLight,
+  onGoDeck,
 }: HomeScreenProps) {
   const { timeHHMM, timeSS } = formatClock(now);
   const dateStr = formatDate(now);
@@ -185,6 +187,21 @@ export function HomeScreen({
             </Card>
           )}
         </View>
+      )}
+
+      {/* Deck card -- real, isVisible-gated tile for the phone-as-stream-deck
+          button grid (config.json's deck.buttons), same real-module treatment
+          as System/Weather/Now Playing above. */}
+      {isVisible('deck') && (
+        <Card onPress={onGoDeck} accent>
+          <View style={styles.cardHeaderRow}>
+            <View style={styles.labelRow}>
+              <IconChip kind="deck" />
+              <Text style={styles.sectionLabelAccent}>DECK</Text>
+            </View>
+            <Text style={styles.chevron}>›</Text>
+          </View>
+        </Card>
       )}
 
       {/* Voice + Steam Deck standby row -- roadmap variant: dashed, dimmed,

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readSystemStats, readWeather } from './widgetReaders.js';
+import { readSystemStats, readWeather, readDeck } from './widgetReaders.js';
 import type { Widget } from '@desk-agent/protocol';
 
 describe('readSystemStats', () => {
@@ -99,5 +99,65 @@ describe('readWeather', () => {
       w1: { type: 'weather', props: { tempF: 68, conditions: 'Cloudy', stale: false, forecast: 'nope' } },
     };
     expect(readWeather(widgets).forecast).toEqual([]);
+  });
+});
+
+describe('readDeck', () => {
+  it('reads buttons, grid, and lastPress when the widget is present', () => {
+    const widgets: Record<string, Widget> = {
+      w1: {
+        type: 'deck',
+        props: {
+          buttons: [
+            { id: 'focus', label: 'Focus', glyph: '◐', color: '#5FD07A', kind: 'shortcut', pluginId: 'focus-mode', action: 'toggle' },
+          ],
+          grid: { rows: 2, cols: 3 },
+          lastPress: { seq: 5, buttonId: 'focus', state: 'ok' },
+        },
+      },
+    };
+    expect(readDeck(widgets)).toEqual({
+      buttons: [
+        { id: 'focus', label: 'Focus', glyph: '◐', color: '#5FD07A', kind: 'shortcut', pluginId: 'focus-mode', action: 'toggle' },
+      ],
+      grid: { rows: 2, cols: 3 },
+      lastPress: { seq: 5, buttonId: 'focus', state: 'ok' },
+    });
+  });
+
+  it('returns honest placeholders when the widget is absent', () => {
+    expect(readDeck({})).toEqual({ buttons: [] });
+  });
+
+  it('drops malformed buttons instead of rendering garbage', () => {
+    const widgets: Record<string, Widget> = {
+      w1: {
+        type: 'deck',
+        props: {
+          buttons: [
+            { id: 'focus', label: 'Focus', kind: 'shortcut' },
+            { id: 'bad-kind', label: 'Bad', kind: 'nonsense' },
+            { label: 'No id', kind: 'shortcut' },
+            null,
+            'garbage',
+          ],
+        },
+      },
+    };
+    expect(readDeck(widgets).buttons).toEqual([{ id: 'focus', label: 'Focus', kind: 'shortcut' }]);
+  });
+
+  it('omits grid and lastPress when absent instead of fabricating them', () => {
+    const widgets: Record<string, Widget> = {
+      w1: { type: 'deck', props: { buttons: [] } },
+    };
+    expect(readDeck(widgets)).toEqual({ buttons: [] });
+  });
+
+  it('defaults buttons to an empty array when the field is missing or not an array', () => {
+    const widgets: Record<string, Widget> = {
+      w1: { type: 'deck', props: { buttons: 'nope' } },
+    };
+    expect(readDeck(widgets).buttons).toEqual([]);
   });
 });

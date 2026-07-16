@@ -17,8 +17,9 @@ import { SystemDetail } from './screens/SystemDetail.js';
 import { WeatherDetail } from './screens/WeatherDetail.js';
 import { LightScreen } from './screens/LightScreen.js';
 import { SettingsScreen } from './screens/SettingsScreen.js';
+import { DeckScreen } from './screens/DeckScreen.js';
 import type { LightColorPreset } from './lightColor.js';
-import { readSystemStats, readWeather } from './widgetReaders.js';
+import { readSystemStats, readWeather, readDeck, type DeckButtonView } from './widgetReaders.js';
 import { derivePresence } from './derivePresence.js';
 import { shouldAutoIdleWithConfig } from './autoIdle.js';
 import { pushHistory } from './sparkline.js';
@@ -51,6 +52,10 @@ export interface AppShellProps {
   onTogglePlayPause?: () => void;
   onNextTrack?: () => void;
   onPreviousTrack?: () => void;
+  // Deck button press: App.tsx sends the right frame (deck press vs. builtin
+  // fire-and-forget) and returns the seq used for tracking, or null for a
+  // builtin (see App.tsx's onPressDeckButton doc comment).
+  onPressDeckButton: (button: DeckButtonView) => number | null;
   sendFrame: (json: string) => void;
   connectionEpoch: number;
   onSensor: (partial: Partial<SensorFrame>) => void;
@@ -65,6 +70,7 @@ export interface AppShellProps {
   onGoVoice: () => void;
   onGoSteamDeck: () => void;
   onGoLight: () => void;
+  onGoDeck: () => void;
   onBack: () => void;
   onSleep: () => void;
   onWake: () => void;
@@ -85,6 +91,7 @@ export function AppShell({
   onTogglePlayPause,
   onNextTrack,
   onPreviousTrack,
+  onPressDeckButton,
   sendFrame,
   connectionEpoch,
   onSensor,
@@ -99,6 +106,7 @@ export function AppShell({
   onGoVoice,
   onGoSteamDeck,
   onGoLight,
+  onGoDeck,
   onBack,
   onSleep,
   onWake,
@@ -205,6 +213,7 @@ export function AppShell({
 
   const stats = useMemo(() => readSystemStats(widgets), [widgets]);
   const weather = useMemo(() => readWeather(widgets), [widgets]);
+  const deck = useMemo(() => readDeck(widgets), [widgets]);
   const presence = useMemo(() => derivePresence(sensorFrame, cameraEnabled), [sensorFrame, cameraEnabled]);
 
   // CPU/RAM sparkline history: accumulated here because AppShell is the
@@ -290,6 +299,16 @@ export function AppShell({
         return <StandbyScreen standby={screenState.standby ?? STANDBY_VOICE} onBack={onBack} />;
       case 'settings':
         return <SettingsScreen config={screensaverConfig} onChange={onChangeScreensaverConfig} onBack={onBack} />;
+      case 'deck':
+        return (
+          <DeckScreen
+            buttons={deck.buttons}
+            grid={deck.grid}
+            lastPress={deck.lastPress}
+            onPressButton={onPressDeckButton}
+            onBack={onBack}
+          />
+        );
       case 'home':
       default:
         return (
@@ -311,6 +330,7 @@ export function AppShell({
             onGoVoice={onGoVoice}
             onGoSteamDeck={onGoSteamDeck}
             onGoLight={onGoLight}
+            onGoDeck={onGoDeck}
           />
         );
     }
