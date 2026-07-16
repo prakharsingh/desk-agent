@@ -187,6 +187,11 @@ were required.
 - [ ] Kill the core mid-session, tap any button → the button shows the red
       error treatment after ~1.5s (ack timeout), not a silent no-op.
 - [ ] Configure a shortcut name that doesn't exist → error blip + core log line.
+- [ ] Relaunch the phone app mid-core-session (or reload it), then tap a button
+      that was already pressed once before the relaunch → pending → ok, NOT
+      an error blip (regression probe: the deck seq counter must be
+      clock-seeded so it stays ahead of the plugin's newest-seq high-water
+      mark, which persists for the core's lifetime across phone relaunches).
 
 ## Troubleshooting
 

@@ -152,7 +152,14 @@ export default function App() {
   // Everything else (shortcut/open) goes through the deck plugin's press
   // action with a locally incrementing seq DeckScreen uses to match the
   // eventual widget-republish ack (see deckPress.ts).
-  const deckSeqRef = useRef(0);
+  // Seeded from the clock (not 0) so seqs stay strictly increasing across
+  // app relaunches: the deck plugin keeps a newest-seq high-water mark for
+  // the *core's* lifetime (packages/plugins/deck/src/index.ts), which
+  // outlives any single phone-app session. A counter that resets to 0 on
+  // relaunch would replay seqs the plugin has already seen as "newest",
+  // so every post-relaunch ack gets silently suppressed by the >= guard --
+  // producing false error blips on presses that actually succeeded on the Mac.
+  const deckSeqRef = useRef(Date.now());
   const onPressDeckButton = useCallback(
     (button: DeckButtonView): number | null => {
       const t0 = Date.now();

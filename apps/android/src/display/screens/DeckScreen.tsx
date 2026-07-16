@@ -81,12 +81,17 @@ export function DeckScreen({
               <Pressable
                 key={button.id}
                 onPressIn={() => handlePressIn(button)}
-                style={[
+                style={({ pressed: touchPressed }) => [
                   styles.btn,
                   { width: cellSize, height: cellSize },
                   state === 'pending' && styles.btnPending,
                   state === 'ok' && styles.btnOk,
                   state === 'error' && styles.btnError,
+                  // Builtin buttons return null from onPressButton, so `state`
+                  // never leaves idle for them -- without this they'd get
+                  // haptic feedback (Vibration.vibrate above) but zero visual
+                  // feedback on contact, which the spec requires immediately.
+                  touchPressed && styles.btnPressedIn,
                 ]}
               >
                 <View style={[styles.accentBar, { backgroundColor: accent }]} />
@@ -114,9 +119,12 @@ const styles = StyleSheet.create({
     borderRadius: theme.radii.card, alignItems: 'center', justifyContent: 'center', gap: theme.spacing.sm,
     overflow: 'hidden',
   },
-  btnPending: { borderColor: '#2d4038' },
+  btnPending: { borderColor: theme.colors.accentBorder },
   btnOk: { borderColor: theme.colors.accent },
   btnError: { borderColor: theme.colors.alert },
+  // Immediate touch-down feedback for every button, including builtins
+  // (which never enter the pending/ok/error ack state machine at all).
+  btnPressedIn: { borderColor: theme.colors.accentBorder, backgroundColor: theme.colors.accentBg },
   accentBar: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, opacity: 0.55 },
   errBadge: { position: 'absolute', top: 8, right: 8, color: theme.colors.alert, fontFamily: theme.font.bold, fontSize: 12 },
   glyph: { fontSize: 26, fontFamily: theme.font.medium },
