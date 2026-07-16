@@ -90,20 +90,34 @@ export function createDeckPlugin(config: DeckPluginConfig): Plugin {
       if (!argv) {
         // Unknown id, or a builtin press that should never have been routed
         // here -- ack it as an error rather than silently dropping it.
-        lastPress = { seq, buttonId, state: 'error' };
+        // The host doesn't serialize onAction invocations (wsGateway/workerEntry
+        // async listeners fire-and-forget), so overlapping presses can settle
+        // out of order and race on this module-scoped slot -- only let the
+        // newest seq win, so a slow stale ack can never clobber a fresher one.
+        if (seq >= (lastPress?.seq ?? -Infinity)) {
+          lastPress = { seq, buttonId, state: 'error' };
+          publish(ctx);
+        }
         ctx.log('warn', `deck press for unknown/non-exec button "${buttonId}"`);
-        publish(ctx);
         return;
       }
 
-      lastPress = { seq, buttonId, state: 'pending' };
-      publish(ctx);
+      // Same newest-seq guard as above: unserialized concurrent onAction
+      // calls means seq must gate every lastPress write, not just this one.
+      if (seq >= (lastPress?.seq ?? -Infinity)) {
+        lastPress = { seq, buttonId, state: 'pending' };
+        publish(ctx);
+      }
       const result = await ctx.exec.run(argv.command, argv.args);
       // Mac-side latency segment (single clock): action receipt -> exec settled.
       ctx.log('info', `deck press ${buttonId} seq=${seq} exec=${argv.command} code=${result.code} latencyMs=${Date.now() - receivedAt}`);
-      lastPress = { seq, buttonId, state: result.code === 0 ? 'ok' : 'error' };
       if (result.code !== 0) ctx.log('warn', `deck button ${buttonId} failed: ${result.stderr.trim()}`);
-      publish(ctx);
+      // Newest-seq guard again: a slower exec settling later must not
+      // overwrite a newer press's already-published ack.
+      if (seq >= (lastPress?.seq ?? -Infinity)) {
+        lastPress = { seq, buttonId, state: result.code === 0 ? 'ok' : 'error' };
+        publish(ctx);
+      }
     },
     onEvent() {},
   };
