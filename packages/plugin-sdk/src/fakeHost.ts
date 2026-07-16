@@ -10,6 +10,7 @@ export interface FakeHostRecorder {
   publishedWidgets: Array<{ widgetId: string; widget: Widget }>;
   logs: Array<{ level: string; message: string }>;
   deniedCalls: string[];
+  execCalls: Array<{ command: string; args: string[] }>;
 }
 
 export function createFakeHost(plugin: Plugin, options: FakeHostOptions = {}) {
@@ -19,6 +20,7 @@ export function createFakeHost(plugin: Plugin, options: FakeHostOptions = {}) {
     publishedWidgets: [],
     logs: [],
     deniedCalls: [],
+    execCalls: [],
   };
 
   const ctx: Ctx = {
@@ -39,13 +41,18 @@ export function createFakeHost(plugin: Plugin, options: FakeHostOptions = {}) {
     publishEvent: (eventName, data) => recorder.publishedEvents.push({ eventName, data }),
     publishWidget: (widgetId, widget) => recorder.publishedWidgets.push({ widgetId, widget }),
     exec: {
-      async run(_command, _args): Promise<ExecResult> {
+      async run(command, args): Promise<ExecResult> {
         const hasSysPermission =
-          granted.has('sys:read-stats') || granted.has('sys:control-display') || granted.has('sys:control-media');
+          granted.has('sys:read-stats') ||
+          granted.has('sys:control-display') ||
+          granted.has('sys:control-media') ||
+          granted.has('sys:run-shortcuts') ||
+          granted.has('sys:open');
         if (!hasSysPermission) {
           recorder.deniedCalls.push('exec.run');
           return { stdout: '', stderr: 'permission denied', code: 1 };
         }
+        recorder.execCalls.push({ command, args: [...args] });
         return { stdout: '', stderr: '', code: 0 };
       },
     },

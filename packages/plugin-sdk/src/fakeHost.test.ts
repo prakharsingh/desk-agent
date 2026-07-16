@@ -55,4 +55,19 @@ describe('createFakeHost', () => {
     await host.init();
     expect(host.recorder.deniedCalls).toContain('exec.run');
   });
+
+  it('records exec calls and honors sys:run-shortcuts / sys:open', async () => {
+    const plugin: Plugin = {
+      id: 'p',
+      permissions: ['sys:run-shortcuts', 'sys:open'],
+      init: async () => {},
+      getWidgets: () => [],
+      onAction: async () => {},
+      onEvent: async () => {},
+    };
+    const host = createFakeHost(plugin);
+    const result = await host.ctx.exec.run('shortcuts', ['run', 'X']);
+    expect(result.code).toBe(0);
+    expect(host.recorder.execCalls).toEqual([{ command: 'shortcuts', args: ['run', 'X'] }]);
+  });
 });

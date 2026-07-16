@@ -22,6 +22,12 @@ const EXEC_ALLOWLIST: ReadonlyArray<{ permission: Permission; command: string; f
   { permission: 'sys:control-media', command: 'nowplaying-cli', firstArg: 'togglePlayPause' },
   { permission: 'sys:control-media', command: 'nowplaying-cli', firstArg: 'next' },
   { permission: 'sys:control-media', command: 'nowplaying-cli', firstArg: 'previous' },
+  // Deck plugin (spec 2026-07-16-phone-deck-design.md): `shortcuts` is
+  // pinned to its `run` subcommand so the permission can't enumerate or
+  // edit shortcuts; `open` takes config-supplied args (app name or URL),
+  // which is acceptable because config.json is user-owned.
+  { permission: 'sys:run-shortcuts', command: 'shortcuts', firstArg: 'run' },
+  { permission: 'sys:open', command: 'open' },
 ];
 
 function execPermissionsFor(command: string, args: string[] | undefined): Permission[] {

@@ -148,6 +148,29 @@ describe('createEnforcedCtx', () => {
     expect(onDenied).toHaveBeenCalledWith(expect.objectContaining({ requiredPermission: null }));
   });
 
+  it('sys:run-shortcuts allows only `shortcuts run`', async () => {
+    const base = makeBaseCtx();
+    const onDenied = vi.fn();
+    const ctx = createEnforcedCtx('deck', ['sys:run-shortcuts'], base, onDenied);
+    const runResult = await ctx.exec.run('shortcuts', ['run', 'Focus Mode']);
+    expect(runResult.code).toBe(0);
+    expect(base.exec.run).toHaveBeenCalledWith('shortcuts', ['run', 'Focus Mode']);
+    const listResult = await ctx.exec.run('shortcuts', ['list']);
+    expect(listResult.code).toBe(1);
+    expect(onDenied).toHaveBeenCalled();
+  });
+
+  it('sys:open allows the open binary and nothing else', async () => {
+    const base = makeBaseCtx();
+    const onDenied = vi.fn();
+    const ctx = createEnforcedCtx('deck', ['sys:open'], base, onDenied);
+    const openResult = await ctx.exec.run('open', ['-a', 'Figma']);
+    expect(openResult.code).toBe(0);
+    expect(base.exec.run).toHaveBeenCalledWith('open', ['-a', 'Figma']);
+    const denied = await ctx.exec.run('pmset', ['displaysleepnow']);
+    expect(denied.code).toBe(1);
+  });
+
   it('passes timer, log, publishEvent, publishWidget through ungated', () => {
     const base = makeBaseCtx();
     const ctx = createEnforcedCtx('weather', [], base, vi.fn());
