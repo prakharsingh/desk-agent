@@ -91,4 +91,36 @@ describe('loadConfigFromFile', () => {
     expect(() => loadConfigFromFile(configPath)).toThrow(configPath);
     expect(() => loadConfigFromFile(configPath)).toThrow(/not valid JSON/);
   });
+
+  it('validates that config.example.json parses and declares all configured plugins in enabledPlugins', () => {
+    // Resolve the repo root from this test file's location
+    const testFileUrl = new URL(import.meta.url);
+    const testFilePath = testFileUrl.pathname;
+    // packages/core/src/configLoader.test.ts -> ../../../ for repo root
+    const repoRoot = path.resolve(path.dirname(testFilePath), '..', '..', '..');
+    const exampleConfigPath = path.join(repoRoot, 'config.example.json');
+
+    // Read and parse the example config
+    const exampleConfigText = fs.readFileSync(exampleConfigPath, 'utf-8');
+    const exampleConfigData = JSON.parse(exampleConfigText);
+
+    // Verify it parses through loadConfig without errors
+    const config = loadConfig(exampleConfigData);
+    expect(config).toBeDefined();
+
+    // Extract all top-level keys that are plugin configuration blocks
+    // (keys that aren't special config keys like enabledPlugins, presenceDebounceMs, wsPort, presence)
+    const specialKeys = new Set(['enabledPlugins', 'presenceDebounceMs', 'wsPort', 'presence']);
+    const configuredPlugins = Object.keys(exampleConfigData).filter(
+      (key) => !specialKeys.has(key) && typeof exampleConfigData[key] === 'object'
+    );
+
+    // Assert that enabledPlugins includes all plugins that have configuration
+    for (const pluginId of configuredPlugins) {
+      expect(config.enabledPlugins).toContain(pluginId);
+    }
+
+    // At minimum, assert that 'deck' is included (the defect being fixed)
+    expect(config.enabledPlugins).toContain('deck');
+  });
 });

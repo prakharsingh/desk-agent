@@ -1,5 +1,5 @@
 {
-  "enabledPlugins": ["system-stats", "weather", "energy-saver"],
+  "enabledPlugins": ["system-stats", "weather", "energy-saver", "deck"],
   "weather": { "location": "Seattle" },
   "presenceDebounceMs": 10000,
   "wsPort": 8787,
