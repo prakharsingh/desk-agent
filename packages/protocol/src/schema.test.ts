@@ -4,7 +4,11 @@ import { parseScreensaverConfig } from './schema.js';
 
 describe('WIDGET_IDS', () => {
   it('is the single source of truth for known widget ids, shared by the Mac config schema and the phone app', () => {
-    expect(WIDGET_IDS).toEqual(['clock', 'system', 'weather', 'presence', 'playing', 'light']);
+    expect(WIDGET_IDS).toEqual(['clock', 'system', 'weather', 'presence', 'playing', 'light', 'deck']);
+  });
+
+  it('includes the deck tile (phone-as-stream-deck, slice 1)', () => {
+    expect(WIDGET_IDS).toContain('deck');
   });
 });
 

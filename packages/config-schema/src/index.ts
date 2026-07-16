@@ -71,8 +71,8 @@ export const ConfigSchema = z.object({
   // phone in the hello-reply's widget.update frame (see
   // packages/core/src/wsGateway.ts); app/src/display/HomeScreen.tsx
   // conditionally renders each tile against this list. Roadmap-only tiles
-  // (Voice, Steam Deck) aren't in WIDGET_IDS at all -- they're always shown,
-  // always disabled, never toggleable.
+  // (Voice, the Valve Steam Deck companion — not the 'deck' button grid) aren't
+  // in WIDGET_IDS at all -- they're always shown, always disabled, never toggleable.
   visibleWidgets: z.array(z.string()).default([...WIDGET_IDS]),
 });
 

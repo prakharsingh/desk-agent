@@ -5,10 +5,12 @@ export const PROTOCOL_VERSION = 1 as const;
 // Single source of truth for which phone-dashboard tiles exist, shared by
 // the Mac config schema (packages/config-schema's visibleWidgets default)
 // and the phone app (app/src/display/HomeScreen.tsx's per-tile visibility
-// check) -- both import this instead of hand-copying the list. Voice/Steam
-// Deck are permanently roadmap tiles (never toggleable, always shown
-// disabled) and deliberately excluded here.
-export const WIDGET_IDS = ['clock', 'system', 'weather', 'presence', 'playing', 'light'] as const;
+// check) -- both import this instead of hand-copying the list. Voice and
+// the (Valve) Steam Deck companion are permanently roadmap tiles (never
+// toggleable, always shown disabled) and deliberately excluded here. The
+// 'deck' id below is UNRELATED to the Steam Deck: it is the phone-as-
+// stream-deck button grid (docs/superpowers/specs/2026-07-16-phone-deck-design.md).
+export const WIDGET_IDS = ['clock', 'system', 'weather', 'presence', 'playing', 'light', 'deck'] as const;
 export type WidgetId = (typeof WIDGET_IDS)[number];
 
 export const WidgetSchema = z.object({
