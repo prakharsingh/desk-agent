@@ -7,7 +7,7 @@ import { loadConfig, loadConfigFromFile } from './index.js';
 describe('loadConfig', () => {
   it('applies sane defaults when optional fields are omitted', () => {
     const config = loadConfig({ weather: { location: 'Seattle' } });
-    expect(config.enabledPlugins).toEqual(['system-stats', 'weather', 'energy-saver']);
+    expect(config.enabledPlugins).toEqual(['system-stats', 'weather', 'energy-saver', 'deck']);
     expect(config.presenceDebounceMs).toBe(30000);
     expect(config.wsPort).toBe(8787);
   });
