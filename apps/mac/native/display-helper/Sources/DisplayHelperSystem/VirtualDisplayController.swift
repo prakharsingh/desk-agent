@@ -42,7 +42,7 @@ public final class VirtualDisplayController {
         d.productID = productId
         d.serialNum = serialNum == 0 ? 1 : serialNum
         d.terminationHandler = { _, _ in
-            FileHandle.standardError.write(Data("[display-helper] virtual display terminated\n".utf8))
+            Stderr.diag("virtual display terminated")
         }
         guard let vd = CGVirtualDisplay(descriptor: d) else { throw VirtualDisplayError.unsupported }
         display = vd

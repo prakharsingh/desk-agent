@@ -3,14 +3,16 @@ import DisplayHelperCore
 import DisplayHelperSystem
 import Foundation
 
+// A closed stdout/stderr pipe (Electron main quit or crashed) must make writes fail with EPIPE, not
+// kill the helper before the display is destroyed. Set first, for every mode.
+signal(SIGPIPE, SIG_IGN)
+
 func fail(_ message: String, code: Int32) -> Never {
-    FileHandle.standardError.write(Data((message + "\n").utf8))
+    Stderr.write(message)
     exit(code)
 }
 
-func diag(_ message: String) {
-    FileHandle.standardError.write(Data("[display-helper] \(message)\n".utf8))
-}
+func diag(_ message: String) { Stderr.diag(message) }
 
 /// Contract C stdout: one JSON event per line. stdio (not FileHandle) so a closed pipe returns EPIPE
 /// instead of raising (SIGPIPE is ignored by `ProcessLifecycle`). Called only on the session queue.
@@ -45,13 +47,15 @@ final class ServeMode {
 
     /// Installs the watchers; the caller then runs the AppKit run loop.
     func install() {
+        // Shut down first, then log: the diagnostic is best-effort (the parent may be gone) and must
+        // never stand between us and destroying the display. Before `start`, shutdown exits directly.
         lifecycle.watchSignals { [unowned self] signo in
-            diag("signal \(signo)")
             self.shutdown(.signal)
+            diag("signal \(signo)")
         }
         lifecycle.watchParent { [unowned self] in
-            diag("parent process died")
             self.shutdown(.parentExit)
+            diag("parent process died")
         }
         lifecycle.watchStdin(
             onLine: { [unowned self] line in self.handle(self.input.line(line)) },
@@ -177,12 +181,13 @@ case .serve:
     if !ProcessInfo.processInfo.isOperatingSystemAtLeast(OperatingSystemVersion(majorVersion: 14, minorVersion: 0, patchVersion: 0)) {
         fail("macOS 14 or later is required", code: 3)
     }
-    let serve = ServeMode()
-    serve.install()
     // A real AppKit run loop (no Dock icon, no menu bar) so NSWorkspace sleep/wake and display
-    // reconfiguration notifications are delivered later (Tasks 4.3, 5.2). Session work stays on the
-    // serial session queue; the process exits from there after `ended`.
+    // reconfiguration notifications are delivered later (Tasks 4.3, 5.2). Set up BEFORE the watchers:
+    // the stdin thread may deliver `start` (and create the display) as soon as `install()` returns.
+    // Session work stays on the serial session queue; the process exits from there after `ended`.
     let app = NSApplication.shared
     app.setActivationPolicy(.prohibited)
+    let serve = ServeMode()
+    serve.install()
     app.run()
 }

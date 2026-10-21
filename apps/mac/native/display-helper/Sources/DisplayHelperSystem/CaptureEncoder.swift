@@ -67,7 +67,7 @@ public final class CaptureEncoder: NSObject, SCStreamOutput, SCStreamDelegate {
     private static func now() -> TimeInterval { ProcessInfo.processInfo.systemUptime }
 
     private static func log(_ s: String) {
-        FileHandle.standardError.write(Data("[display-helper] capture: \(s)\n".utf8))
+        Stderr.diag("capture: \(s)")
     }
 
     private func onQueue<T>(_ body: () throws -> T) rethrows -> T {
