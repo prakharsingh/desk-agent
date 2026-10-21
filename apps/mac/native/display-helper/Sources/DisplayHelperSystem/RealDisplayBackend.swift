@@ -11,24 +11,18 @@ public final class RealDisplayBackend: DisplayBackend {
     public let encoder: CaptureEncoder
     private let queue: DispatchQueue
     private var display: VirtualDisplayController?
-    private var requestedScreenRecording = false
+    private let screenCapture: ScreenCaptureAccess
 
-    public init(queue: DispatchQueue) {
+    public init(queue: DispatchQueue, screenCapture: ScreenCaptureAccess = .system) {
         self.queue = queue
+        self.screenCapture = screenCapture
         encoder = CaptureEncoder(queue: queue)
     }
 
-    /// When Screen Recording is missing, asks once (`CGRequestScreenCaptureAccess`) so the system
-    /// prompt / Settings entry appears — attributed to the responsible app (Desk Agent when spawned
-    /// by main) — and still reports `false` for this session.
-    public func preflightScreenRecording() -> Bool {
-        if CGPreflightScreenCaptureAccess() { return true }
-        if !requestedScreenRecording {
-            requestedScreenRecording = true
-            _ = CGRequestScreenCaptureAccess()
-        }
-        return false
-    }
+    /// Preflight only: `serve` never shows the Screen Recording prompt. Not granted → the session
+    /// ends `permission-screen-recording`; prompting is `--request-permissions`' job (Contract C), so
+    /// main's needs-relaunch bookkeeping sees every request.
+    public func preflightScreenRecording() -> Bool { screenCapture.preflight() }
 
     public func preflightPostEvent() -> Bool { CGPreflightPostEventAccess() }
 
