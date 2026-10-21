@@ -34,10 +34,10 @@ let package = Package(
             name: "DisplayHelperCoreTests",
             dependencies: ["DisplayHelperCore"]
         ),
-        // Opt-in integration tests (real displays / permissions). Placeholder until Task 1.4.
+        // Opt-in integration tests (real displays / permissions).
         .testTarget(
             name: "DisplayHelperIntegrationTests",
-            dependencies: ["DisplayHelperSystem"]
+            dependencies: ["DisplayHelperSystem", "DisplayHelperCore"]
         ),
     ]
 )
