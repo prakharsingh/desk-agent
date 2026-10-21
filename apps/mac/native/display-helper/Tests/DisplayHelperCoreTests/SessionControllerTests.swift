@@ -14,13 +14,21 @@ final class FakeBackend: DisplayBackend {
     var widthPoints = 936   // 2340 / 2.5 — the 6T at the default preferred divisor
 
     var createCalls = 0
-    var createArgs: (maxPixels: Int, size: CGSize, modes: [ModeSpec])?
+    var createArgs: (maxPixels: Int, size: CGSize)?
     var destroyCalls = 0
     var startCalls: [(w: Int, h: Int, cursor: Bool)] = []
     var stopCaptureCalls = 0
     var forceKeyframeCalls = 0
     var unblockedCalls = 0
     var applied: [[ModeSpec]] = []
+    /// When true, `applyModes` completions are held in `pendingApplies` (mode activation still in
+    /// flight, as on the real backend) instead of completing synchronously.
+    var deferApply = false
+    var pendingApplies: [(Result<Void, Error>) -> Void] = []
+    /// Completes the oldest held activation.
+    func completeApply(_ result: Result<Void, Error> = .success(())) {
+        pendingApplies.removeFirst()(result)
+    }
     var cursorCalls: [Bool] = []
     /// Ordered record of the calls that matter for sequencing assertions.
     var log: [String] = []
@@ -29,16 +37,17 @@ final class FakeBackend: DisplayBackend {
 
     func preflightScreenRecording() -> Bool { screenRecording }
     func preflightPostEvent() -> Bool { postEvent }
-    func createDisplay(maxPixels: Int, sizeInMillimeters: CGSize, modes: [ModeSpec], serialNum: UInt32,
+    func createDisplay(maxPixels: Int, sizeInMillimeters: CGSize, serialNum: UInt32,
                        vendorId: UInt32, productId: UInt32) throws -> UInt32 {
         createCalls += 1
         log.append("createDisplay")
         if let createError { throw createError }
-        createArgs = (maxPixels, sizeInMillimeters, modes)
+        createArgs = (maxPixels, sizeInMillimeters)
         return 7
     }
     func waitUntilCapturable(displayId: UInt32, timeout: TimeInterval,
                              completion: @escaping (Result<Void, BackendError>) -> Void) {
+        log.append("waitUntilCapturable")
         waitTimeout = timeout
         waitCompletion = completion
     }
@@ -51,10 +60,12 @@ final class FakeBackend: DisplayBackend {
     func forceKeyframe() { forceKeyframeCalls += 1; log.append("forceKeyframe") }
     func unblocked() { unblockedCalls += 1 }
     func setShowsCursor(_ on: Bool) { cursorCalls.append(on) }
-    func applyModes(_ modes: [ModeSpec]) throws {
+    func applyModes(_ modes: [ModeSpec], completion: @escaping (Result<Void, Error>) -> Void) {
         log.append("applyModes")
-        if let applyError { throw applyError }
         applied.append(modes)
+        if deferApply { return pendingApplies.append(completion) }
+        if let applyError { return completion(.failure(applyError)) }
+        completion(.success(()))
     }
     func currentWidthPoints() -> Int { widthPoints }
     func displayBounds() -> CGRect { CGRect(x: 0, y: 0, width: widthPoints, height: 432) }
@@ -199,7 +210,46 @@ final class Harness {
         h.ctrl.begin()
         #expect(h.backend.createArgs?.maxPixels == 4680)
         #expect(h.backend.createArgs?.size == CGSize(width: 145, height: 67))
-        #expect(h.backend.createArgs?.modes == DisplayModes.modes(surfaceW: 2340, surfaceH: 1080))
+        #expect(h.backend.applied == [DisplayModes.modes(surfaceW: 2340, surfaceH: 1080)])
+        #expect(h.backend.log == ["createDisplay", "applyModes", "waitUntilCapturable"])
+    }
+
+    // MARK: begin() — mode activation is asynchronous (I2)
+
+    @Test func waitsForInitialModeActivationBeforeWaitingForCapturable() {
+        let h = Harness()
+        h.backend.deferApply = true
+        h.ctrl.begin()
+        #expect(h.backend.applied.count == 1)
+        #expect(h.backend.waitTimeout == nil)
+        #expect(h.sink.events.isEmpty)
+        h.backend.completeApply()
+        #expect(h.backend.waitTimeout == 5.0)
+        h.backend.waitCompletion?(.success(()))
+        #expect(h.sink.events == [.ready(displayId: 7, port: 8788)])
+    }
+
+    @Test func initialModeActivationFailureEndsUnsupportedAndDestroysTheDisplay() {
+        let h = Harness()
+        h.backend.deferApply = true
+        h.ctrl.begin()
+        h.backend.completeApply(.failure(BackendError.unsupported))
+        #expect(h.sink.ended == [.ended(.unsupported)])
+        #expect(!h.sink.events.contains(.ready(displayId: 7, port: 8788)))
+        #expect(h.backend.destroyCalls == 1)
+        #expect(h.backend.waitTimeout == nil)
+    }
+
+    @Test func stopDuringInitialActivationDestroysAndIgnoresTheLateResult() {
+        let h = Harness()
+        h.backend.deferApply = true
+        h.ctrl.begin()
+        h.ctrl.stop(.stopRequested)
+        #expect(h.sink.events == [.ended(.stopRequested)])
+        #expect(h.backend.destroyCalls == 1)
+        h.backend.completeApply()
+        #expect(h.backend.waitTimeout == nil)
+        #expect(h.sink.events == [.ended(.stopRequested)])
     }
 
     @Test func createDisplayThrowEndsUnsupported() {
@@ -339,7 +389,7 @@ final class Harness {
         #expect(h.backend.startCalls.first?.h == 1080)
         #expect(h.backend.startCalls.first?.cursor == false)
         #expect(h.backend.forceKeyframeCalls == 1)
-        #expect(h.backend.applied.isEmpty)
+        #expect(h.backend.applied.count == 1)   // only the initial modes from begin()
         #expect(c.jsonTypes == ["helloAck"])
         #expect(c.json.first?["inputEnabled"] as? Bool == true)
         #expect(h.sink.events == [.ready(displayId: 7, port: 8788), .connected])
@@ -370,18 +420,19 @@ final class Harness {
         let h = Harness().ready()
         // Divisor source: nearestDivisor(currentWidthPoints: 936, surfaceW: start.surfaceW 2340) == 2.5.
         h.connect(helloFrame(w: 1080, h: 2340, orientation: "portrait"))
-        #expect(h.backend.applied == [DisplayModes.modes(surfaceW: 1080, surfaceH: 2340, preferredDivisor: 2.5)])
+        #expect(h.backend.applied.last == DisplayModes.modes(surfaceW: 1080, surfaceH: 2340, preferredDivisor: 2.5))
+        #expect(h.backend.applied.count == 2)
         #expect(h.backend.startCalls.first?.w == 1080)
         #expect(h.backend.startCalls.first?.h == 2340)
         let order = h.backend.log.filter { ["applyModes", "startCapture", "forceKeyframe"].contains($0) }
-        #expect(order == ["applyModes", "startCapture", "forceKeyframe"])
+        #expect(order == ["applyModes", "applyModes", "startCapture", "forceKeyframe"])   // begin(), then the resize
     }
 
     @Test func implicitResizeKeepsTheUsersCurrentDivisor() {
         let h = Harness().ready()
         h.backend.widthPoints = 1170   // macOS activated the 2.0 (pixel-exact) mode
         h.connect(helloFrame(w: 1080, h: 2340, orientation: "portrait"))
-        #expect(h.backend.applied.first?.first == ModeSpec(widthPoints: 540, heightPoints: 1170))
+        #expect(h.backend.applied.last?.first == ModeSpec(widthPoints: 540, heightPoints: 1170))
     }
 
     @Test func implicitResizeFailureEndsTheSession() {
@@ -390,6 +441,78 @@ final class Harness {
         h.connect(helloFrame(w: 1080, h: 2340, orientation: "portrait"))
         #expect(h.ctrl.endedReason == .captureFailed)
         #expect(h.backend.startCalls.isEmpty)
+    }
+
+    // MARK: implicit resize while mode activation is in flight (I2)
+
+    /// Ready, then an authenticated portrait hello whose mode activation is still in flight.
+    private func resizingSession() -> (Harness, FakeConnection, ConnectionID) {
+        let h = Harness().ready()
+        h.backend.deferApply = true
+        let (c, id) = h.connect(helloFrame(w: 1080, h: 2340, orientation: "portrait"))
+        return (h, c, id)
+    }
+
+    @Test func helloAckAndKeepalivesFlowWhileResizeActivationIsInFlight() {
+        let (h, c, id) = resizingSession()
+        #expect(c.jsonTypes == ["helloAck"])
+        #expect(h.sink.events.last == .connected)
+        #expect(h.backend.pendingApplies.count == 1)
+        #expect(h.backend.startCalls.isEmpty)
+        #expect(h.ctrl.shouldEncodeNextFrame())   // nothing is captured yet, so nothing is encoded anyway
+        // 2.5 s of activation: the session keeps ticking, sending keepalives and feeding the watchdog.
+        for _ in 0..<5 {
+            h.advance(0.5)
+            h.ctrl.receive(jsonFrame(#"{"t":"keepalive"}"#), on: id)
+            h.ctrl.tick()
+        }
+        #expect(h.ctrl.endedReason == nil)
+        #expect(c.jsonTypes.filter { $0 == "keepalive" }.count == 2)
+        h.backend.completeApply()
+        #expect(h.backend.startCalls.count == 1)
+        #expect(h.backend.startCalls.first?.w == 1080)
+        #expect(h.backend.startCalls.first?.h == 2340)
+        #expect(h.backend.log.suffix(2) == ["startCapture", "forceKeyframe"])
+    }
+
+    @Test func stopWhileResizeActivationIsInFlightEndsAtOnce() {
+        let (h, c, _) = resizingSession()
+        h.ctrl.stop(.stopRequested)
+        #expect(h.sink.events.last == .ended(.stopRequested))
+        #expect(c.jsonTypes.last == "end")
+        #expect(h.backend.destroyCalls == 1)
+        h.backend.completeApply()   // the late activation result is ignored
+        #expect(h.backend.startCalls.isEmpty)
+        #expect(h.sink.ended.count == 1)
+    }
+
+    @Test func resizeActivationFailureEndsTheSession() {
+        let (h, _, _) = resizingSession()
+        h.backend.completeApply(.failure(BackendError.captureFailed("mode")))
+        #expect(h.ctrl.endedReason == .captureFailed)
+        #expect(h.backend.startCalls.isEmpty)
+        #expect(h.backend.destroyCalls == 1)
+    }
+
+    @Test func pauseDuringResizeActivationDefersCaptureUntilResume() {
+        let (h, _, id) = resizingSession()
+        h.ctrl.receive(jsonFrame(#"{"t":"pause"}"#), on: id)
+        h.backend.completeApply()
+        #expect(h.backend.startCalls.isEmpty)
+        h.ctrl.receive(jsonFrame(#"{"t":"resume"}"#), on: id)
+        #expect(h.backend.startCalls.count == 1)
+        #expect(h.backend.startCalls.first?.w == 1080)
+    }
+
+    @Test func pauseAndResumeDuringResizeActivationStartCaptureOnce() {
+        let (h, _, id) = resizingSession()
+        h.ctrl.receive(jsonFrame(#"{"t":"pause"}"#), on: id)
+        h.ctrl.receive(jsonFrame(#"{"t":"resume"}"#), on: id)
+        #expect(h.backend.startCalls.isEmpty)   // still waiting for the new mode
+        #expect(h.sink.events.last == .resumed)
+        h.backend.completeApply()
+        #expect(h.backend.startCalls.count == 1)
+        #expect(h.backend.startCalls.first?.w == 1080)
     }
 
     @Test func helloVersionMismatchSendsEndAndStops() {

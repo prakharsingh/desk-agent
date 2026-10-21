@@ -6,7 +6,8 @@ import Foundation
 public protocol DisplayBackend: AnyObject {
     func preflightScreenRecording() -> Bool
     func preflightPostEvent() -> Bool
-    func createDisplay(maxPixels: Int, sizeInMillimeters: CGSize, modes: [ModeSpec], serialNum: UInt32,
+    /// Creates the virtual display (no modes yet; `applyModes` follows). Returns its display id.
+    func createDisplay(maxPixels: Int, sizeInMillimeters: CGSize, serialNum: UInt32,
                        vendorId: UInt32, productId: UInt32) throws -> UInt32
     func waitUntilCapturable(displayId: UInt32, timeout: TimeInterval,
                              completion: @escaping (Result<Void, BackendError>) -> Void)
@@ -18,7 +19,10 @@ public protocol DisplayBackend: AnyObject {
     /// `CaptureEncoder.unblocked()`: encode the held frame if it was never encoded.
     func unblocked()
     func setShowsCursor(_ on: Bool)
-    func applyModes(_ modes: [ModeSpec]) throws
+    /// Applies `modes` (preferred first) and activates a usable HiDPI one. Activation is polled for up
+    /// to 3 s OFF the session queue; `completion` is delivered later on the session queue (never
+    /// inline on the real backend), so keepalives, `stop` and signals are handled meanwhile.
+    func applyModes(_ modes: [ModeSpec], completion: @escaping (Result<Void, Error>) -> Void)
     func currentWidthPoints() -> Int
     func displayBounds() -> CGRect
     func destroyDisplay()
@@ -92,6 +96,10 @@ public final class SessionController {
     private var flow = FlowControl(maxUnacked: SessionController.maxUnacked, stallTimeout: SessionController.ackStall)
     private var paused = false
     private var capturing = false
+    /// A mode activation (implicit resize) is in flight; capture (re)starts when it completes.
+    private var activating = false
+    /// Bumped per activation request so only the latest completion acts.
+    private var activationGeneration = 0
     private var surface = (w: 0, h: 0)
     private var decoderMax = (w: 0, h: 0)
     private var showsCursor = false
@@ -113,8 +121,8 @@ public final class SessionController {
 
     // MARK: - Lifecycle
 
-    /// Call only after the video listener is bound. preflight → createDisplay → waitUntilCapturable
-    /// → `.ready` (the connect deadline starts here).
+    /// Call only after the video listener is bound. preflight → createDisplay → applyModes (async
+    /// activation) → waitUntilCapturable → `.ready` (the connect deadline starts here).
     public func begin() {
         guard !begun, endedReason == nil else { return }
         begun = true
@@ -124,13 +132,25 @@ public final class SessionController {
             displayId = try backend.createDisplay(
                 maxPixels: DisplayModes.descriptorMaxPixels(surfaceW: w, surfaceH: h),
                 sizeInMillimeters: DisplayModes.sizeInMillimeters(surfaceW: w, surfaceH: h, dpi: start.dpi),
-                modes: DisplayModes.modes(surfaceW: w, surfaceH: h),
                 serialNum: start.serialNum, vendorId: start.vendorId, productId: start.productId)
         } catch {
             log("error", "createDisplay failed: \(error)")
             return terminate(.unsupported)
         }
         displayCreated = true
+        backend.applyModes(DisplayModes.modes(surfaceW: w, surfaceH: h)) { [weak self] result in
+            guard let self, self.endedReason == nil else { return }
+            switch result {
+            case .success:
+                self.waitUntilCapturable()
+            case .failure(let error):
+                self.log("error", "mode activation failed: \(error)")
+                self.terminate(.unsupported)
+            }
+        }
+    }
+
+    private func waitUntilCapturable() {
         backend.waitUntilCapturable(displayId: displayId, timeout: Self.capturableTimeout) { [weak self] result in
             guard let self, self.endedReason == nil else { return }
             switch result {
@@ -373,17 +393,41 @@ public final class SessionController {
 
     // MARK: - Capture
 
-    /// The one capture (re)start sequence: stop → [applyModes] → start at the stream size →
-    /// reset the flow-control window → force an IDR. Failures end the session via the BackendError mapping.
+    /// The one capture (re)start sequence: stop → [applyModes, asynchronously] → start at the stream
+    /// size → reset the flow-control window → force an IDR. Failures end the session via the
+    /// BackendError mapping. While an activation is in flight the session keeps running (keepalives,
+    /// watchdog, stop) without capture; a pause meanwhile defers the start to `resume`.
     private func restartCapture(surfaceW: Int, surfaceH: Int, modes: [ModeSpec]?) {
         if capturing {
             backend.stopCapture()
             capturing = false
         }
+        surface = (surfaceW, surfaceH)
+        if let modes {
+            activationGeneration += 1
+            let generation = activationGeneration
+            activating = true
+            backend.applyModes(modes) { [weak self] result in
+                guard let self, self.endedReason == nil, generation == self.activationGeneration else { return }
+                self.activating = false
+                switch result {
+                case .success:
+                    if !self.paused { self.startCapture() }
+                case .failure(let error):
+                    self.log("error", "capture start failed: \(error)")
+                    self.terminate(Self.endReason(for: error))
+                }
+            }
+            return
+        }
+        // The in-flight activation starts capture when it lands.
+        guard !activating else { return }
+        startCapture()
+    }
+
+    private func startCapture() {
         do {
-            if let modes { try backend.applyModes(modes) }
-            surface = (surfaceW, surfaceH)
-            let size = StreamSizing.streamSize(surfaceW: surfaceW, surfaceH: surfaceH,
+            let size = StreamSizing.streamSize(surfaceW: surface.w, surfaceH: surface.h,
                                                maxW: decoderMax.w, maxH: decoderMax.h)
             try backend.startCapture(width: size.w, height: size.h, showsCursor: showsCursor)
         } catch {

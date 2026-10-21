@@ -56,3 +56,39 @@ import Testing
         #expect(ModeActivation.decide(current: oneX1170, available: available, applied: applied) == .activate(hi1170))
     }
 }
+
+/// The retry/give-up bookkeeping of the asynchronous activation poll (VirtualDisplayController).
+@Suite struct ActivationPollTests {
+    @Test func budgetIsThirtyAttemptsOver3s() {
+        #expect(ActivationPoll.maxAttempts == 30)
+        #expect(abs(Double(ActivationPoll.maxAttempts) * ActivationPoll.interval - 3.0) < 1e-9)
+    }
+
+    @Test func keptOrSwitchedFinishesAtOnce() {
+        var a = ActivationPoll()
+        #expect(a.record(.kept) == .finished)
+        var b = ActivationPoll()
+        #expect(b.record(.switchSucceeded) == .finished)
+    }
+
+    @Test func nothingListedRetriesThenFailsUnavailableOnTheLastAttempt() {
+        var p = ActivationPoll()
+        for _ in 1..<ActivationPoll.maxAttempts { #expect(p.record(.notListed) == .retry) }
+        #expect(p.record(.notListed) == .failed(.modeUnavailable))
+    }
+
+    @Test func aFailedSwitchIsReportedWithTheLastError() {
+        var p = ActivationPoll()
+        #expect(p.record(.switchFailed(-1)) == .retry)
+        #expect(p.record(.switchFailed(1001)) == .retry)
+        for _ in 3..<ActivationPoll.maxAttempts { #expect(p.record(.notListed) == .retry) }
+        #expect(p.record(.notListed) == .failed(.modeSwitchFailed(1001)))
+    }
+
+    @Test func aLateSuccessFinishes() {
+        var p = ActivationPoll()
+        for _ in 0..<10 { #expect(p.record(.notListed) == .retry) }
+        #expect(p.record(.switchFailed(1001)) == .retry)
+        #expect(p.record(.switchSucceeded) == .finished)
+    }
+}

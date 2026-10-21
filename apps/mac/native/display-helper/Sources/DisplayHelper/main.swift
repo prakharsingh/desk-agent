@@ -129,7 +129,7 @@ final class ServeMode {
 
     private func listening() {
         guard let controller, controller.endedReason == nil else { return }
-        controller.begin()   // preflight → createDisplay → waitUntilCapturable → `ready`
+        controller.begin()   // preflight → createDisplay → applyModes (async) → waitUntilCapturable → `ready`
         guard controller.endedReason == nil else { return }
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + 0.25, repeating: 0.25)

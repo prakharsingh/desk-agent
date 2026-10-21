@@ -20,6 +20,15 @@ private func wait(upTo seconds: Double, until cond: () -> Bool) -> Bool {
     return cond()
 }
 
+/// Test-only: waits for the asynchronous `apply(modes:deliverOn:completion:)` (≤ 3 s activation).
+private func applyAndWait(_ c: VirtualDisplayController, _ modes: [ModeSpec]) throws {
+    let done = DispatchSemaphore(value: 0)
+    nonisolated(unsafe) var result: Result<Void, Error>?
+    c.apply(modes: modes, deliverOn: DispatchQueue(label: "apply-wait")) { result = $0; done.signal() }
+    done.wait()
+    try result?.get()
+}
+
 private final class Counter: @unchecked Sendable {
     private let lock = NSLock()
     private var frames = 0, keyframes = 0, paramSets = 0
@@ -45,7 +54,7 @@ private final class Counter: @unchecked Sendable {
         let id = c.displayId
         defer { c.destroy() }  // always tear down, even when an expectation or throw fails the test
 
-        try c.apply(modes: modes)
+        try applyAndWait(c, modes)
         #expect(wait(upTo: 5) { isOnline(id) }, "display should appear in the online list within 5 s")
 
         // The HiDPI modes we applied must be registered on the display (point size, 2x backing pixels).
@@ -79,7 +88,7 @@ private final class Counter: @unchecked Sendable {
             sizeInMillimeters: DisplayModes.sizeInMillimeters(surfaceW: 2340, surfaceH: 1080, dpi: nil),
             serialNum: 1, vendorId: 0x3456, productId: 0x4D44)
         defer { c.destroy() }
-        try c.apply(modes: DisplayModes.modes(surfaceW: 2340, surfaceH: 1080))
+        try applyAndWait(c, DisplayModes.modes(surfaceW: 2340, surfaceH: 1080))
 
         let q = DispatchQueue(label: "capture-probe")
         let encoder = CaptureEncoder(queue: q)

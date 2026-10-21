@@ -20,6 +20,17 @@ public enum VirtualDisplayError: Error, Equatable {
 public final class VirtualDisplayController {
     private var display: CGVirtualDisplay?
     public let displayId: UInt32
+    /// Mode-activation polls run here, off the caller's (session) queue.
+    private let activationQueue = DispatchQueue(label: "com.deskagent.display-helper.mode-activation")
+    private let cancelled = Flag()
+
+    /// Set once from the session queue, read from `activationQueue`.
+    private final class Flag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = false
+        func set() { lock.lock(); value = true; lock.unlock() }
+        var isSet: Bool { lock.lock(); defer { lock.unlock() }; return value }
+    }
 
     /// `maxPixels` is applied to both axes and is fixed for the display's lifetime, so it must
     /// cover both orientations (see `DisplayModes.descriptorMaxPixels`). A zero `serialNum`
@@ -51,8 +62,20 @@ public final class VirtualDisplayController {
 
     deinit { destroy() }
 
-    /// Applies HiDPI modes (60 Hz). Mode sizes are in points.
-    public func apply(modes: [ModeSpec]) throws {
+    /// Applies HiDPI modes (60 Hz), then activates a usable one asynchronously. Mode sizes are in
+    /// points. Never blocks the caller: `completion` runs later on `queue` (the session queue).
+    public func apply(modes: [ModeSpec], deliverOn queue: DispatchQueue,
+                      completion: @escaping (Result<Void, Error>) -> Void) {
+        do {
+            try applySettings(modes: modes)
+        } catch {
+            return queue.async { completion(.failure(error)) }
+        }
+        activatePreferredMode(applied: modes, deliverOn: queue, completion: completion)
+    }
+
+    /// `applySettings` only (fast, synchronous). Throws `destroyed` / `settingsRejected`.
+    public func applySettings(modes: [ModeSpec]) throws {
         guard let vd = display else { throw VirtualDisplayError.destroyed }
         let s = CGVirtualDisplaySettings()
         s.hiDPI = 1
@@ -62,7 +85,6 @@ public final class VirtualDisplayController {
             CGVirtualDisplayMode(width: UInt32(spec.widthPoints), height: UInt32(spec.heightPoints), refreshRate: 60)
         }
         guard vd.apply(s) else { throw VirtualDisplayError.settingsRejected }
-        try activatePreferredMode(applied: modes)
     }
 
     private static func info(_ m: CGDisplayMode) -> DisplayModeInfo {
@@ -70,45 +92,61 @@ public final class VirtualDisplayController {
             usableForDesktop: m.isUsableForDesktopGUI())
     }
 
-    private func allModes() -> [CGDisplayMode] {
+    private static func allModes(_ displayId: UInt32) -> [CGDisplayMode] {
         let opts = [kCGDisplayShowDuplicateLowResolutionModes: true] as CFDictionary
         return (CGDisplayCopyAllDisplayModes(displayId, opts) as? [CGDisplayMode]) ?? []
     }
 
-    /// macOS may come up in the 1x mode at the HiDPI pixel size. Poll (up to 3 s) until a HiDPI mode of
-    /// ours is active: keep one that is already active, otherwise switch (permanently) to the first
-    /// usable applied mode. The mode list can lag behind applySettings and a fresh display may reject
-    /// configuration briefly, so "none available" and failed switches are retried; expiry throws.
-    private func activatePreferredMode(applied: [ModeSpec]) throws {
-        var sawTarget = false
-        var lastError: Int32 = 0
-        for _ in 0..<30 {
-            let modes = allModes()
-            let current = CGDisplayCopyDisplayMode(displayId).map(Self.info)
-            switch ModeActivation.decide(current: current, available: modes.map(Self.info), applied: applied) {
-            case .keep:
-                return
-            case .noneAvailable:
-                break
-            case .activate(let wanted):
-                if let target = modes.first(where: { Self.info($0) == wanted }) {
-                    sawTarget = true
-                    var config: CGDisplayConfigRef?
-                    var err = CGBeginDisplayConfiguration(&config)
-                    if err == .success { err = CGConfigureDisplayWithDisplayMode(config, displayId, target, nil) }
-                    if err == .success {
-                        err = CGCompleteDisplayConfiguration(config, .permanently)
-                        if err == .success { return }
-                    } else {
-                        CGCancelDisplayConfiguration(config)
-                    }
-                    lastError = err.rawValue
-                }
+    /// One activation attempt: keep a HiDPI mode of ours that is already active, otherwise switch
+    /// (permanently) to the first usable applied mode.
+    private static func attemptActivation(displayId: UInt32, applied: [ModeSpec]) -> ActivationPoll.Attempt {
+        let modes = allModes(displayId)
+        let current = CGDisplayCopyDisplayMode(displayId).map(info)
+        switch ModeActivation.decide(current: current, available: modes.map(info), applied: applied) {
+        case .keep:
+            return .kept
+        case .noneAvailable:
+            return .notListed
+        case .activate(let wanted):
+            guard let target = modes.first(where: { info($0) == wanted }) else { return .notListed }
+            var config: CGDisplayConfigRef?
+            var err = CGBeginDisplayConfiguration(&config)
+            guard err == .success else { return .switchFailed(err.rawValue) }
+            err = CGConfigureDisplayWithDisplayMode(config, displayId, target, nil)
+            guard err == .success else {
+                CGCancelDisplayConfiguration(config)
+                return .switchFailed(err.rawValue)
             }
-            Thread.sleep(forTimeInterval: 0.1)
+            err = CGCompleteDisplayConfiguration(config, .permanently)
+            return err == .success ? .switchSucceeded : .switchFailed(err.rawValue)
         }
-        if sawTarget { throw VirtualDisplayError.modeSwitchFailed(lastError) }
-        throw VirtualDisplayError.modeUnavailable
+    }
+
+    /// macOS may come up in the 1x mode at the HiDPI pixel size. Polls every 100 ms for up to 3 s
+    /// (`ActivationPoll`) on `activationQueue` — never on the session queue — until a HiDPI mode of
+    /// ours is active. The mode list can lag behind applySettings and a fresh display may reject
+    /// configuration briefly, so "none available" and failed switches are retried; expiry fails with
+    /// `modeSwitchFailed` / `modeUnavailable`. `destroy()` cancels the poll (`destroyed`).
+    private func activatePreferredMode(applied: [ModeSpec], deliverOn queue: DispatchQueue,
+                                       completion: @escaping (Result<Void, Error>) -> Void) {
+        let displayId = self.displayId
+        let cancelled = self.cancelled
+        let pollQueue = activationQueue
+        var poll = ActivationPoll()
+        func attempt() {
+            if cancelled.isSet { return queue.async { completion(.failure(VirtualDisplayError.destroyed)) } }
+            switch poll.record(Self.attemptActivation(displayId: displayId, applied: applied)) {
+            case .finished:
+                queue.async { completion(.success(())) }
+            case .retry:
+                pollQueue.asyncAfter(deadline: .now() + ActivationPoll.interval) { attempt() }
+            case .failed(.modeUnavailable):
+                queue.async { completion(.failure(VirtualDisplayError.modeUnavailable)) }
+            case .failed(.modeSwitchFailed(let err)):
+                queue.async { completion(.failure(VirtualDisplayError.modeSwitchFailed(err))) }
+            }
+        }
+        pollQueue.async { attempt() }
     }
 
     /// Active mode (point and pixel size), nil if the display is gone.
@@ -118,6 +156,10 @@ public final class VirtualDisplayController {
 
     public func bounds() -> CGRect { CGDisplayBounds(displayId) }
 
-    /// Idempotent. Dropping the last reference removes the display from the system.
-    public func destroy() { display = nil }
+    /// Idempotent. Dropping the last reference removes the display from the system; an in-flight
+    /// mode activation stops at its next attempt.
+    public func destroy() {
+        cancelled.set()
+        display = nil
+    }
 }

@@ -1,3 +1,5 @@
+import Foundation
+
 /// A display mode as the OS reports it: size in points plus backing pixels.
 public struct DisplayModeInfo: Equatable {
     public let widthPoints: Int
@@ -48,5 +50,60 @@ public enum ModeActivation {
             }
         }
         return .noneAvailable
+    }
+}
+
+/// Retry bookkeeping for activating a mode after `applySettings`: the mode list can lag behind the
+/// settings and a fresh display may reject configuration briefly, so attempts are repeated every
+/// `interval` for up to `maxAttempts` (3 s). The poll itself runs asynchronously (VirtualDisplayController);
+/// this only decides retry / finish / give up.
+public struct ActivationPoll {
+    public static let maxAttempts = 30
+    public static let interval: TimeInterval = 0.1
+
+    /// What one attempt observed or did.
+    public enum Attempt: Equatable {
+        /// `ModeDecision.keep`: a HiDPI mode of ours is already active.
+        case kept
+        /// The configuration switch to the wanted mode succeeded.
+        case switchSucceeded
+        /// No usable mode listed yet (`noneAvailable`, or the wanted mode vanished from the list).
+        case notListed
+        /// CGConfigureDisplayWithDisplayMode / CGCompleteDisplayConfiguration failed with this CGError.
+        case switchFailed(Int32)
+    }
+
+    public enum Failure: Error, Equatable {
+        /// The preferred HiDPI mode never appeared.
+        case modeUnavailable
+        /// It appeared, but switching to it kept failing (the last CGError).
+        case modeSwitchFailed(Int32)
+    }
+
+    public enum Next: Equatable {
+        case finished
+        case retry
+        case failed(Failure)
+    }
+
+    public private(set) var attempts = 0
+    private var sawTarget = false
+    private var lastError: Int32 = 0
+
+    public init() {}
+
+    public mutating func record(_ attempt: Attempt) -> Next {
+        attempts += 1
+        switch attempt {
+        case .kept, .switchSucceeded:
+            return .finished
+        case .switchFailed(let err):
+            sawTarget = true
+            lastError = err
+        case .notListed:
+            break
+        }
+        guard attempts >= Self.maxAttempts else { return .retry }
+        return .failed(sawTarget ? .modeSwitchFailed(lastError) : .modeUnavailable)
     }
 }
