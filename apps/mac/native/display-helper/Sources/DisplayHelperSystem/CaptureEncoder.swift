@@ -327,6 +327,19 @@ public final class CaptureEncoder: NSObject, SCStreamOutput, SCStreamDelegate {
         }
     }
 
+    /// The encoded block's bytes; nil when it is empty or the copy fails. The empty guard matters:
+    /// `baseAddress` of an empty buffer may be nil, and force-unwrapping it would trap.
+    static func copyBytes(of block: CMBlockBuffer) -> Data? {
+        let length = CMBlockBufferGetDataLength(block)
+        guard length > 0 else { return nil }
+        var out = Data(count: length)
+        let copy = out.withUnsafeMutableBytes { buf -> OSStatus in
+            guard let base = buf.baseAddress else { return kCMBlockBufferBadPointerParameterErr }
+            return CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: length, destination: base)
+        }
+        return copy == kCMBlockBufferNoErr ? out : nil
+    }
+
     /// Runs on a VideoToolbox thread; converts there, emits on `queue` (order is preserved because
     /// VideoToolbox delivers a session's outputs serially and `queue` is serial).
     private func handleEncoded(status: OSStatus, flags: VTEncodeInfoFlags, sample: CMSampleBuffer?, generation gen: Int) {
@@ -343,12 +356,7 @@ public final class CaptureEncoder: NSObject, SCStreamOutput, SCStreamDelegate {
         let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false) as? [[CFString: Any]]
         let isKeyframe = !((attachments?.first?[kCMSampleAttachmentKey_NotSync] as? Bool) ?? false)
 
-        let length = CMBlockBufferGetDataLength(block)
-        var avcc = Data(count: length)
-        let copy = avcc.withUnsafeMutableBytes { buf in
-            CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: length, destination: buf.baseAddress!)
-        }
-        guard copy == kCMBlockBufferNoErr else { return }
+        guard let avcc = Self.copyBytes(of: block) else { return }
 
         var count = 0
         var nalHeaderLength: Int32 = 4
