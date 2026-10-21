@@ -10,6 +10,10 @@ public enum VirtualDisplayError: Error, Equatable {
     case settingsRejected
     /// Called after `destroy()`.
     case destroyed
+    /// The preferred HiDPI mode never appeared in the display's mode list.
+    case modeUnavailable
+    /// CGConfigureDisplayWithDisplayMode / CGCompleteDisplayConfiguration failed.
+    case modeSwitchFailed(Int32)
 }
 
 /// Owns a private `CGVirtualDisplay`. Releasing it (via `destroy()`) removes the display.
@@ -58,9 +62,56 @@ public final class VirtualDisplayController {
             CGVirtualDisplayMode(width: UInt32(spec.widthPoints), height: UInt32(spec.heightPoints), refreshRate: 60)
         }
         guard vd.apply(s) else { throw VirtualDisplayError.settingsRejected }
+        try activatePreferredMode(applied: modes)
     }
 
-    public func currentWidthPoints() -> Int { Int(bounds().width) }
+    private static func info(_ m: CGDisplayMode) -> DisplayModeInfo {
+        DisplayModeInfo(widthPoints: m.width, heightPoints: m.height, pixelWidth: m.pixelWidth, pixelHeight: m.pixelHeight,
+            usableForDesktop: m.isUsableForDesktopGUI())
+    }
+
+    private func allModes() -> [CGDisplayMode] {
+        let opts = [kCGDisplayShowDuplicateLowResolutionModes: true] as CFDictionary
+        return (CGDisplayCopyAllDisplayModes(displayId, opts) as? [CGDisplayMode]) ?? []
+    }
+
+    /// macOS may come up in the 1x mode at the HiDPI pixel size; switch (permanently) to the
+    /// preferred HiDPI mode unless a HiDPI mode of ours is already active. The mode list can lag
+    /// behind applySettings, so poll briefly.
+    private func activatePreferredMode(applied: [ModeSpec]) throws {
+        var target: CGDisplayMode?
+        for _ in 0..<50 {
+            let modes = allModes()
+            let current = CGDisplayCopyDisplayMode(displayId).map(Self.info)
+            let wanted = ModeActivation.modeToActivate(
+                current: current, available: modes.map(Self.info), applied: applied)
+            guard let wanted else { return }  // nothing to change
+            target = modes.first { Self.info($0) == wanted }
+            if target != nil { break }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        guard let target else { throw VirtualDisplayError.modeUnavailable }
+        var lastError: Int32 = 0
+        for _ in 0..<30 {  // the freshly created display may not accept configuration immediately
+            var config: CGDisplayConfigRef?
+            var err = CGBeginDisplayConfiguration(&config)
+            if err == .success { err = CGConfigureDisplayWithDisplayMode(config, displayId, target, nil) }
+            if err == .success {
+                err = CGCompleteDisplayConfiguration(config, .permanently)
+                if err == .success { return }
+            } else {
+                CGCancelDisplayConfiguration(config)
+            }
+            lastError = err.rawValue
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        throw VirtualDisplayError.modeSwitchFailed(lastError)
+    }
+
+    /// Active mode (point and pixel size), nil if the display is gone.
+    public func activeMode() -> DisplayModeInfo? { CGDisplayCopyDisplayMode(displayId).map(Self.info) }
+
+    public func currentWidthPoints() -> Int { activeMode()?.widthPoints ?? Int(bounds().width) }
 
     public func bounds() -> CGRect { CGDisplayBounds(displayId) }
 

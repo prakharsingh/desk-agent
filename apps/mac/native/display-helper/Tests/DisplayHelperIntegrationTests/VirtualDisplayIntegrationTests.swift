@@ -45,13 +45,15 @@ private func wait(upTo seconds: Double, until cond: () -> Bool) -> Bool {
                 "HiDPI mode \(m.widthPoints)x\(m.heightPoints) should be listed")
         }
 
-        // macOS decides which mode is active (observed: the 1x mode at a HiDPI mode's pixel size),
-        // so do not assume the first applied mode. Accept an applied point width or its 2x pixel width.
-        let accepted = modes.flatMap { [CGFloat($0.widthPoints), CGFloat(2 * $0.widthPoints)] }
+        // The controller activates a HiDPI mode of ours. macOS here refuses 936x432 (not usable for
+        // desktop), so the first usable applied mode wins: 1170x540 pt / 2340x1080 px.
         let w = c.bounds().width
-        #expect(accepted.contains(w), "bounds width \(w) should be one of \(accepted)")
+        #expect(w == 1170, "bounds width \(w) should be 1170")
+        #expect(c.currentWidthPoints() == 1170)
+        #expect(c.activeMode()?.pixelWidth == 2340)
 
         c.destroy()
-        #expect(wait(upTo: 2) { !isOnline(id) }, "display should leave the online list within 2 s")
+        // Typically ~0.1 s; one run after a permanent mode switch exceeded 2 s, so allow 5 s.
+        #expect(wait(upTo: 5) { !isOnline(id) }, "display should leave the online list within 5 s")
     }
 }
