@@ -64,7 +64,7 @@ jobs:
         run: ./gradlew :app:testDebugUnitTest
 
       - name: Test — Swift display helper
-        run: swift test --package-path apps/mac/native/display-helper
+        run: pnpm --filter @desk-agent/mac run test:native
 
       - name: Pack mac DMG (pre-release verification build)
         run: pnpm --filter @desk-agent/mac run pack
