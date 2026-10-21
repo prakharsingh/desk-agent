@@ -20,9 +20,21 @@ private func wait(upTo seconds: Double, until cond: () -> Bool) -> Bool {
     return cond()
 }
 
+private final class Counter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var frames = 0, keyframes = 0, paramSets = 0
+    private var errors: [String] = []
+    func frame(key: Bool) { lock.lock(); frames += 1; if key { keyframes += 1 }; lock.unlock() }
+    func params() { lock.lock(); paramSets += 1; lock.unlock() }
+    func error(_ e: Error) { lock.lock(); errors.append("\(e)"); lock.unlock() }
+    var snapshot: (frames: Int, keyframes: Int, paramSets: Int, errors: [String]) {
+        lock.lock(); defer { lock.unlock() }; return (frames, keyframes, paramSets, errors)
+    }
+}
+
 /// Opt-in: creates a real virtual display (needs a logged-in GUI session; no TCC prompt).
 /// Without DESK_AGENT_VD_INTEGRATION=1 this is reported as skipped.
-@Suite struct VirtualDisplayIntegrationTests {
+@Suite(.serialized) struct VirtualDisplayIntegrationTests {
     @Test(.enabled(if: ProcessInfo.processInfo.environment["DESK_AGENT_VD_INTEGRATION"] == "1"))
     func createsAppliesAndDestroysARealVirtualDisplay() throws {
         let modes = DisplayModes.modes(surfaceW: 2340, surfaceH: 1080)
@@ -55,5 +67,48 @@ private func wait(upTo seconds: Double, until cond: () -> Bool) -> Bool {
         c.destroy()
         // Typically ~0.1 s; one run after a permanent mode switch exceeded 2 s, so allow 5 s.
         #expect(wait(upTo: 5) { !isOnline(id) }, "display should leave the online list within 5 s")
+    }
+
+    /// Opt-in capture feasibility probe (Task 1.5 Step 5b). Needs Screen Recording for the calling
+    /// terminal, an unlocked screen, and content changing on the virtual display during the 10 s window
+    /// (ScreenCaptureKit only delivers frames when something changes).
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["DESK_AGENT_CAPTURE_PROBE"] == "1"))
+    func captureProducesCompleteSamples() throws {
+        let c = try VirtualDisplayController(
+            maxPixels: DisplayModes.descriptorMaxPixels(surfaceW: 2340, surfaceH: 1080),
+            sizeInMillimeters: DisplayModes.sizeInMillimeters(surfaceW: 2340, surfaceH: 1080, dpi: nil),
+            serialNum: 1, vendorId: 0x3456, productId: 0x4D44)
+        defer { c.destroy() }
+        try c.apply(modes: DisplayModes.modes(surfaceW: 2340, surfaceH: 1080))
+
+        let q = DispatchQueue(label: "capture-probe")
+        let encoder = CaptureEncoder(queue: q)
+        defer { encoder.stop() }
+        let counter = Counter()
+        encoder.onFrame = { _, key in counter.frame(key: key) }
+        encoder.onParameterSets = { _, _, _ in counter.params() }
+        encoder.onError = { counter.error($0) }
+
+        let ready = DispatchSemaphore(value: 0)
+        nonisolated(unsafe) var result: Result<Void, BackendError>?
+        encoder.waitUntilCapturable(displayId: c.displayId, timeout: 5) { result = $0; ready.signal() }
+        ready.wait()
+        try #require(result.map { if case .success = $0 { true } else { false } } == true,
+                     "display should become capturable: \(String(describing: result))")
+
+        let w = c.activeMode()?.pixelWidth ?? 2340
+        let h = c.activeMode()?.pixelHeight ?? 1080
+        try encoder.start(displayId: c.displayId, width: w, height: h, showsCursor: true)
+        print("move a window onto Desk Agent Phone now (display \(c.displayId), bounds \(c.bounds()), stream \(w)x\(h))")
+        Thread.sleep(forTimeInterval: 10)
+        encoder.stop()
+        Thread.sleep(forTimeInterval: 0.2)   // let queued encoder outputs drain
+
+        let s = counter.snapshot
+        print("capture probe: completeSamples=\(encoder.completeSamples) frames=\(s.frames) keyframes=\(s.keyframes) paramSets=\(s.paramSets) errors=\(s.errors)")
+        #expect(encoder.completeSamples >= 30, "need >= 30 .complete samples, got \(encoder.completeSamples)")
+        #expect(s.frames > 0, "encoder should emit Annex-B frames")
+        #expect(s.paramSets >= 1, "parameter sets should be emitted before the first frame")
+        #expect(s.errors.isEmpty, "no capture/encode errors: \(s.errors)")
     }
 }
