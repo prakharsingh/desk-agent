@@ -79,3 +79,7 @@ oscal.json
 coverage.md
 coverage.html
 *.vsix
+
+# Swift display helper
+apps/mac/native/display-helper/.build/
+apps/mac/native-bin/

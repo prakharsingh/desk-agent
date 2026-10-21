@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "build:native": "bash scripts/build-native.sh",
     "preview": "electron-vite preview",
     "test": "vitest run",
     "test:e2e": "playwright test",
