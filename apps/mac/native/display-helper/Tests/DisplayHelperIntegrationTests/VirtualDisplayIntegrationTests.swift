@@ -80,7 +80,11 @@ private final class Counter: @unchecked Sendable {
 
     /// Opt-in capture feasibility probe (Task 1.5 Step 5b). Needs Screen Recording for the calling
     /// terminal, an unlocked screen, and content changing on the virtual display during the 10 s window
-    /// (ScreenCaptureKit only delivers frames when something changes).
+    /// (ScreenCaptureKit only delivers frames when something changes). Provide that content with the
+    /// in-repo animator, started first in another shell (it waits up to 60 s for the display):
+    ///
+    ///     swift run --package-path tools/animator animator 15 &
+    ///     DESK_AGENT_CAPTURE_PROBE=1 scripts/test.sh --filter captureProducesCompleteSamples
     @Test(.enabled(if: ProcessInfo.processInfo.environment["DESK_AGENT_CAPTURE_PROBE"] == "1"))
     func captureProducesCompleteSamples() throws {
         let c = try VirtualDisplayController(
@@ -108,7 +112,7 @@ private final class Counter: @unchecked Sendable {
         let w = c.activeMode()?.pixelWidth ?? 2340
         let h = c.activeMode()?.pixelHeight ?? 1080
         try encoder.start(displayId: c.displayId, width: w, height: h, showsCursor: true)
-        print("move a window onto Desk Agent Phone now (display \(c.displayId), bounds \(c.bounds()), stream \(w)x\(h))")
+        print("tools/animator should now be flashing a window on Desk Agent Phone (display \(c.displayId), bounds \(c.bounds()), stream \(w)x\(h))")
         Thread.sleep(forTimeInterval: 10)
         encoder.stop()
         Thread.sleep(forTimeInterval: 0.2)   // let queued encoder outputs drain

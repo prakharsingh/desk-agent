@@ -82,4 +82,5 @@ coverage.html
 
 # Swift display helper
 apps/mac/native/display-helper/.build/
+apps/mac/native/display-helper/tools/animator/.build/
 apps/mac/native-bin/
