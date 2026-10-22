@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { buildPluginSpecs, buildAutomationRules, boot, EventBus, AutomationEngine, Watchdog } from './index.js';
-import type { Config } from './index.js';
+import type { Config, ToApp } from './index.js';
+import { WakeSetting, ControlChannel } from './index.js';
 
 describe('buildPluginSpecs', () => {
   it('maps enabled plugin ids through the registry', () => {
@@ -242,5 +243,106 @@ describe('boot with screensaverConfigStore', () => {
     deps.eventBus.publish({ eventName: 'screensaver.config', data: { enabled: 'not-a-boolean' } });
     expect(screensaverConfigStore.setConfig).not.toHaveBeenCalled();
     expect(onLog).toHaveBeenCalledWith('error', expect.stringContaining('screensaver.config'));
+  });
+});
+
+describe('live wakeEnabled (no core restart)', () => {
+  const baseConfig = (): Config => ({
+    enabledPlugins: [], weather: { location: 'Seattle', intervalMs: 600_000 }, systemStats: { pollIntervalMs: 2000 }, energySaver: { idleAction: 'displaysleepnow' }, watchdogTimeoutMs: 30000, visibleWidgets: ['clock', 'system', 'weather', 'presence', 'playing', 'light'], presenceDebounceMs: 45000, wsPort: 8787, launchAppOnDock: true,
+    presence: { absenceTimeoutMs: 300000, gazeIsKeepAwake: true, bootConfirmationTimeoutMs: 300000, wakeEnabled: true },
+  });
+
+  it('wake-on-return condition reads the live WakeSetting, so a later set() changes it without rebuilding rules', () => {
+    const wake = new WakeSetting(true, { sendToPhone: vi.fn(), notifyApp: vi.fn() });
+    const rules = buildAutomationRules(baseConfig(), wake);
+    const wakeRule = rules.find((r) => r.id === 'wake-on-return')!;
+    expect(wakeRule.condition({})).toBe(true);
+    wake.set(false, 'mac');
+    expect(wakeRule.condition({})).toBe(false);
+    wake.set(true, 'phone');
+    expect(wakeRule.condition({})).toBe(true);
+  });
+
+  it('a live wake change gates the real AutomationEngine dispatch of wake-display', () => {
+    vi.useFakeTimers();
+    const wake = new WakeSetting(true, { sendToPhone: vi.fn(), notifyApp: vi.fn() });
+    const invoke = vi.fn();
+    const engine = new AutomationEngine(buildAutomationRules(baseConfig(), wake), { invoke }, vi.fn());
+    wake.set(false, 'mac');
+    engine.handleEvent('presence.returned', {});
+    vi.runAllTimers();
+    expect(invoke).not.toHaveBeenCalled();
+    wake.set(true, 'mac');
+    engine.handleEvent('presence.returned', {});
+    vi.runAllTimers();
+    expect(invoke).toHaveBeenCalledWith('energy-saver', 'wake-display', undefined);
+    vi.useRealTimers();
+  });
+});
+
+describe('boot with cameraConfigStore / wakeSetting', () => {
+  it('forwards a valid presence.cameraConfig payload to the camera store', () => {
+    const deps = makeMinimalBootDeps();
+    const cameraConfigStore = { setConfig: vi.fn(), getStatus: vi.fn(() => null) } as any;
+    boot({ ...deps, cameraConfigStore });
+    deps.eventBus.publish({ eventName: 'presence.cameraConfig', data: { enabled: true } });
+    expect(cameraConfigStore.setConfig).toHaveBeenCalledWith({ enabled: true });
+  });
+
+  it('drops a malformed presence.cameraConfig payload and logs it', () => {
+    const deps = makeMinimalBootDeps();
+    const cameraConfigStore = { setConfig: vi.fn(), getStatus: vi.fn(() => null) } as any;
+    const onLog = vi.fn();
+    boot({ ...deps, cameraConfigStore, onLog });
+    deps.eventBus.publish({ eventName: 'presence.cameraConfig', data: { enabled: 'yes' } });
+    expect(cameraConfigStore.setConfig).not.toHaveBeenCalled();
+    expect(onLog).toHaveBeenCalledWith('error', expect.stringContaining('presence.cameraConfig'));
+  });
+
+  it('applies a phone-originated presence.wakeEnabled as a phone-sourced live change', () => {
+    const deps = makeMinimalBootDeps();
+    const wakeSetting = { set: vi.fn(), get: vi.fn(() => true) } as any;
+    boot({ ...deps, wakeSetting });
+    deps.eventBus.publish({ eventName: 'presence.wakeEnabled', data: { enabled: false } });
+    expect(wakeSetting.set).toHaveBeenCalledWith(false, 'phone');
+  });
+
+  it('drops a malformed presence.wakeEnabled payload and logs it', () => {
+    const deps = makeMinimalBootDeps();
+    const wakeSetting = { set: vi.fn(), get: vi.fn(() => true) } as any;
+    const onLog = vi.fn();
+    boot({ ...deps, wakeSetting, onLog });
+    deps.eventBus.publish({ eventName: 'presence.wakeEnabled', data: {} });
+    expect(wakeSetting.set).not.toHaveBeenCalled();
+    expect(onLog).toHaveBeenCalledWith('error', expect.stringContaining('presence.wakeEnabled'));
+  });
+
+  it('end to end: a phone wake toggle reaches the Mac app as a ToApp wakeEnabledChanged and is re-broadcast to the phone', () => {
+    const deps = makeMinimalBootDeps();
+    const sent: ToApp[] = [];
+    const transport = { postMessage: (m: ToApp) => sent.push(m), onMessage: vi.fn() };
+    let channel: ControlChannel | undefined;
+    const sendWakeEnabled = vi.fn();
+    const wakeSetting = new WakeSetting(true, {
+      sendToPhone: sendWakeEnabled,
+      notifyApp: (enabled, source) => channel?.notifyWakeEnabledChanged(enabled, source),
+    });
+    channel = new ControlChannel({
+      transport,
+      gateway: { getClientCount: () => 1, getLastHelloAt: () => null, sendScreensaverConfig: vi.fn(), sendCameraEnabled: vi.fn() },
+      tunnelSupervisor: { getStatus: () => ({}) as any, reissue: vi.fn(), launchApp: vi.fn(), setLaunchAppOnDock: vi.fn() },
+      presenceEngine: { getState: () => 'present', getStateSince: () => 0 },
+      automationEngine: { isEnabled: () => true, getRules: () => [], setEnabled: vi.fn(), setRuleEnabled: vi.fn() },
+      phoneDisplay: { getStatus: () => null },
+      camera: { getStatus: () => null },
+      wakeSetting,
+      wsPort: 8787, watchdogTimeoutMs: 30000, pluginPermissions: {}, enabledPlugins: [], snapshotIntervalMs: 60_000,
+    });
+    boot({ ...deps, wakeSetting });
+    deps.eventBus.publish({ eventName: 'presence.wakeEnabled', data: { enabled: false } });
+    expect(wakeSetting.get()).toBe(false);
+    expect(sent).toContainEqual({ kind: 'wakeEnabledChanged', enabled: false, source: 'phone' });
+    expect(sendWakeEnabled).toHaveBeenCalledWith(false);
+    channel.stop();
   });
 });

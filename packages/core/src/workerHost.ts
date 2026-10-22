@@ -37,6 +37,18 @@ export interface WorkerHostOptions {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// Event names that drive core-owned state or automation and may only come
+// from the phone (WsGateway) or core itself -- never a plugin worker. Without
+// this, any plugin could e.g. publish presence.wakeEnabled (persisted to
+// config.json via the Mac app), screensaver.config, a fake sensor.* reading,
+// or person_present to trigger display wake/sleep.
+const RESERVED_EVENT_PREFIXES = ['presence.', 'sensor.', 'display.'];
+const RESERVED_EVENT_NAMES = new Set(['screensaver.config', 'person_present', 'automation.override']);
+
+export function isReservedCoreEventName(eventName: string): boolean {
+  return RESERVED_EVENT_NAMES.has(eventName) || RESERVED_EVENT_PREFIXES.some((prefix) => eventName.startsWith(prefix));
+}
+
 export class WorkerHost {
   private workers = new Map<string, WorkerLike>();
   private restarts = new Map<string, number>();
@@ -69,6 +81,10 @@ export class WorkerHost {
       } else if (msg.kind === 'denial') {
         this.opts.onDenial?.(spec.id, msg.denial);
       } else if (msg.kind === 'publishEvent') {
+        if (typeof msg.eventName !== 'string' || isReservedCoreEventName(msg.eventName)) {
+          this.opts.onLog(spec.id, 'warn', `dropped publishEvent ${JSON.stringify(msg.eventName)}: reserved for core/phone, not publishable by plugins`);
+          return;
+        }
         this.opts.onEventPublish({ eventName: msg.eventName, data: msg.data });
       } else if (msg.kind === 'publishWidget') {
         this.opts.onWidgetPublish(msg.widgetId, msg.widget);

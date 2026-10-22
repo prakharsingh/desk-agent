@@ -60,6 +60,31 @@ export const ScreensaverConfigSchema = z.object({
 });
 export type ScreensaverConfig = z.infer<typeof ScreensaverConfigSchema>;
 
+// Reserved sentinel pluginId for phone-targeted action.invoke frames (core ->
+// phone). Deliberately absent from core's plugin registry, so these never
+// reach WorkerHost.invokeAction -- see wsGateway.ts's sendScreensaverConfig.
+export const PHONE_DISPLAY_PLUGIN_ID = 'phone-display' as const;
+
+// Camera presence: PHONE-owned (persisted in AsyncStorage on the phone), the
+// same ownership model as ScreensaverConfig. The phone publishes
+// event.publish CAMERA_CONFIG_EVENT on every change and every reconnect; the
+// Mac requests a change via action.invoke phone-display/SET_CAMERA_ENABLED_ACTION
+// and only sees the result once the phone reports it back.
+export const CameraConfigSchema = z.object({ enabled: z.boolean() });
+export type CameraConfig = z.infer<typeof CameraConfigSchema>;
+export const CAMERA_CONFIG_EVENT = 'presence.cameraConfig' as const;
+export const SET_CAMERA_ENABLED_ACTION = 'setCameraEnabled' as const;
+
+// Monitor wake on return: MAC-owned (config.json presence.wakeEnabled is the
+// source of truth). Core pushes the live value to the phone via action.invoke
+// phone-display/SET_WAKE_ENABLED_ACTION on every hello and every change; a
+// toggle on the phone is sent back as event.publish WAKE_ENABLED_EVENT, which
+// core applies live and forwards to the Mac app for persistence.
+export const WakeEnabledSchema = z.object({ enabled: z.boolean() });
+export type WakeEnabled = z.infer<typeof WakeEnabledSchema>;
+export const WAKE_ENABLED_EVENT = 'presence.wakeEnabled' as const;
+export const SET_WAKE_ENABLED_ACTION = 'setWakeEnabled' as const;
+
 export const FaceVisiblePayloadSchema = z.object({ visible: z.boolean() });
 export type FaceVisiblePayload = z.infer<typeof FaceVisiblePayloadSchema>;
 
@@ -134,6 +159,14 @@ export function parseEventPublishPayload(raw: unknown): ParseResult<EventPublish
 
 export function parseScreensaverConfig(raw: unknown): ParseResult<ScreensaverConfig> {
   return toResult(ScreensaverConfigSchema.safeParse(raw));
+}
+
+export function parseCameraConfig(raw: unknown): ParseResult<CameraConfig> {
+  return toResult(CameraConfigSchema.safeParse(raw));
+}
+
+export function parseWakeEnabled(raw: unknown): ParseResult<WakeEnabled> {
+  return toResult(WakeEnabledSchema.safeParse(raw));
 }
 
 type PayloadOf<T extends Frame['type']> = Extract<Frame, { type: T }>['payload'];

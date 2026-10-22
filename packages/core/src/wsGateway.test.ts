@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
-import { WsGateway } from './index.js';
+import { WsGateway, isAllowedGatewayClient } from './index.js';
 import { createFrame, type Frame } from '@desk-agent/protocol';
 import type { WsClientLike, WsServerLike } from './index.js';
 
@@ -220,6 +220,19 @@ describe('WsGateway', () => {
       expect(gateway.getClientCount()).toBe(1);
     });
 
+    it('reports every connected-client count change via onClientCountChange (connect and close)', () => {
+      const server = new FakeServer();
+      const onClientCountChange = vi.fn();
+      new WsGateway({
+        port: 8787, heartbeatMs: 5000, getSnapshot: async () => [], onEventPublish: vi.fn(), wssFactory: () => server, onClientCountChange,
+      });
+      const client1 = connectClient(server);
+      const client2 = connectClient(server);
+      client1.emit('close');
+      client2.emit('close');
+      expect(onClientCountChange.mock.calls.map(([n]) => n)).toEqual([1, 2, 1, 0]);
+    });
+
     it('records the timestamp of the most recent hello frame', async () => {
       const server = new FakeServer();
       const snapshot = [{ widgetId: 'system-stats', widget: { type: 'system-stats', props: { cpu: 1 } } }];
@@ -276,3 +289,94 @@ describe('WsGateway', () => {
     expect(client2.sent).toHaveLength(1);
   });
 });
+
+describe('WsGateway presence settings (camera / wake)', () => {
+  it('sendCameraEnabled broadcasts action.invoke phone-display/setCameraEnabled', () => {
+    const server = new FakeServer();
+    const gateway = new WsGateway({ port: 8787, heartbeatMs: 5000, getSnapshot: async () => [], onEventPublish: vi.fn(), wssFactory: () => server });
+    gateway.start();
+    const a = connectClient(server);
+    const b = connectClient(server);
+    gateway.sendCameraEnabled(true);
+    for (const c of [a, b]) {
+      const frame: Frame = JSON.parse(c.sent[0]);
+      expect(frame.type).toBe('action.invoke');
+      expect(frame.payload).toEqual({ pluginId: 'phone-display', action: 'setCameraEnabled', args: { enabled: true } });
+    }
+    gateway.stop();
+  });
+
+  it('sendWakeEnabled broadcasts action.invoke phone-display/setWakeEnabled', () => {
+    const server = new FakeServer();
+    const gateway = new WsGateway({ port: 8787, heartbeatMs: 5000, getSnapshot: async () => [], onEventPublish: vi.fn(), wssFactory: () => server });
+    gateway.start();
+    const client = connectClient(server);
+    gateway.sendWakeEnabled(false);
+    const frame: Frame = JSON.parse(client.sent[0]);
+    expect(frame.payload).toEqual({ pluginId: 'phone-display', action: 'setWakeEnabled', args: { enabled: false } });
+    gateway.stop();
+  });
+
+  it('on hello, sends the current wakeEnabled to that client right after the widget.update snapshot', async () => {
+    const server = new FakeServer();
+    let wake = true;
+    const gateway = new WsGateway({
+      port: 8787, heartbeatMs: 5000, getSnapshot: async () => [], onEventPublish: vi.fn(), wssFactory: () => server,
+      getWakeEnabled: () => wake,
+    });
+    gateway.start();
+    const other = connectClient(server);
+    const client = connectClient(server);
+    wake = false;
+    client.emit('message', JSON.stringify(createFrame('hello', { clientVersion: '1.0.0' })));
+    await vi.waitFor(() => expect(client.sent.length).toBe(2));
+    expect(JSON.parse(client.sent[0]).type).toBe('widget.update');
+    expect(JSON.parse(client.sent[1]).payload).toEqual({ pluginId: 'phone-display', action: 'setWakeEnabled', args: { enabled: false } });
+    expect(other.sent).toHaveLength(0);
+    gateway.stop();
+  });
+});
+
+describe('WsGateway client verification (Origin)', () => {
+  it.each([
+    ['no Origin header (Node/ws, native clients)', undefined, '127.0.0.1:8787', true],
+    ["RN Android's default origin derived from ws://localhost:8787", 'http://localhost:8787', 'localhost:8787', true],
+    ['same-origin 127.0.0.1', 'http://127.0.0.1:8787', '127.0.0.1:8787', true],
+    ['a browser page on another site', 'https://evil.example', 'localhost:8787', false],
+    ['a browser page on another localhost port', 'http://localhost:3000', 'localhost:8787', false],
+    ['a sandboxed/file page ("null")', 'null', 'localhost:8787', false],
+    ['DNS rebinding (Host is the attacker name)', 'http://evil.example:8787', 'evil.example:8787', false],
+    ['an Origin with no Host header', 'http://localhost:8787', undefined, false],
+    ['garbage Origin', 'not a url', 'localhost:8787', false],
+  ] as const)('%s -> %s', (_label, origin, host, allowed) => {
+    expect(isAllowedGatewayClient(origin, host)).toBe(allowed);
+  });
+
+  it('the real WebSocketServer rejects a browser-Origin connection and accepts the phone/native ones', async () => {
+    const { WebSocket } = await import('ws');
+    const net = await import('node:net');
+    const port: number = await new Promise((resolve) => {
+      const srv = net.createServer().listen(0, '127.0.0.1', () => {
+        const p = (srv.address() as import('node:net').AddressInfo).port;
+        srv.close(() => resolve(p));
+      });
+    });
+    const gateway = new WsGateway({ port, heartbeatMs: 60_000, getSnapshot: async () => [], onEventPublish: vi.fn() });
+    const attempt = (headers: Record<string, string>, url = `ws://127.0.0.1:${port}`) =>
+      new Promise<'open' | number>((resolve) => {
+        const ws = new WebSocket(url, { headers });
+        ws.on('open', () => { ws.close(); resolve('open'); });
+        ws.on('unexpected-response', (_req, res) => { resolve(res.statusCode ?? -1); ws.terminate(); });
+        ws.on('error', () => {});
+      });
+    try {
+      await vi.waitFor(async () => expect(await attempt({})).toBe('open'));
+      expect(await attempt({ Origin: 'https://evil.example' })).toBe(403);
+      // Exactly the headers RN's OkHttp sends for ws://localhost:<port>.
+      expect(await attempt({ Host: `localhost:${port}`, Origin: `http://localhost:${port}` })).toBe('open');
+    } finally {
+      gateway.stop();
+    }
+  });
+});
+

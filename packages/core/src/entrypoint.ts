@@ -1,5 +1,13 @@
 import type { LogLevel, Permission } from '@desk-agent/plugin-sdk';
-import { parseSensorEvent, parseScreensaverConfig, type SensorEventName } from '@desk-agent/protocol';
+import {
+  parseSensorEvent,
+  parseScreensaverConfig,
+  parseCameraConfig,
+  parseWakeEnabled,
+  CAMERA_CONFIG_EVENT,
+  WAKE_ENABLED_EVENT,
+  type SensorEventName,
+} from '@desk-agent/protocol';
 import type { Config } from './configLoader.js';
 import type { PluginSpec } from './workerHost.js';
 import type { AutomationRule } from './automationEngine.js';
@@ -11,6 +19,8 @@ import type { AutomationEngine } from './automationEngine.js';
 import type { Watchdog } from './watchdog.js';
 import type { PresenceEngine, PresenceEngineConfig } from './presenceEngine.js';
 import type { ScreensaverConfigStore } from './screensaverConfigStore.js';
+import type { CameraConfigStore } from './cameraConfigStore.js';
+import type { WakeSetting } from './wakeSetting.js';
 
 export interface PluginRegistryEntry {
   modulePath: string;
@@ -43,7 +53,11 @@ export function buildPluginSpecs(
   return specs;
 }
 
-export function buildAutomationRules(config: Config): AutomationRule[] {
+// `wake` is the live holder (see wakeSetting.ts) so a Mac- or phone-
+// originated wakeEnabled change takes effect on the very next
+// presence.returned, with no core restart. Omitted (standalone/tests), the
+// condition falls back to the boot-time config value.
+export function buildAutomationRules(config: Config, wake?: Pick<WakeSetting, 'get'>): AutomationRule[] {
   return [
     {
       id: 'sleep-on-absent',
@@ -55,7 +69,7 @@ export function buildAutomationRules(config: Config): AutomationRule[] {
     {
       id: 'wake-on-return',
       eventName: 'presence.returned',
-      condition: () => config.presence.wakeEnabled,
+      condition: () => (wake ? wake.get() : config.presence.wakeEnabled),
       debounceMs: 0,
       action: { pluginId: 'energy-saver', action: 'wake-display' },
     },
@@ -79,6 +93,8 @@ export interface BootDeps {
   watchdog?: Watchdog;
   presenceEngine?: PresenceEngine;
   screensaverConfigStore?: ScreensaverConfigStore;
+  cameraConfigStore?: Pick<CameraConfigStore, 'setConfig'>;
+  wakeSetting?: Pick<WakeSetting, 'set'>;
   onLog?: (level: LogLevel, message: string) => void;
 }
 
@@ -96,6 +112,28 @@ export function boot(deps: BootDeps) {
         return;
       }
       store.setConfig(result.value);
+    });
+  }
+  if (deps.cameraConfigStore) {
+    const store = deps.cameraConfigStore;
+    deps.eventBus.subscribe(CAMERA_CONFIG_EVENT, (payload) => {
+      const result = parseCameraConfig(payload.data);
+      if (!result.ok) {
+        onLog('error', `dropped malformed ${CAMERA_CONFIG_EVENT} payload: ${result.error}`);
+        return;
+      }
+      store.setConfig(result.value);
+    });
+  }
+  if (deps.wakeSetting) {
+    const wake = deps.wakeSetting;
+    deps.eventBus.subscribe(WAKE_ENABLED_EVENT, (payload) => {
+      const result = parseWakeEnabled(payload.data);
+      if (!result.ok) {
+        onLog('error', `dropped malformed ${WAKE_ENABLED_EVENT} payload: ${result.error}`);
+        return;
+      }
+      wake.set(result.value.enabled, 'phone');
     });
   }
   if (deps.presenceEngine) {

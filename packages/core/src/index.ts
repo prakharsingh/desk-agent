@@ -10,4 +10,6 @@ export * from './entrypoint.js';
 export * from './watchdog.js';
 export * from './presenceEngine.js';
 export * from './controlChannel.js';
+export * from './cameraConfigStore.js';
+export * from './wakeSetting.js';
 export * from './main.js';

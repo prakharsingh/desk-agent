@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parseFrame, parseWidget, createFrame, PROTOCOL_VERSION, parseSensorEvent, WIDGET_IDS } from './index.js';
-import { parseScreensaverConfig } from './schema.js';
+import { parseScreensaverConfig, parseCameraConfig, parseWakeEnabled, CAMERA_CONFIG_EVENT, WAKE_ENABLED_EVENT, PHONE_DISPLAY_PLUGIN_ID, SET_CAMERA_ENABLED_ACTION, SET_WAKE_ENABLED_ACTION } from './schema.js';
 
 describe('WIDGET_IDS', () => {
   it('is the single source of truth for known widget ids, shared by the Mac config schema and the phone app', () => {
@@ -139,5 +139,63 @@ describe('parseScreensaverConfig', () => {
   it('rejects a non-integer graceMs', () => {
     const result = parseScreensaverConfig({ enabled: true, graceMs: 1.5 });
     expect(result.ok).toBe(false);
+  });
+});
+
+describe('parseCameraConfig', () => {
+  it('accepts { enabled: boolean }', () => {
+    expect(parseCameraConfig({ enabled: true })).toEqual({ ok: true, value: { enabled: true } });
+    expect(parseCameraConfig({ enabled: false })).toEqual({ ok: true, value: { enabled: false } });
+  });
+
+  it('rejects a missing or non-boolean enabled', () => {
+    expect(parseCameraConfig({}).ok).toBe(false);
+    expect(parseCameraConfig({ enabled: 'yes' }).ok).toBe(false);
+    expect(parseCameraConfig(null).ok).toBe(false);
+  });
+
+  it('round-trips through an event.publish frame named CAMERA_CONFIG_EVENT', () => {
+    const frame = createFrame('event.publish', { eventName: CAMERA_CONFIG_EVENT, data: { enabled: true } });
+    const parsed = parseFrame(JSON.parse(JSON.stringify(frame)));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok || parsed.value.type !== 'event.publish') throw new Error('expected event.publish');
+    expect(parsed.value.payload.eventName).toBe('presence.cameraConfig');
+    expect(parseCameraConfig(parsed.value.payload.data)).toEqual({ ok: true, value: { enabled: true } });
+  });
+
+  it('round-trips through the Mac->phone action.invoke phone-display/setCameraEnabled frame', () => {
+    const frame = createFrame('action.invoke', { pluginId: PHONE_DISPLAY_PLUGIN_ID, action: SET_CAMERA_ENABLED_ACTION, args: { enabled: false } });
+    const parsed = parseFrame(JSON.parse(JSON.stringify(frame)));
+    if (!parsed.ok || parsed.value.type !== 'action.invoke') throw new Error('expected action.invoke');
+    expect(parsed.value.payload.pluginId).toBe('phone-display');
+    expect(parsed.value.payload.action).toBe('setCameraEnabled');
+    expect(parseCameraConfig(parsed.value.payload.args)).toEqual({ ok: true, value: { enabled: false } });
+  });
+});
+
+describe('parseWakeEnabled', () => {
+  it('accepts { enabled: boolean }', () => {
+    expect(parseWakeEnabled({ enabled: false })).toEqual({ ok: true, value: { enabled: false } });
+  });
+
+  it('rejects a missing or non-boolean enabled', () => {
+    expect(parseWakeEnabled({}).ok).toBe(false);
+    expect(parseWakeEnabled({ enabled: 1 }).ok).toBe(false);
+  });
+
+  it('round-trips through an event.publish frame named WAKE_ENABLED_EVENT', () => {
+    const frame = createFrame('event.publish', { eventName: WAKE_ENABLED_EVENT, data: { enabled: false } });
+    const parsed = parseFrame(JSON.parse(JSON.stringify(frame)));
+    if (!parsed.ok || parsed.value.type !== 'event.publish') throw new Error('expected event.publish');
+    expect(parsed.value.payload.eventName).toBe('presence.wakeEnabled');
+    expect(parseWakeEnabled(parsed.value.payload.data)).toEqual({ ok: true, value: { enabled: false } });
+  });
+
+  it('round-trips through the core->phone action.invoke phone-display/setWakeEnabled frame', () => {
+    const frame = createFrame('action.invoke', { pluginId: PHONE_DISPLAY_PLUGIN_ID, action: SET_WAKE_ENABLED_ACTION, args: { enabled: true } });
+    const parsed = parseFrame(JSON.parse(JSON.stringify(frame)));
+    if (!parsed.ok || parsed.value.type !== 'action.invoke') throw new Error('expected action.invoke');
+    expect(parsed.value.payload.action).toBe('setWakeEnabled');
+    expect(parseWakeEnabled(parsed.value.payload.args)).toEqual({ ok: true, value: { enabled: true } });
   });
 });
