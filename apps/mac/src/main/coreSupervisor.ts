@@ -8,7 +8,10 @@ import type { UtilityProcess } from 'electron';
 // `fork`, so this is only ever actually invoked inside the real app.
 const require = createRequire(import.meta.url);
 
-export type CoreHealth = 'starting' | 'running' | 'crashed' | 'stopped';
+// Defined in shared/ so the renderer and the shared overallHealth() rule can
+// use it without importing a main-process module.
+import type { CoreHealth } from '../shared/health.js';
+export type { CoreHealth };
 
 type ForkFn = (
   modulePath: string,
