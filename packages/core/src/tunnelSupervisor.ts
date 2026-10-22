@@ -85,6 +85,7 @@ export class TunnelSupervisor {
         // The reverses (and their failures) died with the device.
         this.upPorts.clear();
         this.failedPorts.clear();
+        this.tunnelStatus = 'idle';
       }
     });
   }
@@ -152,8 +153,9 @@ export class TunnelSupervisor {
     if (this.ports.has(port)) return this.upPorts.has(port);
     this.ports.add(port);
     if (this.serial === null) return false;
+    const serial = this.serial;
     await this.reversePort(port);
-    this.updateStatus();
+    if (this.serial === serial) this.updateStatus();
     return this.upPorts.has(port);
   }
 
@@ -276,7 +278,8 @@ export class TunnelSupervisor {
       if (!this.ports.has(port)) continue;
       await this.reversePort(port);
     }
-    this.updateStatus();
+    // Detached (or replaced) mid-pass: those results are not the current device's.
+    if (this.serial === serial) this.updateStatus();
   }
 
   /** Public so a manual "Launch now" action (Device pane) can call it directly, regardless of the launchAppOnDock toggle -- same reasoning as reissue() above. Failure here is non-fatal to the tunnel itself. */

@@ -36,6 +36,29 @@ describe('TunnelSupervisor', () => {
     await vi.waitFor(() => expect(adb.reverse).toHaveBeenCalledTimes(2));
   });
 
+  it('resets tunnelStatus to idle when the attached phone detaches', async () => {
+    const adb = makeFakeAdb();
+    const supervisor = new TunnelSupervisor(adb, 8787, vi.fn());
+    supervisor.start();
+    adb.emitAttach();
+    await vi.waitFor(() => expect(supervisor.getStatus().tunnelStatus).toBe('reissued'));
+    adb.emitDetach();
+    expect(supervisor.getStatus().tunnelStatus).toBe('idle');
+  });
+
+  it('a late reverse from the detached phone does not flip tunnelStatus back', async () => {
+    const adb = makeFakeAdb();
+    let land!: () => void;
+    adb.reverse = vi.fn(() => new Promise<void>((resolve) => { land = resolve; }));
+    const supervisor = new TunnelSupervisor(adb, 8787, vi.fn());
+    supervisor.start();
+    adb.emitAttach();
+    adb.emitDetach();
+    land();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(supervisor.getStatus().tunnelStatus).toBe('idle');
+  });
+
   it('logs and does not throw when adb reverse rejects', async () => {
     const onLog = vi.fn();
     const adb: AdbRunner = {
