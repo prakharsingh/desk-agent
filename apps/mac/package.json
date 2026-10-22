@@ -71,7 +71,10 @@
         }
       ],
       "artifactName": "DeskAgent-${version}-mac-arm64.${ext}",
-      "identity": null,
+      "identity": "-",
+      "binaries": [
+        "Contents/MacOS/desk-agent-display-helper"
+      ],
       "category": "public.app-category.utilities",
       "icon": "build/icon.icns"
     }
