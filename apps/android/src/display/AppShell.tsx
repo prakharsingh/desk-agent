@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Animated, StyleSheet } from 'react-native';
-import type { Widget, ScreensaverConfig } from '@desk-agent/protocol';
+import type { Widget, ScreensaverConfig, DisplaySessionPayload } from '@desk-agent/protocol';
 import type { ConnectionState } from '../wsClient.js';
 import type { SensorFrame } from './sensorFrame.js';
 import { computePixelShiftOffset } from '../oledMitigation.js';
@@ -16,11 +16,13 @@ import { StandbyScreen } from './screens/StandbyScreen.js';
 import { SystemDetail } from './screens/SystemDetail.js';
 import { WeatherDetail } from './screens/WeatherDetail.js';
 import { LightScreen } from './screens/LightScreen.js';
+import { DisplayScreen } from './screens/DisplayScreen.js';
+import type { SeenDisplaySessions } from './displayFlow.js';
 import { SettingsScreen } from './screens/SettingsScreen.js';
 import type { LightColorPreset } from './lightColor.js';
 import { readSystemStats, readWeather } from './widgetReaders.js';
 import { derivePresence } from './derivePresence.js';
-import { shouldAutoIdleWithConfig } from './autoIdle.js';
+import { isAutoIdleExempt, shouldAutoIdleWithConfig } from './autoIdle.js';
 import { pushHistory } from './sparkline.js';
 import { STANDBY_VOICE, type ScreenState } from './screens.js';
 import type { TemperatureUnit } from './temperature.js';
@@ -68,6 +70,13 @@ export interface AppShellProps {
   onGoVoice: () => void;
   onGoDeck: () => void;
   onGoLight: () => void;
+  onGoDisplay: () => void;
+  displayUnsupported?: boolean;
+  lastDisplaySession: { payload: DisplaySessionPayload; seq: number } | null;
+  seenDisplaySessions: SeenDisplaySessions;
+  getDisplaySeq: () => number;
+  onDisplayUnsupported: () => void;
+  onDisplaySupported: () => void;
   onBack: () => void;
   onSleep: () => void;
   onWake: () => void;
@@ -104,6 +113,13 @@ export function AppShell({
   onGoVoice,
   onGoDeck,
   onGoLight,
+  onGoDisplay,
+  displayUnsupported = false,
+  lastDisplaySession,
+  seenDisplaySessions,
+  getDisplaySeq,
+  onDisplayUnsupported,
+  onDisplaySupported,
   onBack,
   onSleep,
   onWake,
@@ -113,9 +129,9 @@ export function AppShell({
 }: AppShellProps) {
   const translate = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
 
-  // Chin Light is a full-bleed immersive surface -- see chromeless/Header
-  // below, and the pixel-shift pin just below this.
-  const immersiveLight = screenState.screen === 'light';
+  // Chin Light and the extended Display are full-bleed immersive surfaces --
+  // see chromeless/Header below, and the pixel-shift pin just below this.
+  const immersive = screenState.screen === 'light' || screenState.screen === 'display';
 
   // OLED pixel-shift drift wrapper, moved verbatim in spirit from App.tsx:
   // same constants, same computePixelShiftOffset, same 1s tick cadence.
@@ -124,7 +140,7 @@ export function AppShell({
   // of the dark root background past the light's edge, breaking the
   // full-bleed fill.
   useEffect(() => {
-    if (immersiveLight) {
+    if (immersive) {
       translate.setValue({ x: 0, y: 0 });
       return;
     }
@@ -133,7 +149,7 @@ export function AppShell({
       translate.setValue(offset);
     }, 1000);
     return () => clearInterval(interval);
-  }, [startedAt, translate, immersiveLight]);
+  }, [startedAt, translate, immersive]);
 
   // Local auto-idle policy: track last local-interaction timestamp, reset by
   // a root touch responder, and periodically check whether enough silence
@@ -147,6 +163,7 @@ export function AppShell({
   useEffect(() => {
     const interval = setInterval(() => {
       if (screenState.screen === 'idle') return; // already idle -- don't repeatedly call onSleep
+      if (isAutoIdleExempt(screenState.screen)) return; // the extended display streams continuously
       if (shouldAutoIdleWithConfig(Date.now() - lastActivityRef.current, screensaverConfig)) {
         onSleep();
       }
@@ -291,6 +308,19 @@ export function AppShell({
             bumpActivity={bumpActivity}
           />
         );
+      case 'display':
+        return (
+          <DisplayScreen
+            lastSession={lastDisplaySession}
+            seenSessionIds={seenDisplaySessions}
+            getDisplaySeq={getDisplaySeq}
+            jsonConnected={connectionState === 'connected'}
+            sendFrame={sendFrame}
+            onExit={onBack}
+            onUnsupported={onDisplayUnsupported}
+            onSupported={onDisplaySupported}
+          />
+        );
       case 'clock':
         return <ClockScreen now={now} startedAt={startedAt} onBack={onBack} />;
       case 'standby':
@@ -318,14 +348,16 @@ export function AppShell({
             onGoVoice={onGoVoice}
             onGoDeck={onGoDeck}
             onGoLight={onGoLight}
+            onGoDisplay={onGoDisplay}
+            displayUnsupported={displayUnsupported}
           />
         );
     }
   }
 
-  // Chromeless (no Header) on Idle -- and on Chin Light, so the header bar
+  // Chromeless (no Header) on Idle -- and on Chin Light / Display, so the header bar
   // doesn't leave a dark strip across an otherwise full-bleed fill-light.
-  const chromeless = screenState.screen === 'idle' || immersiveLight;
+  const chromeless = screenState.screen === 'idle' || immersive;
 
   return (
     <Animated.View
