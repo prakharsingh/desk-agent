@@ -11,7 +11,7 @@ import { debounce } from './debounce.js';
 import { LogBuffer } from './logBuffer.js';
 import { SnapshotCache } from './snapshotCache.js';
 import { WakeSync } from './wakeSync.js';
-import { augmentedPath, checkBinaries } from './binaries.js';
+import { augmentedPath, checkBinaries, resolveAdb } from './binaries.js';
 import * as dockWatch from './dockWatch.js';
 import { startUpdateChecker } from './updateCheck.js';
 import { TRAFFIC_LIGHT_POSITION, USE_SIDEBAR_VIBRANCY, windowBackgroundColor } from '../shared/constants.js';
@@ -84,6 +84,12 @@ if (!gotLock) {
     const entry: LogEntry = { ts: Date.now(), level: 'error', source: 'core-process', message: text };
     logBuffer.push(entry);
     mainWindow?.webContents.send('status:message', { kind: 'log', entry } satisfies ToApp);
+  }
+
+  // The adb we ship, used only when the user has none of their own (see
+  // resolveAdb). Packaged: next to the executable; dev: apps/mac/native-bin.
+  function bundledAdbPath(): string {
+    return app.isPackaged ? path.join(path.dirname(process.execPath), 'adb') : path.join(__dirname, '../../native-bin/adb');
   }
 
   function resourcesPath(): string {
@@ -181,7 +187,8 @@ if (!gotLock) {
   // Computed once (which binaries are installed essentially never changes
   // mid-session) and cached here, mirroring snapshotCache's cache-and-serve
   // pattern, instead of re-doing sync fs.existsSync calls on every mount.
-  let binaryStatus = checkBinaries();
+  const adb = resolveAdb({ bundledPath: bundledAdbPath() });
+  const binaryStatus = checkBinaries(undefined, adb);
   ipcMain.handle('binaries:getStatus', () => binaryStatus);
   // OS login-item state is the source of truth -- deliberately not mirrored
   // into config.json, so it can never drift from what macOS actually has
@@ -200,7 +207,7 @@ if (!gotLock) {
   // back pattern as the login toggle above: launchctl can fail silently, so
   // the renderer trusts isInstalled()'s answer, not an assumed success.
   ipcMain.handle('dockwatch:getEnabled', () => dockWatch.isInstalled());
-  ipcMain.handle('dockwatch:setEnabled', (_event, enabled: boolean) => (enabled ? dockWatch.install() : dockWatch.uninstall()));
+  ipcMain.handle('dockwatch:setEnabled', (_event, enabled: boolean) => (enabled ? dockWatch.install({ adbPath: adb?.path }) : dockWatch.uninstall()));
   ipcMain.handle('status:setScreensaverConfig', (_event, enabled: boolean, graceMs: number) =>
     sendToCore({ kind: 'setScreensaverConfig', enabled, graceMs }));
   // Phone-owned camera presence: a request to the phone, confirmed back via snapshot.camera.
@@ -228,7 +235,7 @@ if (!gotLock) {
       // calls would ENOENT without this. A function, recomputed on every
       // spawn/restart, so a binary installed after the app launched is
       // picked up by the next restart rather than requiring a full quit.
-      extraEnv: () => ({ PATH: augmentedPath(process.env.PATH ?? '') }),
+      extraEnv: () => ({ PATH: augmentedPath(process.env.PATH ?? ''), ...(adb ? { DESK_AGENT_ADB: adb.path } : {}) }),
       onStderr: recordStderr,
       onHealthChange: (health) => {
         // Drop the snapshot once the core leaves 'running' so neither the tray

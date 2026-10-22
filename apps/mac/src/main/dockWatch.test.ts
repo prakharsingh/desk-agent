@@ -32,6 +32,14 @@ describe('dockWatch', () => {
       expect(script).toContain('if [ -z "$ADB" ] && [ -x "/usr/local/bin/adb" ]; then ADB="/usr/local/bin/adb"; fi');
     });
 
+    it('bakes the resolved adb path into the dock-watch script', () => {
+      expect(buildWatchScript([], '/Apps/Desk Agent.app/Contents/MacOS/adb')).toMatch(/^ADB="\/Apps\/Desk Agent\.app\/Contents\/MacOS\/adb"$/m);
+    });
+
+    it('leaves ADB empty before the fallbacks when no preferred adb is given', () => {
+      expect(buildWatchScript([])).toMatch(/^ADB=""$/m);
+    });
+
     it('falls back to PATH resolution, then gives up if adb is nowhere to be found', () => {
       const script = buildWatchScript([]);
       expect(script).toContain('ADB=$(command -v adb 2>/dev/null || true)');

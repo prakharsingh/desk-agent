@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { findBinary, checkBinaries, augmentedPath } from './binaries.js';
+import { findBinary, checkBinaries, augmentedPath, resolveAdb } from './binaries.js';
 
 describe('binaries', () => {
   const tmpDirs: string[] = [];
@@ -44,6 +44,52 @@ describe('binaries', () => {
       const result = checkBinaries([dir]);
       expect(result.adb).toBe(true);
       expect(result.nowplayingCli).toBe(false);
+    });
+  });
+
+  describe('resolveAdb', () => {
+    it('prefers the user adb over the bundled one', () => {
+      const userDir = makeFakeBinDir('adb');
+      const bundledDir = makeFakeBinDir('adb');
+      expect(resolveAdb({ candidateDirs: [userDir], pathEnv: '', bundledPath: path.join(bundledDir, 'adb') })).toEqual({
+        path: path.join(userDir, 'adb'),
+        source: 'user',
+      });
+    });
+
+    it('finds a user adb on PATH', () => {
+      const pathDir = makeFakeBinDir('adb');
+      expect(resolveAdb({ candidateDirs: [], pathEnv: `/nonexistent:${pathDir}`, bundledPath: null })).toEqual({
+        path: path.join(pathDir, 'adb'),
+        source: 'user',
+      });
+    });
+
+    it('falls back to the bundled adb', () => {
+      const bundledDir = makeFakeBinDir('adb');
+      const bundled = path.join(bundledDir, 'adb');
+      expect(resolveAdb({ candidateDirs: [], pathEnv: '', bundledPath: bundled })).toEqual({ path: bundled, source: 'bundled' });
+    });
+
+    it('returns null when neither exists', () => {
+      expect(resolveAdb({ candidateDirs: [], pathEnv: '', bundledPath: '/definitely/not/here/adb' })).toBeNull();
+      expect(resolveAdb({ candidateDirs: [], pathEnv: '', bundledPath: null })).toBeNull();
+    });
+
+    it('ignores a non-executable adb', () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'desk-agent-binaries-'));
+      tmpDirs.push(dir);
+      fs.writeFileSync(path.join(dir, 'adb'), 'x');
+      expect(resolveAdb({ candidateDirs: [dir], pathEnv: '', bundledPath: null })).toBeNull();
+    });
+  });
+
+  describe('checkBinaries adb details', () => {
+    it('reports the resolved adb path and source', () => {
+      const dir = makeFakeBinDir('adb');
+      const result = checkBinaries([dir], { path: path.join(dir, 'adb'), source: 'bundled' });
+      expect(result).toMatchObject({ adb: true, adbPath: path.join(dir, 'adb'), adbSource: 'bundled' });
+      expect(checkBinaries([dir], null)).toMatchObject({ adb: false, adbPath: null, adbSource: null });
     });
   });
 

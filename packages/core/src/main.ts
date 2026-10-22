@@ -137,7 +137,7 @@ export function run(opts: RunOptions = {}) {
 
   const tunnelLog = (level: 'info' | 'warn' | 'error', message: string) => log('tunnel', level, message);
   // One runner for both the tunnel and display-token delivery (core owns adb).
-  const adbRunner = createRealAdbRunner(tunnelLog);
+  const adbRunner = createRealAdbRunner(tunnelLog, process.env.DESK_AGENT_ADB ?? 'adb');
   // displayCoordinator is assigned below; after a core restart it learns the active session from main's
   // resync (sent on core's first snapshot, which precedes boot() and so tunnelSupervisor.start()).
   const tunnelSupervisor = new TunnelSupervisor(adbRunner, config.wsPort, tunnelLog, config.launchAppOnDock,
