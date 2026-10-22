@@ -58,6 +58,8 @@ config.json
 docs/**/plans
 docs/**/specs
 docs/**/enhancements
+docs/**/prs
+docs/**/archive
 gemini.md
 CLAUDE.md
 ANTIGRAVITY.md
