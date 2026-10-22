@@ -46,6 +46,9 @@ export interface AppShellProps {
   // a prop-interface break.
   automationEnabled?: boolean;
   onToggleAutomation?: () => void;
+  // Mac-owned Monitor wake, synced live from core (null = not received yet).
+  wakeEnabled?: boolean | null;
+  onToggleWake?: () => void;
   // Real media-control actions (system-stats plugin's togglePlayPause/next/
   // previous), sourced from App.tsx the same way onToggleAutomation is.
   onTogglePlayPause?: () => void;
@@ -82,6 +85,8 @@ export function AppShell({
   setCameraEnabled,
   automationEnabled = false,
   onToggleAutomation,
+  wakeEnabled = null,
+  onToggleWake,
   onTogglePlayPause,
   onNextTrack,
   onPreviousTrack,
@@ -179,8 +184,8 @@ export function AppShell({
   // Window-absolute rect of PresenceDetail's live-preview slot, reported via
   // measureInWindow on every layout. Passed through to the always-mounted
   // CameraPresence below so it can portal a real visible preview + face-box
-  // overlay exactly onto that slot; null/undefined keeps CameraPresence's
-  // existing invisible 1x1 fallback. Ignore zero-size rects: PresenceDetail's
+  // overlay exactly onto that slot; null runs the camera headless (frame
+  // output only, no preview surface). Ignore zero-size rects: PresenceDetail's
   // first layout pass can transiently report {x:0,y:0,width:0,height:0}
   // before RN settles, and passing that through would briefly render a
   // zero-size <Camera>.
@@ -268,6 +273,8 @@ export function AppShell({
             onToggleCamera={() => setCameraEnabled(!cameraEnabled)}
             automationEnabled={automationEnabled}
             onToggleAutomation={onToggleAutomation}
+            wakeEnabled={wakeEnabled}
+            onToggleWake={onToggleWake}
             onBack={onBack}
             onSleepNow={onSleep}
             onPreviewRect={handlePreviewRect}

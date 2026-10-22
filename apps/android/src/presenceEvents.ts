@@ -1,4 +1,4 @@
-import { createFrame, type Frame, type CameraStatePayload, type ScreensaverConfig } from '@desk-agent/protocol';
+import { createFrame, CAMERA_CONFIG_EVENT, WAKE_ENABLED_EVENT, type Frame, type CameraStatePayload, type ScreensaverConfig } from '@desk-agent/protocol';
 
 export function buildFaceVisibleFrame(visible: boolean): Frame {
   return createFrame('event.publish', { eventName: 'sensor.face_visible', data: { visible } });
@@ -29,4 +29,15 @@ export function buildMediaActionFrame(action: 'togglePlayPause' | 'next' | 'prev
 
 export function buildScreensaverConfigFrame(config: ScreensaverConfig): Frame {
   return createFrame('event.publish', { eventName: 'screensaver.config', data: config });
+}
+
+// Phone-owned camera presence setting, reported to the Mac on change and on
+// every reconnect (same pattern as buildScreensaverConfigFrame).
+export function buildCameraConfigFrame(enabled: boolean): Frame {
+  return createFrame('event.publish', { eventName: CAMERA_CONFIG_EVENT, data: { enabled } });
+}
+
+// A phone-side toggle of the Mac-owned Monitor wake setting.
+export function buildWakeEnabledFrame(enabled: boolean): Frame {
+  return createFrame('event.publish', { eventName: WAKE_ENABLED_EVENT, data: { enabled } });
 }

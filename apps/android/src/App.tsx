@@ -1,11 +1,22 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { parseScreensaverConfig, type Frame, type ScreensaverConfig, type Widget } from '@desk-agent/protocol';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  parseScreensaverConfig,
+  parseCameraConfig,
+  parseWakeEnabled,
+  PHONE_DISPLAY_PLUGIN_ID,
+  SET_CAMERA_ENABLED_ACTION,
+  SET_WAKE_ENABLED_ACTION,
+  type Frame,
+  type ScreensaverConfig,
+  type Widget,
+} from '@desk-agent/protocol';
 import { WsClient, type ConnectionState } from './wsClient.js';
 import { AppShell } from './display/AppShell.js';
 import { INITIAL_SCREEN_STATE, STANDBY_DECK, STANDBY_VOICE, back, goTo, goToStandby, sleep, wake } from './display/screens.js';
 import { UNKNOWN_SENSOR_FRAME, mergeSensorFrame, resetSensorFrame, type SensorFrame } from './display/sensorFrame.js';
 import { DEFAULT_SCREENSAVER_CONFIG, loadScreensaverConfig, saveScreensaverConfig } from './display/screensaverConfig.js';
 import { buildMediaActionFrame, buildOverrideFrame, buildScreensaverConfigFrame } from './presenceEvents.js';
+import { useCameraSetting, useWakeSetting } from './display/usePresenceSettings.js';
 
 const WS_URL = 'ws://localhost:8787';
 const HEARTBEAT_TIMEOUT_MS = 15000;
@@ -16,7 +27,6 @@ export default function App() {
   // undefined until the first hello-reply arrives -- HomeScreen treats that
   // as "show everything" (fail open), not "hide everything".
   const [visibleWidgets, setVisibleWidgets] = useState<readonly string[] | undefined>(undefined);
-  const [cameraEnabled, setCameraEnabled] = useState(false);
   const [automationEnabled, setAutomationEnabled] = useState(true);
   const [connectionEpoch, setConnectionEpoch] = useState(0);
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
@@ -27,12 +37,21 @@ export default function App() {
   // always receive DEFAULT_SCREENSAVER_CONFIG as a fallback in the meantime
   // (see the JSX below), matching today's pre-feature hardcoded behavior.
   const [screensaverConfig, setScreensaverConfig] = useState<ScreensaverConfig | null>(null);
+  // Remote (Mac -> phone) presence-setting appliers, read through a ref by the
+  // once-created WsClient's onFrame below, so it always reaches the latest
+  // callbacks without recreating the client.
+  const remoteSettingsRef = useRef<{ applyCamera: (enabled: boolean) => void; applyWake: (enabled: boolean) => void }>({
+    applyCamera: () => {},
+    applyWake: () => {},
+  });
 
   useEffect(() => {
     let cancelled = false;
-    void loadScreensaverConfig().then((config) => {
-      if (!cancelled) setScreensaverConfig(config);
-    });
+    void loadScreensaverConfig()
+      .catch(() => DEFAULT_SCREENSAVER_CONFIG)
+      .then((config) => {
+        if (!cancelled) setScreensaverConfig(config);
+      });
     return () => {
       cancelled = true;
     };
@@ -48,11 +67,21 @@ export default function App() {
           setConnectionState(state);
         },
         onFrame: (frame: Frame) => {
+          if (frame.type === 'action.invoke' && frame.payload.pluginId === PHONE_DISPLAY_PLUGIN_ID && frame.payload.action === SET_CAMERA_ENABLED_ACTION) {
+            const result = parseCameraConfig(frame.payload.args);
+            if (result.ok) remoteSettingsRef.current.applyCamera(result.value.enabled);
+            return;
+          }
+          if (frame.type === 'action.invoke' && frame.payload.pluginId === PHONE_DISPLAY_PLUGIN_ID && frame.payload.action === SET_WAKE_ENABLED_ACTION) {
+            const result = parseWakeEnabled(frame.payload.args);
+            if (result.ok) remoteSettingsRef.current.applyWake(result.value.enabled);
+            return;
+          }
           if (frame.type === 'action.invoke' && frame.payload.pluginId === 'phone-display' && frame.payload.action === 'setScreensaverConfig') {
             const result = parseScreensaverConfig(frame.payload.args);
             if (result.ok) {
               setScreensaverConfig(result.value);
-              void saveScreensaverConfig(result.value);
+              saveScreensaverConfig(result.value).catch((err: unknown) => console.warn('[App] saveScreensaverConfig failed:', err));
             }
             return;
           }
@@ -99,7 +128,7 @@ export default function App() {
 
   const onChangeScreensaverConfig = useCallback((config: ScreensaverConfig) => {
     setScreensaverConfig(config);
-    void saveScreensaverConfig(config);
+    saveScreensaverConfig(config).catch((err: unknown) => console.warn('[App] saveScreensaverConfig failed:', err));
   }, []);
 
   const onGoSettings = useCallback(() => setScreenState((s) => goTo(s, 'settings')), []);
@@ -144,10 +173,21 @@ export default function App() {
     sendFrame(JSON.stringify(buildMediaActionFrame('previous')));
   }, [sendFrame]);
 
+  // Camera presence: persisted on the phone, published to the Mac on change
+  // and on every reconnect (see usePresenceSettings.ts). Null until loaded --
+  // CameraPresence gets `false` meanwhile, so it never starts on a guess.
+  const { cameraEnabled, setCameraEnabled } = useCameraSetting({ sendFrame, connectionEpoch });
   const setCameraEnabledAndReset = useCallback((enabled: boolean) => {
     setCameraEnabled(enabled);
     if (!enabled) setSensorFrame(resetSensorFrame());
-  }, []);
+  }, [setCameraEnabled]);
+
+  // Monitor wake: Mac-owned, pushed by core; toggled here -> event.publish.
+  const { wakeEnabled, applyFromMac: applyWakeFromMac, toggle: toggleWake } = useWakeSetting({ sendFrame });
+
+  remoteSettingsRef.current = { applyCamera: setCameraEnabledAndReset, applyWake: applyWakeFromMac };
+  // (Below) the wake toggle is read-only while offline: a toggle sent now
+  // would be dropped by WsClient, and the next hello re-syncs the Mac's value.
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000);
@@ -172,10 +212,12 @@ export default function App() {
       visibleWidgets={visibleWidgets}
       connectionState={connectionState}
       sensorFrame={sensorFrame}
-      cameraEnabled={cameraEnabled}
+      cameraEnabled={cameraEnabled ?? false}
       setCameraEnabled={setCameraEnabledAndReset}
       automationEnabled={automationEnabled}
       onToggleAutomation={onToggleAutomation}
+      wakeEnabled={wakeEnabled}
+      onToggleWake={connectionState === 'connected' ? toggleWake : undefined}
       onTogglePlayPause={onTogglePlayPause}
       onNextTrack={onNextTrack}
       onPreviousTrack={onPreviousTrack}
