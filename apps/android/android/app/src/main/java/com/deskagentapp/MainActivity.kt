@@ -1,10 +1,12 @@
 package com.deskagentapp
 
+import android.content.Intent
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.deskagentapp.display.DisplayTokenHolder
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnabled
@@ -24,6 +26,16 @@ class MainActivity : ReactActivity() {
     // whenever the app is in the foreground (Task C5 / Spike-2).
     window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     hideSystemBars()
+    // A process-death restore replays the original launch intent; its token was
+    // already consumed, so only read extras on a fresh start.
+    if (savedInstanceState == null) DisplayTokenHolder.readFromIntent(intent)
+  }
+
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+    // Extras-less launches (core's plain `am start`) are a no-op for the holder.
+    DisplayTokenHolder.readFromIntent(intent)
   }
 
   override fun onWindowFocusChanged(hasFocus: Boolean) {
