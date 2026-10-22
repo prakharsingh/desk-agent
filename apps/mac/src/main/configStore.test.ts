@@ -24,6 +24,13 @@ describe('configStore', () => {
     expect(read.weather.location).toBe('Portland');
   });
 
+  it('writeConfig keeps knownWidgets', () => {
+    const configPath = tmpConfigPath();
+    writeConfig(configPath, { knownWidgets: ['clock', 'display'], visibleWidgets: ['clock'] });
+    expect(JSON.parse(fs.readFileSync(configPath, 'utf8')).knownWidgets).toEqual(['clock', 'display']);
+    expect(readConfig(configPath).knownWidgets).toEqual(['clock', 'display']);
+  });
+
   it('applies schema defaults on read for an older on-disk config missing newer fields (upgrade path)', () => {
     const configPath = tmpConfigPath();
     fs.writeFileSync(configPath, JSON.stringify({ weather: { location: 'Seattle' } }));

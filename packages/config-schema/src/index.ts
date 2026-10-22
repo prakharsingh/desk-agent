@@ -74,6 +74,10 @@ export const ConfigSchema = z.object({
   // (Voice, Steam Deck) aren't in WIDGET_IDS at all -- they're always shown,
   // always disabled, never toggleable.
   visibleWidgets: z.array(z.string()).default([...WIDGET_IDS]),
+  // Widget ids this config has already been reconciled against (see
+  // reconcileWidgets): an id in WIDGET_IDS but not here is "new" to this
+  // install and gets switched on once. Fresh configs know every current id.
+  knownWidgets: z.array(z.string()).default([...WIDGET_IDS]),
   // Phone-as-extended-display: USB vendor/product ids the helper gives the
   // virtual display (spike-proven defaults).
   display: z
@@ -89,4 +93,27 @@ export type PresenceConfig = z.infer<typeof PresenceConfigSchema>;
 
 export function parseConfig(raw: unknown): Config {
   return ConfigSchema.parse(raw);
+}
+
+// The widget ids that existed before `knownWidgets` was introduced (i.e. before
+// `display`). Treated as already-known for configs that lack the field. Never
+// remove an id from this list.
+export const LEGACY_KNOWN_WIDGETS = ['clock', 'system', 'weather', 'presence', 'playing', 'light'] as const;
+
+// Switches new widget tiles on exactly once for existing installs. Works on the
+// RAW config JSON: a parsed Config would already have defaulted knownWidgets and
+// hide the migration. Ids in WIDGET_IDS missing from knownWidgets are appended
+// to visibleWidgets (when it is an array) and to knownWidgets; a tile the user
+// hid while it was known stays hidden. Pure: never mutates `raw`.
+export function reconcileWidgets(raw: Record<string, unknown>): { changed: boolean; next: Record<string, unknown> } {
+  const hadKnown = Array.isArray(raw.knownWidgets);
+  const known: string[] = hadKnown ? [...(raw.knownWidgets as string[])] : [...LEGACY_KNOWN_WIDGETS];
+  const added = WIDGET_IDS.filter((id) => !known.includes(id));
+
+  const next: Record<string, unknown> = { ...raw, knownWidgets: [...known, ...added] };
+  if (Array.isArray(raw.visibleWidgets)) {
+    const visible = raw.visibleWidgets as string[];
+    next.visibleWidgets = [...visible, ...added.filter((id) => !visible.includes(id))];
+  }
+  return { changed: !hadKnown || added.length > 0, next };
 }

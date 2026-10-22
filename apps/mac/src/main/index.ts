@@ -5,7 +5,7 @@ import type { ToApp, ToCore, LogEntry } from '@desk-agent/core';
 import type { StatusMessage } from '../shared/types.js';
 import { CoreSupervisor } from './coreSupervisor.js';
 import { TrayController } from './tray.js';
-import { ensureConfigExists, defaultConfigPath } from './firstRunConfig.js';
+import { ensureConfigExists, reconcileWidgetsOnDisk, defaultConfigPath } from './firstRunConfig.js';
 import { readConfig } from './configStore.js';
 import { debounce } from './debounce.js';
 import { LogBuffer } from './logBuffer.js';
@@ -216,6 +216,9 @@ if (!gotLock) {
     // Follow System Settings > Appearance (no in-app override).
     nativeTheme.themeSource = 'system';
     ensureConfigExists(configPath);
+    // Switch newly added widget tiles on once for existing installs, before
+    // core or the Widgets pane read the file.
+    reconcileWidgetsOnDisk(configPath);
 
     supervisor = new CoreSupervisor({
       coreHostPath: path.join(__dirname, 'coreHost.js'),

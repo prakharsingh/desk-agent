@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { ConfigSchema } from '@desk-agent/config-schema';
+import { ConfigSchema, reconcileWidgets } from '@desk-agent/config-schema';
 
 export function defaultConfigPath(): string {
   return path.join(os.homedir(), '.desk-agent', 'config.json');
@@ -27,4 +27,24 @@ export function ensureConfigExists(configPath: string): void {
   const tmpPath = `${configPath}.${process.pid}.tmp`;
   fs.writeFileSync(tmpPath, JSON.stringify(DEFAULT_CONFIG, null, 2));
   fs.renameSync(tmpPath, configPath);
+}
+
+// Switches newly added widget tiles on once for an install whose config.json
+// predates them (see reconcileWidgets). Returns true when it rewrote the file.
+// An unreadable/unparseable file is left untouched for the normal config-error
+// path to report. Same single-instance caveat as ensureConfigExists.
+export function reconcileWidgetsOnDisk(configPath: string): boolean {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  } catch {
+    return false;
+  }
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return false;
+  const { changed, next } = reconcileWidgets(raw as Record<string, unknown>);
+  if (!changed) return false;
+  const tmpPath = `${configPath}.${process.pid}.tmp`;
+  fs.writeFileSync(tmpPath, JSON.stringify(next, null, 2));
+  fs.renameSync(tmpPath, configPath);
+  return true;
 }

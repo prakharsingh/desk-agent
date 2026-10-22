@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { parseConfig, ConfigSchema } from './index.js';
+import { WIDGET_IDS } from '@desk-agent/protocol';
+import { parseConfig, ConfigSchema, reconcileWidgets, LEGACY_KNOWN_WIDGETS } from './index.js';
 
 describe('ConfigSchema', () => {
   it('parses a fully empty object into a fully-defaulted, valid config (needed for first-run bootstrap)', () => {
@@ -86,5 +87,66 @@ describe('ConfigSchema', () => {
       expect(parseConfig({}).watchdogTimeoutMs).toBe(30000);
       expect(parseConfig({ weather: {}, watchdogTimeoutMs: 60000 }).watchdogTimeoutMs).toBe(60000);
     });
+  });
+});
+
+describe('reconcileWidgets', () => {
+  it('a config without knownWidgets gets display added to visibleWidgets once', () => {
+    const r = reconcileWidgets({ visibleWidgets: ['clock', 'weather'] });
+    expect(r.changed).toBe(true);
+    expect(r.next.visibleWidgets).toEqual(['clock', 'weather', 'display']);
+    expect(r.next.knownWidgets).toEqual([...WIDGET_IDS]);
+  });
+
+  it('a tile the user hid stays hidden', () => {
+    const r = reconcileWidgets({ visibleWidgets: ['clock', 'weather', 'presence', 'playing', 'light'] });
+    expect(r.next.visibleWidgets).not.toContain('system');
+    expect(r.next.visibleWidgets).toContain('display');
+  });
+
+  it('a tile hidden after it was already known is not switched back on', () => {
+    const raw = { visibleWidgets: ['clock'], knownWidgets: [...WIDGET_IDS] };
+    const r = reconcileWidgets(raw);
+    expect(r.changed).toBe(false);
+    expect(r.next).toEqual(raw);
+  });
+
+  it('reconciling twice is a no-op', () => {
+    const first = reconcileWidgets({ visibleWidgets: ['clock'] });
+    const second = reconcileWidgets(first.next);
+    expect(second.changed).toBe(false);
+    expect(second.next).toEqual(first.next);
+  });
+
+  it('a fresh default config is unchanged', () => {
+    const fresh = ConfigSchema.parse({});
+    expect(fresh.knownWidgets).toEqual([...WIDGET_IDS]);
+    const r = reconcileWidgets(fresh as unknown as Record<string, unknown>);
+    expect(r.changed).toBe(false);
+    expect(r.next).toEqual(fresh);
+  });
+
+  it('unrelated keys are preserved and the input is not mutated', () => {
+    const raw = { wsPort: 9999, weather: { location: 'Oslo' }, visibleWidgets: ['clock'], custom: { a: 1 } };
+    const r = reconcileWidgets(raw);
+    expect(r.next.wsPort).toBe(9999);
+    expect(r.next.weather).toEqual({ location: 'Oslo' });
+    expect(r.next.custom).toEqual({ a: 1 });
+    expect(raw.visibleWidgets).toEqual(['clock']);
+  });
+
+  it('a config with no visibleWidgets (already defaults to all) only records knownWidgets', () => {
+    const r = reconcileWidgets({ wsPort: 1 });
+    expect(r.changed).toBe(true);
+    expect(r.next).toEqual({ wsPort: 1, knownWidgets: [...WIDGET_IDS] });
+  });
+
+  it('ignores a non-array knownWidgets and treats the install as legacy', () => {
+    const r = reconcileWidgets({ knownWidgets: 'nope', visibleWidgets: ['clock'] });
+    expect(r.next.visibleWidgets).toEqual(['clock', 'display']);
+  });
+
+  it('LEGACY_KNOWN_WIDGETS is the pre-display set', () => {
+    expect([...LEGACY_KNOWN_WIDGETS]).toEqual(['clock', 'system', 'weather', 'presence', 'playing', 'light']);
   });
 });
