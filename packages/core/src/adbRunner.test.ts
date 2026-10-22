@@ -62,6 +62,70 @@ describe('createRealAdbRunner', () => {
     });
   });
 
+  describe('getModel', () => {
+    // Same real-stub-binary style as launchApp above: the stub records its
+    // argv and prints canned getprop output (one line per queried prop, empty
+    // when the prop is unset -- exactly what `getprop <name>` does on-device).
+    function stubAdb(stdout: string, exitCode = 0): { adbPath: string; argsFile: string } {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'desk-agent-adb-model-stub-'));
+      const adbPath = path.join(dir, 'adb');
+      const argsFile = path.join(dir, 'args');
+      const outFile = path.join(dir, 'out');
+      fs.writeFileSync(outFile, stdout);
+      fs.writeFileSync(adbPath, `#!/bin/sh\nprintf '%s\\n' "$@" > "${argsFile}"\ncat "${outFile}"\nexit ${exitCode}\n`);
+      fs.chmodSync(adbPath, 0o755);
+      return { adbPath, argsFile };
+    }
+
+    it('runs a single adb shell command, scoped to the serial: settings device_name, then marketname, vendor marketname, model', async () => {
+      const { adbPath, argsFile } = stubAdb('null\n\n\nONEPLUS A6013\n');
+      await createRealAdbRunner(vi.fn(), adbPath).getModel!('78f2af2a');
+      const args = fs.readFileSync(argsFile, 'utf8').trim().split('\n');
+      expect(args).toEqual([
+        '-s', '78f2af2a', 'shell',
+        'settings get global device_name; getprop ro.product.marketname; getprop ro.product.vendor.marketname; getprop ro.product.model',
+      ]);
+    });
+
+    it('prefers the user-visible device_name (Settings > About phone) over every getprop', async () => {
+      // The real OnePlus 6T: no marketname props, model code ONEPLUS A6010.
+      const { adbPath } = stubAdb('OnePlus 6T\n\n\nONEPLUS A6010\n');
+      await expect(createRealAdbRunner(vi.fn(), adbPath).getModel!('s')).resolves.toBe('OnePlus 6T');
+    });
+
+    it('skips a literal "null" device_name (what `settings get` prints when unset)', async () => {
+      const { adbPath } = stubAdb('null\nPixel 4a\n\nsunfish\n');
+      await expect(createRealAdbRunner(vi.fn(), adbPath).getModel!('s')).resolves.toBe('Pixel 4a');
+    });
+
+    it('falls back to ro.product.model when device_name is null and no marketname is set', async () => {
+      const { adbPath } = stubAdb('null\r\n\r\n\r\nONEPLUS A6010\r\n');
+      await expect(createRealAdbRunner(vi.fn(), adbPath).getModel!('s')).resolves.toBe('ONEPLUS A6010');
+    });
+
+    it('prefers ro.product.marketname when device_name is empty', async () => {
+      const { adbPath } = stubAdb('\nOnePlus 6T\nOnePlus 6T (vendor)\nONEPLUS A6013\n');
+      await expect(createRealAdbRunner(vi.fn(), adbPath).getModel!('s')).resolves.toBe('OnePlus 6T');
+    });
+
+    it('falls back to ro.product.vendor.marketname, then ro.product.model, trimming whitespace / CRLF', async () => {
+      const { adbPath: vendor } = stubAdb('\r\n\r\n  Pixel 4a  \r\nsunfish\r\n');
+      await expect(createRealAdbRunner(vi.fn(), vendor).getModel!('s')).resolves.toBe('Pixel 4a');
+      const { adbPath: model } = stubAdb('\n\n   \n ONEPLUS A6013 \n');
+      await expect(createRealAdbRunner(vi.fn(), model).getModel!('s')).resolves.toBe('ONEPLUS A6013');
+    });
+
+    it('resolves null when nothing is set', async () => {
+      const { adbPath } = stubAdb('null\n\n\n\n');
+      await expect(createRealAdbRunner(vi.fn(), adbPath).getModel!('s')).resolves.toBeNull();
+    });
+
+    it('rejects when adb fails (TunnelSupervisor handles it non-fatally)', async () => {
+      const { adbPath } = stubAdb('', 1);
+      await expect(createRealAdbRunner(vi.fn(), adbPath).getModel!('s')).rejects.toThrow();
+    });
+  });
+
   describe('trackDevices (adb smart-socket framing: 4-hex length + payload)', () => {
     type TrackEvent = { type: string; serial: string };
 

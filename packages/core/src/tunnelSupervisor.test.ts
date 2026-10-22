@@ -49,6 +49,7 @@ describe('TunnelSupervisor', () => {
       const supervisor = new TunnelSupervisor(adb, 8787, vi.fn());
       expect(supervisor.getStatus()).toEqual({
         serial: null,
+        model: null,
         tunnelStatus: 'idle',
         lastReissueAt: null,
         launchAppOnDock: true,
@@ -176,6 +177,73 @@ describe('TunnelSupervisor', () => {
       await vi.waitFor(() => expect(adb.reverse).toHaveBeenCalled());
       expect(adb.launchApp).not.toHaveBeenCalled();
       expect(supervisor.getStatus().launchAppOnDock).toBe(false);
+    });
+  });
+  describe('device model name (Device pane card title)', () => {
+    function fakeAdbWithModel(getModel: AdbRunner['getModel']) {
+      let handler: ((event: { type: 'attach' | 'detach'; serial: string }) => void) | undefined;
+      const adb: AdbRunner = {
+        reverse: vi.fn(async () => {}),
+        launchApp: vi.fn(async () => {}),
+        getModel,
+        trackDevices: (onEvent) => { handler = onEvent; return { stop: vi.fn() }; },
+      };
+      return { adb, emit: (type: 'attach' | 'detach', serial: string) => handler?.({ type, serial }) };
+    }
+
+    it('queries the model once on attach, scoped to the attached serial, and exposes it in getStatus()', async () => {
+      const getModel = vi.fn(async () => 'OnePlus 6T');
+      const { adb, emit } = fakeAdbWithModel(getModel);
+      const supervisor = new TunnelSupervisor(adb, 8787, vi.fn());
+      supervisor.start();
+      expect(supervisor.getStatus().model).toBeNull();
+      emit('attach', 'phone1');
+      await vi.waitFor(() => expect(supervisor.getStatus().model).toBe('OnePlus 6T'));
+      expect(getModel).toHaveBeenCalledTimes(1);
+      expect(getModel).toHaveBeenCalledWith('phone1');
+    });
+
+    it('clears the model on detach', async () => {
+      const { adb, emit } = fakeAdbWithModel(vi.fn(async () => 'OnePlus 6T'));
+      const supervisor = new TunnelSupervisor(adb, 8787, vi.fn());
+      supervisor.start();
+      emit('attach', 'phone1');
+      await vi.waitFor(() => expect(supervisor.getStatus().model).toBe('OnePlus 6T'));
+      emit('detach', 'phone1');
+      expect(supervisor.getStatus().model).toBeNull();
+    });
+
+    it('ignores a late model result for a device that has since detached', async () => {
+      let resolveModel!: (m: string | null) => void;
+      const { adb, emit } = fakeAdbWithModel(vi.fn(() => new Promise<string | null>((r) => { resolveModel = r; })));
+      const supervisor = new TunnelSupervisor(adb, 8787, vi.fn());
+      supervisor.start();
+      emit('attach', 'phone1');
+      emit('detach', 'phone1');
+      resolveModel('OnePlus 6T');
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(supervisor.getStatus().model).toBeNull();
+    });
+
+    it('a failed model query is non-fatal: logs a warning, model stays null, tunnel still re-issued', async () => {
+      const onLog = vi.fn();
+      const { adb, emit } = fakeAdbWithModel(vi.fn(async () => { throw new Error('getprop exploded'); }));
+      const supervisor = new TunnelSupervisor(adb, 8787, onLog);
+      supervisor.start();
+      emit('attach', 'phone1');
+      await vi.waitFor(() => expect(onLog).toHaveBeenCalledWith('warn', expect.stringContaining('getprop exploded')));
+      expect(supervisor.getStatus().model).toBeNull();
+      await vi.waitFor(() => expect(supervisor.getStatus().tunnelStatus).toBe('reissued'));
+    });
+
+    it('model stays null when the runner has no getModel (fakes / older runners)', async () => {
+      const adb = makeFakeAdb();
+      const supervisor = new TunnelSupervisor(adb, 8787, vi.fn());
+      supervisor.start();
+      adb.emitAttach();
+      await vi.waitFor(() => expect(supervisor.getStatus().tunnelStatus).toBe('reissued'));
+      expect(supervisor.getStatus().model).toBeNull();
     });
   });
 });

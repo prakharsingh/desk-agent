@@ -11,6 +11,27 @@ const execFileAsync = promisify(execFile);
 // brings it to front -- safe to call unconditionally on every dock event.
 const APP_COMPONENT = 'com.deskagentapp/.MainActivity';
 
+// User-visible name first (Settings > About phone, e.g. "OnePlus 6T" -- the
+// real 6T has no marketname props and a model code of "ONEPLUS A6010"), then
+// marketing-name props, then the raw model code. One `adb shell` round-trip:
+// each command prints exactly one line (getprop: empty when unset; settings
+// get: the literal "null" when unset), so line N <-> source N.
+const MODEL_COMMANDS = [
+  'settings get global device_name',
+  'getprop ro.product.marketname',
+  'getprop ro.product.vendor.marketname',
+  'getprop ro.product.model',
+];
+
+/** First non-empty, non-"null" (trimmed) line of the MODEL_COMMANDS output, or null. */
+export function pickModelName(output: string): string | null {
+  for (const line of output.split('\n')) {
+    const value = line.trim();
+    if (value && value !== 'null') return value;
+  }
+  return null;
+}
+
 // track-devices frames are a 4-hex length + that many bytes of device list.
 // Four hex digits can't exceed 0xffff, so a 64 KiB cap would never trigger;
 // a real list is ~30 bytes per device, so 16 KiB is generous headroom while
@@ -37,6 +58,10 @@ export function createRealAdbRunner(
     async launchApp(serial) {
       const serialArgs = serial ? ['-s', serial] : [];
       await execFileAsync(adbPath, [...serialArgs, 'shell', 'am', 'start', '-n', APP_COMPONENT]);
+    },
+    async getModel(serial) {
+      const { stdout } = await execFileAsync(adbPath, ['-s', serial, 'shell', MODEL_COMMANDS.join('; ')]);
+      return pickModelName(stdout);
     },
     trackDevices(onEvent) {
       // Survives respawns: a fresh track-devices stream starts with the full

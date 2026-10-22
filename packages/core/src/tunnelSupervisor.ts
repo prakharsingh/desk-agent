@@ -3,6 +3,8 @@ import type { LogLevel } from '@desk-agent/plugin-sdk';
 export interface AdbRunner {
   reverse(localPort: number, remotePort: number): Promise<void>;
   launchApp(serial: string | null): Promise<void>;
+  /** Human-readable device model for the Device pane card title (e.g. "OnePlus 6T"), or null if the device reports none. Optional so lightweight fakes needn't implement it -- the model then just stays null. */
+  getModel?(serial: string): Promise<string | null>;
   trackDevices(onEvent: (event: { type: 'attach' | 'detach'; serial: string }) => void): { stop: () => void };
 }
 
@@ -11,6 +13,8 @@ export type AppLaunchStatus = 'idle' | 'launched' | 'failed';
 
 export interface TunnelStatusSnapshot {
   serial: string | null;
+  /** Device model name, resolved once per attach; null until known, and cleared on detach. */
+  model: string | null;
   tunnelStatus: TunnelStatus;
   lastReissueAt: number | null;
   launchAppOnDock: boolean;
@@ -21,6 +25,7 @@ export interface TunnelStatusSnapshot {
 export class TunnelSupervisor {
   private tracker?: { stop: () => void };
   private serial: string | null = null;
+  private model: string | null = null;
   private tunnelStatus: TunnelStatus = 'idle';
   private lastReissueAt: number | null = null;
   private appLaunchStatus: AppLaunchStatus = 'idle';
@@ -37,9 +42,12 @@ export class TunnelSupervisor {
     this.tracker = this.adb.trackDevices((event) => {
       if (event.type === 'attach') {
         this.serial = event.serial;
+        this.model = null;
+        void this.resolveModel(event.serial);
         void this.onAttach();
       } else {
         this.serial = null;
+        this.model = null;
       }
     });
   }
@@ -53,6 +61,19 @@ export class TunnelSupervisor {
     if (this.launchAppOnDock) await this.launchApp();
   }
 
+  // Runs alongside (not before) the tunnel/app-launch sequence: it's purely
+  // cosmetic, so it must never delay the tunnel coming up. Never rejects.
+  private async resolveModel(serial: string) {
+    if (!this.adb.getModel) return;
+    try {
+      const model = await this.adb.getModel(serial);
+      // The device may have detached (or another attached) while getprop ran.
+      if (this.serial === serial) this.model = model;
+    } catch (err) {
+      this.onLog('warn', `adb getprop (device model) failed: ${String(err)}`);
+    }
+  }
+
   stop() {
     this.tracker?.stop();
   }
@@ -60,6 +81,7 @@ export class TunnelSupervisor {
   getStatus(): TunnelStatusSnapshot {
     return {
       serial: this.serial,
+      model: this.model,
       tunnelStatus: this.tunnelStatus,
       lastReissueAt: this.lastReissueAt,
       launchAppOnDock: this.launchAppOnDock,
