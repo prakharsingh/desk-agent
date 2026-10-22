@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, nativeTheme, shell } from 'electron';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ToApp, ToCore, LogEntry } from '@desk-agent/core';
@@ -7,6 +8,9 @@ import { CoreSupervisor } from './coreSupervisor.js';
 import { TrayController } from './tray.js';
 import { ensureConfigExists, reconcileWidgetsOnDisk, defaultConfigPath } from './firstRunConfig.js';
 import { readConfig } from './configStore.js';
+import { ConfigSchema } from '@desk-agent/config-schema';
+import { DisplayHelperHost } from './displayHelperHost.js';
+import { DisplaySessionManager } from './displaySessionManager.js';
 import { debounce } from './debounce.js';
 import { LogBuffer } from './logBuffer.js';
 import { SnapshotCache } from './snapshotCache.js';
@@ -28,6 +32,8 @@ if (!gotLock) {
   let mainWindow: BrowserWindow | null = null;
   let tray: TrayController | null = null;
   let supervisor: CoreSupervisor | null = null;
+  // Phone extended display: main owns the helper session (created at whenReady).
+  let sessionMgr: DisplaySessionManager | null = null;
   const snapshotCache = new SnapshotCache();
   const configPath = defaultConfigPath();
   const logBuffer = new LogBuffer(500);
@@ -57,8 +63,19 @@ if (!gotLock) {
   // status:getSnapshot/status:getLogs, rather than waiting up to
   // snapshotIntervalMs for the next periodic push.
   function handleCoreMessage(msg: ToApp) {
+    // Display session requests are main's business only; never forwarded to the renderer.
+    if (msg.kind === 'displayStartRequest') {
+      sessionMgr?.handleStartRequest(msg);
+      return;
+    }
+    if (msg.kind === 'displayStopRequest') {
+      sessionMgr?.handleStopRequest({ sessionId: msg.sessionId, reason: msg.reason });
+      return;
+    }
     if (msg.kind === 'snapshot') {
       snapshotCache.set(msg.data);
+      // Core-restart resync: the first snapshot after 'running' proves core's control channel is listening.
+      sessionMgr?.onCoreSnapshot();
       tray?.refresh();
     } else if (msg.kind === 'log') {
       logBuffer.push(msg.entry);
@@ -84,6 +101,30 @@ if (!gotLock) {
     const entry: LogEntry = { ts: Date.now(), level: 'error', source: 'core-process', message: text };
     logBuffer.push(entry);
     mainWindow?.webContents.send('status:message', { kind: 'log', entry } satisfies ToApp);
+  }
+
+  // Display-helper diagnostics (events, stderr, session lifecycle) go to the Logs pane as source 'display'.
+  // The session token is never part of any message logged here.
+  function recordDisplayLog(level: LogEntry['level'], message: string) {
+    const entry: LogEntry = { ts: Date.now(), level, source: 'display', message };
+    logBuffer.push(entry);
+    mainWindow?.webContents.send('status:message', { kind: 'log', entry } satisfies ToApp);
+  }
+
+  // Packaged: Contents/MacOS next to the executable (outside the asar); dev: apps/mac/native-bin.
+  function displayHelperPath(): string {
+    return app.isPackaged
+      ? path.join(path.dirname(process.execPath), 'desk-agent-display-helper')
+      : path.join(__dirname, '../../native-bin/desk-agent-display-helper');
+  }
+
+  function displayIds(): { vendorId: number; productId: number } {
+    try {
+      return readConfig(configPath).display;
+    } catch (err) {
+      recordDisplayLog('warn', `config unreadable, using default display ids: ${String(err)}`);
+      return ConfigSchema.shape.display.parse(undefined);
+    }
   }
 
   // The adb we ship, used only when the user has none of their own (see
@@ -224,8 +265,39 @@ if (!gotLock) {
     nativeTheme.themeSource = 'system';
     ensureConfigExists(configPath);
     // Switch newly added widget tiles on once for existing installs, before
-    // core or the Widgets pane read the file.
-    reconcileWidgetsOnDisk(configPath);
+    // core or the Widgets pane read the file. Best effort: a failure here must
+    // not keep the app (and core) from starting.
+    try {
+      reconcileWidgetsOnDisk(configPath);
+    } catch (err) {
+      recordStderr(`widget reconcile failed: ${String(err)}`);
+    }
+
+    const helperPath = displayHelperPath();
+    const pidfilePath = path.join(app.getPath('userData'), 'display-helper.pid');
+    const devTokenEnv = process.env.DESK_AGENT_DISPLAY_DEV_TOKEN_FILE;
+    sessionMgr = new DisplaySessionManager({
+      createHost: (handlers) => new DisplayHelperHost({
+        helperPath,
+        pidfilePath,
+        onEvent: handlers.onEvent,
+        onExit: handlers.onExit,
+        onSpawn: handlers.onSpawn,
+        onStderr: (text) => {
+          const trimmed = text.trimEnd();
+          if (trimmed) recordDisplayLog('info', `helper: ${trimmed}`);
+        },
+      }),
+      sendToCore: (msg) => sendToCore(msg),
+      getIds: displayIds,
+      isSupportedMacOS: () => Number(os.release().split('.')[0]) >= 23,
+      onChange: () => tray?.refresh(),
+      onLog: recordDisplayLog,
+      // Dev tooling only (test-client.mjs reads it); never in a packaged app.
+      devTokenFile: !app.isPackaged && devTokenEnv ? devTokenEnv : null,
+    });
+    // A helper left over from a crashed previous run would hold the virtual display and port 8788.
+    new DisplayHelperHost({ helperPath, pidfilePath, onEvent: () => {}, onExit: () => {} }).killStale();
 
     supervisor = new CoreSupervisor({
       coreHostPath: path.join(__dirname, 'coreHost.js'),
@@ -243,6 +315,8 @@ if (!gotLock) {
         if (snapshotCache.onHealthChange(health)) {
           mainWindow?.webContents.send('status:message', { kind: 'snapshotCleared' } satisfies StatusMessage);
         }
+        // Arm the display-session resync; it fires on the next snapshot (see onCoreSnapshot).
+        if (health === 'running') sessionMgr?.onCoreRunning();
         tray?.refresh();
       },
       onMessage: (msg) => handleCoreMessage(msg as ToApp),
@@ -256,6 +330,8 @@ if (!gotLock) {
       onToggleAutomation: (enabled) => sendToCore({ kind: 'setAutomationEnabled', enabled }),
       getUpdateAvailable: () => updateChecker.getAvailable(),
       onOpenUpdate: (url) => { void shell.openExternal(url); },
+      getDisplayActive: () => sessionMgr?.isActive() ?? false,
+      onDisconnectDisplay: () => sessionMgr?.disconnectFromMenu(),
       onQuit: () => app.quit(),
     });
 
@@ -273,8 +349,10 @@ if (!gotLock) {
   });
 
   app.on('before-quit', () => {
+    sessionMgr?.shutdown();
     supervisor?.stop();
     tray?.destroy();
+    tray = null;
     updateChecker.stop();
   });
 }
