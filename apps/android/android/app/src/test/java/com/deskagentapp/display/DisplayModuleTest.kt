@@ -22,11 +22,16 @@ private class FakeHost : DisplaySessionHost {
     var lastEvents: DisplayEvents? = null
     val offered = mutableListOf<String>()
     override fun nowMs(): Long = 1234
-    override fun input(input: SessionInput) { inputs += input }
+    /** Every call in order, so the trackpad reset can be checked against Start. */
+    val order = mutableListOf<String>()
+    override fun input(input: SessionInput) { inputs += input; order += input::class.simpleName!! }
     override fun tokenOffered(sessionId: String) { offered += sessionId }
     override fun setEvents(events: DisplayEvents?) { lastEvents = events }
     var sizeRequests = 0
     override fun requestSize() { sizeRequests++ }
+    val events = mutableListOf<Any>()
+    override fun sendInput(e: SemanticEvent) { events += e }
+    override fun setTrackpadMode(enabled: Boolean) { events += "trackpad:$enabled"; order += "trackpad:$enabled" }
 }
 
 @RunWith(RobolectricTestRunner::class)
@@ -45,6 +50,18 @@ class DisplayModuleTest {
         val host = FakeHost()
         DisplayModule(ctx, host).start("s1", 8788.0)
         assertEquals(listOf<SessionInput>(SessionInput.Start("s1", 8788, 1234)), host.inputs)
+    }
+
+    @Test fun `start resets trackpad mode to off before the session starts`() {
+        val host = FakeHost()
+        DisplayModule(ctx, host).start("s1", 8788.0)
+        assertEquals(listOf("trackpad:false", "Start"), host.order)
+    }
+
+    @Test fun `setTrackpadMode forwards to the session`() {
+        val host = FakeHost()
+        DisplayModule(ctx, host).setTrackpadMode(true)
+        assertEquals(listOf<Any>("trackpad:true"), host.events)
     }
 
     @Test fun `start takes a token that arrived before it`() {

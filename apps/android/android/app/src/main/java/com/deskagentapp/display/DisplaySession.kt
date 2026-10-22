@@ -25,6 +25,10 @@ interface DisplaySessionHost {
     fun setEvents(events: DisplayEvents?)
     /** JS just subscribed: re-emit the last surface size, if there is one. */
     fun requestSize()
+    /** Queues a recognized gesture; sent only while Streaming with input enabled. Never blocks. */
+    fun sendInput(e: SemanticEvent)
+    /** Trackpad mode for the recognizer and the helper (`setTrackpad`, and `hello.trackpad`). */
+    fun setTrackpadMode(enabled: Boolean)
 }
 
 /** The display-session thread. */
@@ -125,6 +129,16 @@ class DisplaySessionRunner(
     private var ticking = false
     private val tick = Runnable { onTick() }
 
+    /** Requested trackpad mode, and the value the current link's helper was last told. */
+    private var trackpad = false
+    private var linkTrackpad = false
+
+    /**
+     * Called on the session thread each time the session leaves Streaming, so the view can cancel
+     * a gesture in progress (a drag then ends locally; the helper also releases the button).
+     */
+    @Volatile var onStreamingEnded: (() -> Unit)? = null
+
     internal fun stateForTest(): SessionState = machine.state
 
     override fun nowMs(): Long = clock()
@@ -139,6 +153,16 @@ class DisplaySessionRunner(
     }
 
     override fun setEvents(events: DisplayEvents?) { this.events = events }
+
+    override fun sendInput(e: SemanticEvent) = executor.post {
+        val st = machine.state
+        if (st is SessionState.Streaming && st.inputEnabled) link?.send(ControlMessages.input(e))
+    }
+
+    override fun setTrackpadMode(enabled: Boolean) = executor.post {
+        trackpad = enabled
+        syncTrackpad()
+    }
 
     /** From the SurfaceView (main thread). Fed on every surfaceChanged. */
     fun surfaceReady(surface: Surface, w: Int, h: Int) = executor.post {
@@ -200,8 +224,17 @@ class DisplaySessionRunner(
 
     private fun feed(input: SessionInput) {
         val before = sessionIdOf(machine.state)
+        val wasStreaming = machine.state is SessionState.Streaming
         val actions = machine.handle(input)
         for (a in executionOrder(actions)) execute(a, before)
+        if (wasStreaming && machine.state !is SessionState.Streaming) {
+            try {
+                onStreamingEnded?.invoke()
+            } catch (e: Exception) {
+                Log.w(TAG, "streaming-ended listener failed: ${e.message}")
+            }
+        }
+        syncTrackpad()
         if (input is SessionInput.Start) {
             // A token that landed after the module's take() but before this Start ran is
             // still held (ClearToken only drops the previous session's token): adopt it.
@@ -262,7 +295,15 @@ class DisplaySessionRunner(
         link = l
         Log.i(TAG, "opening video link for ${a.sessionId} on port ${a.port} (decoder ${codec.name}, max ${codec.maxW}x${codec.maxH})")
         // Blocks up to VideoLink.CONNECT_TIMEOUT_MS; ticks pause meanwhile (accepted).
-        l.open(ControlMessages.hello(a.token, a.sessionId, surfaceW, surfaceH, codec.maxW, codec.maxH, trackpad = false))
+        linkTrackpad = trackpad
+        l.open(ControlMessages.hello(a.token, a.sessionId, surfaceW, surfaceH, codec.maxW, codec.maxH, trackpad = linkTrackpad))
+    }
+
+    /** Tells a streaming helper about a trackpad change made since its hello (or last setTrackpad). */
+    private fun syncTrackpad() {
+        val l = link ?: return
+        if (machine.state !is SessionState.Streaming || linkTrackpad == trackpad) return
+        if (l.send(ControlMessages.setTrackpad(trackpad))) linkTrackpad = trackpad
     }
 
     private fun linkListener(gen: Int) = object : VideoLink.Listener {
@@ -505,14 +546,28 @@ class DisplaySessionRunner(
 
 /** The process-wide display session, shared by [DisplayModule] and [DisplaySurfaceView]. */
 object DisplaySession : DisplaySessionHost {
-    private val runner: DisplaySessionRunner by lazy { DisplaySessionRunner.createDefault() }
+    private val runner: DisplaySessionRunner by lazy {
+        DisplaySessionRunner.createDefault().also { it.onStreamingEnded = { cancelGesture() } }
+    }
     @Volatile private var view: WeakReference<DisplaySurfaceView>? = null
+
+    /** The requested trackpad mode; the view applies it on its main thread (attach and change). */
+    @Volatile var trackpadMode = false
+        private set
 
     override fun nowMs(): Long = runner.nowMs()
     override fun input(input: SessionInput) = runner.input(input)
     override fun tokenOffered(sessionId: String) = runner.tokenOffered(sessionId)
     override fun setEvents(events: DisplayEvents?) = runner.setEvents(events)
     override fun requestSize() = runner.requestSize()
+    override fun sendInput(e: SemanticEvent) = runner.sendInput(e)
+
+    /** The recognizer change is posted to the view's main thread; `setTrackpad` goes through the session thread. */
+    override fun setTrackpadMode(enabled: Boolean) {
+        trackpadMode = enabled
+        view?.get()?.let { v -> v.post { v.applyTrackpadMode() } }
+        runner.setTrackpadMode(enabled)
+    }
 
     fun surfaceReady(surface: Surface, w: Int, h: Int) = runner.surfaceReady(surface, w, h)
     fun surfaceLost() = runner.surfaceLost()
@@ -526,5 +581,10 @@ object DisplaySession : DisplaySessionHost {
     fun detachView(v: DisplaySurfaceView) {
         if (view?.get() === v) view = null
         Log.i(DisplaySessionRunner.TAG, "display view detached")
+    }
+
+    /** From the session thread: end any gesture in progress, on the view's main thread. */
+    private fun cancelGesture() {
+        view?.get()?.let { v -> v.post { v.cancelGesture() } }
     }
 }

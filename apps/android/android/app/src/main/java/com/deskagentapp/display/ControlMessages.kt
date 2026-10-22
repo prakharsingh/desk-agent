@@ -38,6 +38,34 @@ object ControlMessages {
     fun pause() = msg("pause")
     fun resume() = msg("resume")
     fun setTrackpad(enabled: Boolean) = msg("setTrackpad") { put("enabled", enabled) }
+    /** `x,y` in [0,1] of the view; `dx,dy` as fractions of view width/height; null keys omitted. */
+    fun input(e: SemanticEvent): String {
+        val (name, x, y, dx, dy) = when (e) {
+            is SemanticEvent.Click -> InputFields("click", e.x, e.y)
+            is SemanticEvent.RightClick -> InputFields("rightClick", e.x, e.y)
+            is SemanticEvent.DragStart -> InputFields("dragStart", e.x, e.y)
+            is SemanticEvent.DragMove -> InputFields("dragMove", e.x, e.y)
+            is SemanticEvent.DragEnd -> InputFields("dragEnd", e.x, e.y)
+            is SemanticEvent.Scroll -> InputFields("scroll", e.x, e.y, e.dx, e.dy)
+            is SemanticEvent.Move -> InputFields("move", dx = e.dx, dy = e.dy)
+        }
+        return msg("input") {
+            put("e", name)
+            x?.let { put("x", it.toDouble()) }
+            y?.let { put("y", it.toDouble()) }
+            dx?.let { put("dx", it.toDouble()) }
+            dy?.let { put("dy", it.toDouble()) }
+        }
+    }
+
+    private data class InputFields(
+        val name: String,
+        val x: Float? = null,
+        val y: Float? = null,
+        val dx: Float? = null,
+        val dy: Float? = null,
+    )
+
     fun stats(rendered: Long, dropped: Long, decodeMsAvg: Double) = msg("stats") {
         put("rendered", rendered); put("dropped", dropped); put("decodeMsAvg", if (decodeMsAvg.isFinite()) decodeMsAvg else 0.0)
     }

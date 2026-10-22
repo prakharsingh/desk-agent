@@ -37,6 +37,8 @@ class DisplayModule(
     fun start(sessionId: String, videoPort: Double) {
         // The intent can beat the JSON reply: take a token that is already here, right away.
         val token = DisplayTokenHolder.take(sessionId)
+        // Every session starts with trackpad mode off (hello carries it); JS mirrors this.
+        session.setTrackpadMode(false)
         session.input(SessionInput.Start(sessionId, videoPort.toInt(), session.nowMs()))
         if (token != null) session.input(SessionInput.TokenAvailable(sessionId, token))
     }
@@ -48,10 +50,9 @@ class DisplayModule(
     @ReactMethod
     fun requestSize() = session.requestSize()
 
-    /** No-op until trackpad mode lands (Task 4.4). */
+    /** Recognizer change on the view's main thread; `setTrackpad` to the helper via the session thread. */
     @ReactMethod
-    @Suppress("UNUSED_PARAMETER")
-    fun setTrackpadMode(enabled: Boolean) = Unit
+    fun setTrackpadMode(enabled: Boolean) = session.setTrackpadMode(enabled)
 
     // Required by NativeEventEmitter; events go through emitDeviceEvent regardless.
     @ReactMethod

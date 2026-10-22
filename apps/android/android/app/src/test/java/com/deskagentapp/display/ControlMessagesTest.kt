@@ -54,6 +54,46 @@ class ControlMessagesTest {
         assertEquals("bye", bye.getString("t")); assertEquals("user-stop", bye.getString("reason"))
     }
 
+    @Test fun `input omits null coordinates`() {
+        val c = JSONObject(ControlMessages.input(SemanticEvent.Click(null, null)))
+        assertEquals("input", c.getString("t")); assertEquals("click", c.getString("e"))
+        assertFalse(c.has("x")); assertFalse(c.has("y")); assertFalse(c.has("dx")); assertFalse(c.has("dy"))
+        val r = JSONObject(ControlMessages.input(SemanticEvent.RightClick(null, null)))
+        assertEquals("rightClick", r.getString("e")); assertFalse(r.has("x")); assertFalse(r.has("y"))
+        val at = JSONObject(ControlMessages.input(SemanticEvent.Click(0.5f, 0.25f)))
+        assertEquals(0.5, at.getDouble("x"), 0.0); assertEquals(0.25, at.getDouble("y"), 0.0)
+        assertFalse(at.has("dx"))
+        assertEquals("""{"t":"input","e":"click","x":0.5,"y":0.25}""", ControlMessages.input(SemanticEvent.Click(0.5f, 0.25f)))
+    }
+
+    @Test fun `input names match the contract`() {
+        fun j(e: SemanticEvent) = JSONObject(ControlMessages.input(e))
+        val cases = listOf(
+            SemanticEvent.Click(0.5f, 0.5f) to "click",
+            SemanticEvent.RightClick(0.5f, 0.5f) to "rightClick",
+            SemanticEvent.DragStart(0.5f, 0.5f) to "dragStart",
+            SemanticEvent.DragMove(0.5f, 0.5f) to "dragMove",
+            SemanticEvent.DragEnd(0.5f, 0.5f) to "dragEnd",
+            SemanticEvent.Scroll(0.125f, -0.25f) to "scroll",
+            SemanticEvent.Move(0.125f, -0.25f) to "move",
+        )
+        for ((e, name) in cases) {
+            val o = j(e)
+            assertEquals("input", o.getString("t")); assertEquals(name, o.getString("e"))
+        }
+        val drag = j(SemanticEvent.DragMove(0.75f, 0.125f))
+        assertEquals(0.75, drag.getDouble("x"), 0.0); assertEquals(0.125, drag.getDouble("y"), 0.0)
+        assertFalse(drag.has("dx"))
+        val scroll = j(SemanticEvent.Scroll(0.125f, -0.25f))
+        assertEquals(0.125, scroll.getDouble("dx"), 0.0); assertEquals(-0.25, scroll.getDouble("dy"), 0.0)
+        assertFalse(scroll.has("x")); assertFalse(scroll.has("y"))
+        val abs = j(SemanticEvent.Scroll(0.125f, -0.25f, 0.5f, 0.75f))
+        assertEquals(0.5, abs.getDouble("x"), 0.0); assertEquals(0.75, abs.getDouble("y"), 0.0)
+        assertEquals(0.125, abs.getDouble("dx"), 0.0); assertEquals(-0.25, abs.getDouble("dy"), 0.0)
+        val move = j(SemanticEvent.Move(-0.5f, 0.25f))
+        assertEquals(-0.5, move.getDouble("dx"), 0.0); assertEquals(0.25, move.getDouble("dy"), 0.0)
+    }
+
     @Test fun `stats coerces non-finite decodeMsAvg to zero`() {
         assertEquals(0.0, JSONObject(ControlMessages.stats(1, 0, Double.NaN)).getDouble("decodeMsAvg"), 0.0)
         assertEquals(0.0, JSONObject(ControlMessages.stats(1, 0, Double.POSITIVE_INFINITY)).getDouble("decodeMsAvg"), 0.0)

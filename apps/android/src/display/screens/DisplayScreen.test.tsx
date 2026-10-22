@@ -298,6 +298,83 @@ function appSessions() {
   };
 }
 
+const TOUCH_OFF = 'Touch is off — allow Accessibility for Desk Agent on your Mac';
+
+async function toStreaming(props: DisplayScreenProps, inputEnabled: boolean) {
+  const r = await toStarting(props);
+  await act(() => void DeviceEventEmitter.emit('DisplayState', { state: 'streaming', inputEnabled }));
+  return r;
+}
+
+const openOverlay = () =>
+  act(() => {
+    backListener!();
+  });
+
+describe('DisplayScreen trackpad mode and touch hint (Task 4.4)', () => {
+  it('toggling trackpad mode calls the native module', async () => {
+    await toStreaming(setup(), true);
+    await openOverlay();
+    const toggle = screen.getByLabelText('Trackpad mode');
+    expect(toggle.props.accessibilityState).toMatchObject({ checked: false });
+    await fireEvent.press(toggle);
+    expect(mod().setTrackpadMode).toHaveBeenLastCalledWith(true);
+    expect(screen.getByLabelText('Trackpad mode').props.accessibilityState).toMatchObject({ checked: true });
+    await fireEvent.press(screen.getByLabelText('Trackpad mode'));
+    expect(mod().setTrackpadMode).toHaveBeenLastCalledWith(false);
+    expect(mod().setTrackpadMode).toHaveBeenCalledTimes(2);
+  });
+
+  it('the trackpad toggle state survives closing and reopening the overlay', async () => {
+    await toStreaming(setup(), true);
+    await openOverlay();
+    await fireEvent.press(screen.getByLabelText('Trackpad mode'));
+    await fireEvent.press(screen.getByText('Stay'));
+    expect(screen.queryByLabelText('Trackpad mode')).toBeNull();
+    await openOverlay();
+    expect(screen.getByLabelText('Trackpad mode').props.accessibilityState).toMatchObject({ checked: true });
+    expect(mod().setTrackpadMode).toHaveBeenCalledTimes(1);
+  });
+
+  it('a new screen visit starts with trackpad mode off', async () => {
+    const props = setup();
+    const r = await toStreaming(props, true);
+    await openOverlay();
+    await fireEvent.press(screen.getByLabelText('Trackpad mode'));
+    await r.unmount();
+    await toStreaming(props, true);
+    await openOverlay();
+    expect(screen.getByLabelText('Trackpad mode').props.accessibilityState).toMatchObject({ checked: false });
+  });
+
+  it('one toggle press calls native once under StrictMode', async () => {
+    const props = setup();
+    await render(
+      <React.StrictMode>
+        <DisplayScreen {...props} />
+      </React.StrictMode>,
+    );
+    await emitSize();
+    await act(() => void DeviceEventEmitter.emit('DisplayState', { state: 'streaming', inputEnabled: true }));
+    await openOverlay();
+    await fireEvent.press(screen.getByLabelText('Trackpad mode'));
+    expect(mod().setTrackpadMode).toHaveBeenCalledTimes(1);
+    expect(mod().setTrackpadMode).toHaveBeenCalledWith(true);
+  });
+
+  it('shows the touch-off hint when input is disabled', async () => {
+    await toStreaming(setup(), false);
+    await openOverlay();
+    expect(screen.getByText(TOUCH_OFF)).toBeTruthy();
+  });
+
+  it('hides the touch-off hint when input is enabled', async () => {
+    await toStreaming(setup(), true);
+    await openOverlay();
+    expect(screen.queryByText(TOUCH_OFF)).toBeNull();
+  });
+});
+
 describe('DisplayScreen retry after a failed session (I1)', () => {
   it("a retry ignores the failed session's late ended and adopts the new session's ready", async () => {
     const app = appSessions();

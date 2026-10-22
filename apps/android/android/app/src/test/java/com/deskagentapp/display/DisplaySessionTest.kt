@@ -501,4 +501,82 @@ class DisplaySessionTest {
         exec.drain()
         assertEquals(mapOf("state" to "error", "reason" to "decoder-error"), states().last())
     }
+
+    // ---- input and trackpad (Task 4.4) ----
+
+    private fun inputs(l: FakeLink) = l.sent.map { JSONObject(it) }.filter { it.getString("t") == "input" }
+
+    @Test fun `sendInput is posted to the session thread and sent while streaming with input enabled`() {
+        val l = streaming()
+        s.sendInput(SemanticEvent.Click(0.5f, 0.25f))
+        assertTrue(inputs(l).isEmpty()) // not sent inline on the caller's thread
+        exec.drain()
+        assertEquals(listOf("click"), inputs(l).map { it.getString("e") })
+        assertEquals(0, l.offThreadCalls)
+    }
+
+    @Test fun `sendInput is dropped when input is disabled`() {
+        val l = connect()
+        l.listener.onFrame(json("helloAck", "inputEnabled" to false))
+        exec.drain()
+        s.sendInput(SemanticEvent.Click(0.5f, 0.25f))
+        exec.drain()
+        assertTrue(inputs(l).isEmpty())
+    }
+
+    @Test fun `sendInput is dropped before helloAck and after the session ends`() {
+        val l = connect()
+        s.sendInput(SemanticEvent.Click(0.5f, 0.25f))
+        exec.drain()
+        assertTrue(inputs(l).isEmpty())
+        l.listener.onFrame(json("helloAck", "inputEnabled" to true))
+        exec.drain()
+        s.input(SessionInput.UserStop)
+        exec.drain()
+        s.sendInput(SemanticEvent.DragEnd(0.5f, 0.25f))
+        exec.drain()
+        assertTrue(inputs(l).isEmpty())
+    }
+
+    @Test fun `hello carries the current trackpad mode`() {
+        s.setTrackpadMode(true)
+        val l = connect()
+        assertTrue(JSONObject(l.hello!!).getBoolean("trackpad"))
+    }
+
+    @Test fun `setTrackpadMode while streaming sends setTrackpad on the session thread`() {
+        val l = streaming()
+        s.setTrackpadMode(true)
+        assertTrue(l.sentTypes().none { it == "setTrackpad" })
+        exec.drain()
+        val tp = l.sent.map { JSONObject(it) }.single { it.getString("t") == "setTrackpad" }
+        assertTrue(tp.getBoolean("enabled"))
+        assertEquals(0, l.offThreadCalls)
+        s.setTrackpadMode(true) // unchanged: nothing more to tell the helper
+        exec.drain()
+        assertEquals(1, l.sentTypes().count { it == "setTrackpad" })
+    }
+
+    @Test fun `a trackpad change while connecting is sent once streaming`() {
+        val l = connect()
+        s.setTrackpadMode(true)
+        exec.drain()
+        assertTrue(l.sentTypes().none { it == "setTrackpad" })
+        l.listener.onFrame(json("helloAck", "inputEnabled" to true))
+        exec.drain()
+        assertEquals(1, l.sentTypes().count { it == "setTrackpad" })
+    }
+
+    @Test fun `leaving streaming notifies the input-stopped listener once`() {
+        var stopped = 0
+        s.onStreamingEnded = { stopped++ }
+        streaming()
+        assertEquals(0, stopped)
+        s.input(SessionInput.UserStop)
+        exec.drain()
+        assertEquals(1, stopped)
+        s.input(SessionInput.UserStop)
+        exec.drain()
+        assertEquals(1, stopped)
+    }
 }

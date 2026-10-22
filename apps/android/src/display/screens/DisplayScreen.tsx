@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { BackHandler, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { DisplaySessionPayload } from '@desk-agent/protocol';
 import { theme } from '../theme.js';
+import { Toggle } from '../ui/Toggle.js';
 import { buildDisplayStartFrame, buildDisplayStopFrame } from '../../displayFrames.js';
 import {
   INITIAL_DISPLAY_FLOW,
@@ -51,6 +52,21 @@ export function DisplayScreen({ lastSession, seenSessionIds, getDisplaySeq, json
     setShowExitState(v);
   }, []);
 
+  // Trackpad mode lives here (not in the overlay) so it survives the overlay
+  // closing; native resets it to off on every session start, and so does this.
+  // The ref keeps the native call out of a state updater (StrictMode runs those twice).
+  const [trackpad, setTrackpadState] = useState(false);
+  const trackpadRef = useRef(false);
+  const setTrackpad = useCallback((on: boolean) => {
+    trackpadRef.current = on;
+    setTrackpadState(on);
+  }, []);
+  const toggleTrackpad = useCallback(() => {
+    const next = !trackpadRef.current;
+    setTrackpad(next);
+    displayNative.setTrackpadMode(next);
+  }, [setTrackpad]);
+
   const latest = useRef({ sendFrame, onExit, onUnsupported, onSupported, jsonConnected, seenSessionIds, getDisplaySeq });
   latest.current = { sendFrame, onExit, onUnsupported, onSupported, jsonConnected, seenSessionIds, getDisplaySeq };
   // App's frame counter at the moment this screen sent display.start: ids first
@@ -82,6 +98,7 @@ export function DisplayScreen({ lastSession, seenSessionIds, getDisplaySeq, json
           break;
         case 'nativeStart':
           noteDisplaySessionSeen(latest.current.seenSessionIds, effect.sessionId, 0);
+          setTrackpad(false);
           displayNative.start(effect.sessionId, effect.videoPort);
           break;
         case 'nativeStop':
@@ -222,6 +239,13 @@ export function DisplayScreen({ lastSession, seenSessionIds, getDisplaySeq, json
         <View style={styles.overlay}>
           <View style={styles.dialog}>
             <Text style={styles.dialogTitle}>Exit display?</Text>
+            <View style={styles.optionRow}>
+              <Text style={styles.optionText}>Trackpad mode</Text>
+              <Toggle on={trackpad} onToggle={toggleTrackpad} label="Trackpad mode" />
+            </View>
+            {flow.phase === 'streaming' && !flow.inputEnabled && (
+              <Text style={styles.hint}>Touch is off — allow Accessibility for Desk Agent on your Mac</Text>
+            )}
             <View style={styles.dialogRow}>
               <Pressable onPress={() => setShowExit(false)} style={styles.button} accessibilityRole="button">
                 <Text style={styles.buttonText}>Stay</Text>
@@ -267,6 +291,9 @@ const styles = StyleSheet.create({
   },
   dialogTitle: { fontSize: 16, color: theme.colors.text, fontFamily: theme.font.semibold },
   dialogRow: { flexDirection: 'row', gap: theme.spacing.md },
+  optionRow: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing.md },
+  optionText: { fontSize: 14, color: theme.colors.text, fontFamily: theme.font.regular },
+  hint: { fontSize: 13, color: theme.colors.textDim, fontFamily: theme.font.regular, textAlign: 'center', maxWidth: 280 },
   button: {
     paddingHorizontal: theme.spacing.xl,
     paddingVertical: theme.spacing.md,
