@@ -28,6 +28,10 @@ export function useStatus() {
       if (msg.kind === 'snapshot') {
         setSnapshot(msg.data);
         setSnapshotAt(Date.now());
+      } else if (msg.kind === 'snapshotCleared') {
+        // The core left 'running' -- its last snapshot no longer describes anything.
+        setSnapshot(null);
+        setSnapshotAt(null);
       } else if (msg.kind === 'log') {
         setLogs((prev) => [...prev, msg.entry]);
       }

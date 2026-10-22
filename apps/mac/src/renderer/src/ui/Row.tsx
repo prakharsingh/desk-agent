@@ -1,20 +1,25 @@
 import type { ReactNode } from 'react';
+import { StatusDot } from './StatusDot.js';
+import { monoFontFamily } from '../theme.js';
 
 // Shared label/value list row, matching the mockup's repeated inline row
 // markup (Overview's System Status list, Device's Connection list, etc).
-// `dot` renders a trailing glowing status indicator (green/gray) the way
-// the mockup does for every health-ish row; `last` omits the row separator
-// for the final row in a group (the group's own border-radius + overflow
-// hidden then gives a clean bottom edge).
+// `dot` renders a trailing flat status indicator (pass a FILL token, e.g.
+// fillColor('green')); `valueColor` overrides the value text color (pass a
+// TEXT token, e.g. textColor('red') for a failed state); `last` omits the
+// row separator for the final row in a group (the group's own border-radius
+// + overflow hidden then gives a clean bottom edge).
 export function Row({
   label,
   value,
+  valueColor,
   action,
   dot,
   last,
 }: {
   label: string;
   value?: string;
+  valueColor?: string;
   action?: ReactNode;
   dot?: string;
   last?: boolean;
@@ -26,23 +31,23 @@ export function Row({
         alignItems: 'center',
         padding: '13px 16px',
         borderBottom: last ? 'none' : '0.5px solid var(--sep)',
+        gap: 12,
       }}
     >
       <span style={{ fontSize: 13, color: 'var(--text)', flex: 1 }}>{label}</span>
       {value && (
         <span
           style={{
-            fontFamily: "ui-monospace, 'SF Mono', Menlo, Consolas, monospace",
+            fontFamily: monoFontFamily,
             fontSize: 12,
-            color: 'var(--text2)',
-            marginRight: dot || action ? 12 : 0,
+            color: valueColor ?? 'var(--text2)',
           }}
         >
           {value}
         </span>
       )}
       {action}
-      {dot && <i style={{ width: 8, height: 8, borderRadius: '50%', background: dot, boxShadow: `0 0 7px ${dot}`, display: 'inline-block' }} />}
+      {dot && <StatusDot color={dot} />}
     </div>
   );
 }

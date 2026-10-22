@@ -91,12 +91,14 @@ export function PluginsPane({
   return (
     <div style={{ display: 'flex', gap: 20 }}>
       {/* list */}
-      <div style={{ width: 230, flex: '0 0 230px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <GroupLabel>INSTALLED</GroupLabel>
+      <div style={{ width: 230, flex: '0 0 230px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <GroupLabel>Installed</GroupLabel>
         <Group>
           {KNOWN_PLUGINS.map(({ id, label }, index) => (
             <div
               key={id}
+              // Mouse convenience: clicking anywhere on the row (outside the
+              // switch) selects it; keyboard users get the real <button> below.
               onClick={() => setSelectedId(id)}
               style={{
                 display: 'flex',
@@ -105,15 +107,39 @@ export function PluginsPane({
                 padding: '12px 14px',
                 borderBottom: index === KNOWN_PLUGINS.length - 1 ? 'none' : '0.5px solid var(--sep)',
                 cursor: 'pointer',
-                background: id === selectedId ? 'var(--groupHi)' : undefined,
+                background: id === selectedId ? 'var(--list-sel)' : undefined,
               }}
             >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
+              {/* A real <button> (sibling of the Switch, not wrapping it -- no
+                  nested interactive controls) so selection is Tab-focusable
+                  and Enter/Space-activatable. */}
+              <button
+                type="button"
+                aria-pressed={id === selectedId}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedId(id);
+                }}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 2,
+                  flex: 1,
+                  minWidth: 0,
+                  padding: 0,
+                  margin: 0,
+                  border: 'none',
+                  background: 'none',
+                  textAlign: 'left',
+                  font: 'inherit',
+                  color: 'inherit',
+                  cursor: 'pointer',
+                  borderRadius: 4,
+                }}
+              >
                 <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>{label}</span>
-                <span className="mono" style={{ fontSize: 9, color: 'var(--text3)' }}>
-                  {id}
-                </span>
-              </div>
+                <span style={{ fontFamily: monoFontFamily, fontSize: 11, color: 'var(--text3)' }}>{id}</span>
+              </button>
               <Switch
                 label={label}
                 checked={config.enabledPlugins.includes(id)}
@@ -133,8 +159,8 @@ export function PluginsPane({
           </div>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
-          <GroupLabel>CONFIGURATION</GroupLabel>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 18 }}>
+          <GroupLabel>Configuration</GroupLabel>
           <Group>
             <DetailRow label="Enabled">
               {/* Label is distinct from the list row's Switch (which carries the bare
@@ -159,7 +185,7 @@ export function PluginsPane({
                     permanently on, so we show it checked-but-disabled rather than inventing
                     fake toggle state that would silently do nothing on click. */}
                 <DetailRow label="Media transport controls" last>
-                  <Switch label="Media transport controls" checked disabled onChange={() => {}} />
+                  <Switch label="Media transport controls" title="Always on — not configurable yet" checked disabled onChange={() => {}} />
                 </DetailRow>
               </>
             )}
@@ -184,15 +210,15 @@ export function PluginsPane({
                     permanently on, so we show it checked-but-disabled rather than inventing
                     fake toggle state that would silently do nothing on click. */}
                 <DetailRow label="Keep-awake while present" last>
-                  <Switch label="Keep-awake while present" checked disabled onChange={() => {}} />
+                  <Switch label="Keep-awake while present" title="Always on — not configurable yet" checked disabled onChange={() => {}} />
                 </DetailRow>
               </>
             )}
           </Group>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <GroupLabel>PERMISSIONS</GroupLabel>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <GroupLabel>Permissions</GroupLabel>
           <div
             style={{
               background: 'var(--group)',

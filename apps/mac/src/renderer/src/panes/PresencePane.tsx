@@ -1,11 +1,13 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import type { Config } from '@desk-agent/config-schema';
 import type { StatusSnapshot } from '@desk-agent/core';
 import { Switch } from '../ui/Switch.js';
 import { Stepper } from '../ui/Stepper.js';
 import { GroupLabel } from '../ui/GroupLabel.js';
 import { Group } from '../ui/Group.js';
-import { accent } from '../theme.js';
+import { StatusDot } from '../ui/StatusDot.js';
+import { fillColor, monoFontFamily, textColor } from '../theme.js';
+import { cameraToggleState } from '../presenceToggles.js';
 
 const STATES: Array<{ value: 'present' | 'maybe-absent' | 'absent'; label: string }> = [
   { value: 'present', label: 'present' },
@@ -23,21 +25,11 @@ function StatePill({ active, label }: { active: boolean; label: string }) {
         gap: 9,
         padding: '9px 14px',
         borderRadius: 8,
-        background: active ? 'rgba(48,209,88,0.14)' : 'var(--groupHi)',
-        border: active ? '1px solid rgba(48,209,88,0.4)' : '1px solid var(--border)',
+        background: active ? 'color-mix(in srgb, var(--green-fill) 14%, transparent)' : 'var(--groupHi)',
+        border: active ? '1px solid color-mix(in srgb, var(--green-fill) 40%, transparent)' : '1px solid var(--border)',
       }}
     >
-      <i
-        style={{
-          width: 8,
-          height: 8,
-          borderRadius: '50%',
-          flex: '0 0 8px',
-          background: active ? accent.green : '#6e6e73',
-          boxShadow: active ? `0 0 7px ${accent.green}` : 'none',
-          display: 'inline-block',
-        }}
-      />
+      <StatusDot color={active ? fillColor('green') : 'var(--text3)'} />
       {/* Text node stays lowercase (matches snapshot.presence.state verbatim)
           and uses CSS text-transform for the all-caps look, so this doesn't
           add a second `/present|maybe-absent|absent/` text match alongside
@@ -48,7 +40,7 @@ function StatePill({ active, label }: { active: boolean; label: string }) {
           fontSize: 12,
           fontWeight: 700,
           textTransform: 'uppercase',
-          color: active ? 'var(--text)' : 'var(--text2)',
+          color: active ? textColor('green') : 'var(--text2)',
         }}
       >
         {label}
@@ -65,11 +57,13 @@ function ControlRow({ children, last }: { children: ReactNode; last?: boolean })
   return <div style={{ display: 'flex', alignItems: 'center', padding: '13px 16px', borderBottom: last ? 'none' : '0.5px solid var(--sep)' }}>{children}</div>;
 }
 
-function RowText({ label, sub }: { label: string; sub: string }) {
+function RowText({ label, sub, subIsKey, hint }: { label: string; sub: string; subIsKey?: boolean; hint?: string | null }) {
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
       <span style={{ fontSize: 13, color: 'var(--text)' }}>{label}</span>
-      <span style={{ fontSize: 11, color: 'var(--text3)' }}>{sub}</span>
+      {/* Mono only when the sub-label is a raw config key (an ID). */}
+      <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: subIsKey ? monoFontFamily : undefined }}>{sub}</span>
+      {hint && <span style={{ fontSize: 11, color: 'var(--text3)', fontStyle: 'italic' }}>{hint}</span>}
     </div>
   );
 }
@@ -77,21 +71,34 @@ function RowText({ label, sub }: { label: string; sub: string }) {
 export function PresencePane({
   config,
   onChange,
+  onSetWakeEnabled,
   snapshot,
   restarting,
 }: {
   config: Config;
   onChange: (next: Config) => void;
+  onSetWakeEnabled: (enabled: boolean) => void;
   snapshot: StatusSnapshot | null;
   restarting: boolean;
 }) {
   const { presence } = config;
   const currentState = snapshot?.presence.state ?? null;
+  const camera = cameraToggleState(snapshot);
+  const [cameraPending, setCameraPending] = useState(false);
+
+  async function handleCameraChange(enabled: boolean) {
+    setCameraPending(true);
+    try {
+      await window.deskAgent.setCameraEnabled(enabled);
+    } finally {
+      setCameraPending(false);
+    }
+  }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 22, maxWidth: 720 }}>
-      <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <GroupLabel>STATE</GroupLabel>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
+      <section style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <GroupLabel>State</GroupLabel>
         <div style={{ background: 'var(--group)', border: '0.5px solid var(--border)', borderRadius: 10, padding: 18, display: 'flex', alignItems: 'center', gap: 10 }}>
           {STATES.map((s, i) => (
             <span key={s.value} style={{ display: 'contents' }}>
@@ -108,37 +115,40 @@ export function PresencePane({
         )}
       </section>
 
-      <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <GroupLabel>CAMERA &amp; DETECTION</GroupLabel>
+      <section style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <GroupLabel>Camera &amp; detection</GroupLabel>
         <Group>
           <ControlRow>
-            <RowText label="Camera presence" sub="On-device MLKit face detection" />
-            {/* No config field backs camera on/off yet (Config's presence
-                shape has no cameraEnabled-equivalent) -- rendered disabled
-                rather than wired to fake local state, matching the
-                honest-not-fake pattern used elsewhere in this port (e.g.
-                SystemStatsConfigSchema/EnergySaverConfigSchema's
-                informational-only fields) for demo-only mockup elements
-                without real backing state. */}
-            <Switch label="" checked={false} disabled onChange={() => {}} />
+            <RowText label="Camera presence" sub="On-device MLKit face detection · set on the phone" hint={camera.hint} />
+            {/* Phone-owned (persisted on the phone): shows the phone-reported
+                snapshot.camera and sends a request back via action.invoke --
+                the switch only flips once the phone confirms. */}
+            <Switch
+              label="Camera presence"
+              title={camera.disabled ? camera.hint ?? undefined : undefined}
+              checked={camera.checked}
+              disabled={camera.disabled || cameraPending}
+              onChange={(enabled) => void handleCameraChange(enabled)}
+            />
           </ControlRow>
           <ControlRow>
-            <RowText label="Gaze keeps display awake" sub="presence.gazeIsKeepAwake" />
+            <RowText label="Gaze keeps display awake" sub="presence.gazeIsKeepAwake" subIsKey />
             <Switch
-              label=""
+              label="Gaze keeps display awake"
               checked={presence.gazeIsKeepAwake}
               onChange={(gazeIsKeepAwake) => onChange({ ...config, presence: { ...presence, gazeIsKeepAwake } })}
             />
           </ControlRow>
           <ControlRow last>
-            <RowText label="Monitor wake on return" sub="presence.wakeEnabled" />
-            <Switch label="" checked={presence.wakeEnabled} onChange={(wakeEnabled) => onChange({ ...config, presence: { ...presence, wakeEnabled } })} />
+            <RowText label="Monitor wake on return" sub="presence.wakeEnabled" subIsKey />
+            {/* Applied live by core + synced to the phone; persisted without a core restart. */}
+            <Switch label="Monitor wake on return" checked={presence.wakeEnabled} onChange={(wakeEnabled) => onSetWakeEnabled(wakeEnabled)} />
           </ControlRow>
         </Group>
       </section>
 
-      <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <GroupLabel>TIMING</GroupLabel>
+      <section style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <GroupLabel>Timing</GroupLabel>
         <Group>
           <Stepper
             label="Absence timeout"

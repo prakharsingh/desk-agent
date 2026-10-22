@@ -2,7 +2,8 @@ import { useState } from 'react';
 import type { StatusSnapshot } from '@desk-agent/core';
 import { Switch } from '../ui/Switch.js';
 import { GroupLabel } from '../ui/GroupLabel.js';
-import { accent, monoFontFamily } from '../theme.js';
+import { PushButton } from '../ui/PushButton.js';
+import { accent, monoFontFamily, textColor } from '../theme.js';
 
 // v1 scope, locked: read-only rule cards + engine pause/resume + per-rule
 // enable/disable. No condition/action editing -- AutomationRule.condition is
@@ -10,17 +11,19 @@ import { accent, monoFontFamily } from '../theme.js';
 // authoring was explicitly deferred per the Phase 0 control-channel
 // contract's locked scope.
 
-function RuleBadge({ text, color }: { text: string; color: string }) {
+// `color` is the text color; `tint` (defaults to it) seeds the translucent
+// background/border via color-mix so CSS-var tokens work too.
+function RuleBadge({ text, color, tint = color }: { text: string; color: string; tint?: string }) {
   return (
     <span
       style={{
         fontFamily: monoFontFamily,
-        fontSize: 10.5,
+        fontSize: 11,
         padding: '3px 8px',
         borderRadius: 5,
-        background: `${color}22`,
+        background: `color-mix(in srgb, ${tint} 13%, transparent)`,
         color,
-        border: `0.5px solid ${color}55`,
+        border: `0.5px solid color-mix(in srgb, ${tint} 33%, transparent)`,
       }}
     >
       {text}
@@ -55,7 +58,7 @@ export function AutomationPane({ snapshot }: { snapshot: StatusSnapshot | null }
   const setRuleEnabled = (ruleId: string, enabled: boolean) => withPending(ruleId, () => window.deskAgent.setRuleEnabled(ruleId, enabled));
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 760 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ background: 'var(--group)', border: '0.5px solid var(--border)', borderRadius: 10, padding: '14px 16px', display: 'flex', alignItems: 'center' }}>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
           <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>Automation engine</span>
@@ -68,16 +71,18 @@ export function AutomationPane({ snapshot }: { snapshot: StatusSnapshot | null }
         by a docked, camera-active phone. With no phone reporting presence right now, nothing will visibly happen.
       </span>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         <div style={{ display: 'flex', alignItems: 'center' }}>
           <span style={{ flex: 1 }}>
-            <GroupLabel>RULES</GroupLabel>
+            <GroupLabel>Rules</GroupLabel>
           </span>
           {/* Rule authoring is explicitly out of v1 scope (see top-of-file
-              comment) -- no rule editor exists, so "+ Add Rule" is rendered
-              in the mockup's position for visual parity but is intentionally
-              non-interactive: muted color, default cursor, no handler. */}
-          <span style={{ fontSize: 12, color: 'var(--text3)', fontWeight: 500, cursor: 'default' }}>+ Add Rule</span>
+              comment) -- no rule editor exists, so "Add Rule" is a real but
+              disabled button with a "Coming soon" tooltip rather than
+              text that merely looks clickable. */}
+          <PushButton disabled title="Coming soon">
+            + Add Rule
+          </PushButton>
         </div>
         {snapshot.automation.rules.length === 0 && <p style={{ opacity: 0.6, fontSize: 13 }}>No rules configured.</p>}
         {snapshot.automation.rules.map((rule) => (
@@ -97,10 +102,10 @@ export function AutomationPane({ snapshot }: { snapshot: StatusSnapshot | null }
             <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               <RuleBadge text={rule.eventName} color={accent.cyan} />
               <span style={{ color: 'var(--text3)', fontSize: 13 }}>→</span>
-              <RuleBadge text={rule.actionLabel} color={accent.green} />
-              <span style={{ fontFamily: monoFontFamily, fontSize: 10.5, color: 'var(--text3)' }}>debounce {rule.debounceMs / 1000}s</span>
+              <RuleBadge text={rule.actionLabel} color={textColor('green')} tint="var(--green-fill)" />
+              <span style={{ fontFamily: monoFontFamily, fontSize: 11, color: 'var(--text3)' }}>debounce {rule.debounceMs / 1000}s</span>
             </div>
-            <Switch label="" checked={rule.enabled} onChange={(enabled) => setRuleEnabled(rule.id, enabled)} disabled={pendingKeys.has(rule.id)} />
+            <Switch label={`Rule ${rule.eventName} → ${rule.actionLabel}`} checked={rule.enabled} onChange={(enabled) => setRuleEnabled(rule.id, enabled)} disabled={pendingKeys.has(rule.id)} />
           </div>
         ))}
       </div>

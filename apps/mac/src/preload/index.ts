@@ -1,11 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { Config } from '@desk-agent/config-schema';
-import type { StatusSnapshot, LogEntry, ToApp } from '@desk-agent/core';
-import type { BinaryStatus } from '../shared/types.js';
+import type { StatusSnapshot, LogEntry } from '@desk-agent/core';
+import type { BinaryStatus, StatusMessage } from '../shared/types.js';
+import type { CoreHealth } from '../shared/health.js';
 
 const api = {
   ping: (): Promise<string> => ipcRenderer.invoke('ping'),
-  getCoreHealth: (): Promise<string> => ipcRenderer.invoke('core:getHealth'),
+  getCoreHealth: (): Promise<CoreHealth> => ipcRenderer.invoke('core:getHealth'),
   getConfig: (): Promise<Config> => ipcRenderer.invoke('config:get'),
   // Rejects with the Zod validation error if `config` doesn't satisfy
   // ConfigSchema -- the caller should treat a rejected setConfig as "nothing
@@ -41,11 +42,16 @@ const api = {
   setDockWatchEnabled: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke('dockwatch:setEnabled', enabled),
   setScreensaverConfig: (enabled: boolean, graceMs: number): Promise<void> =>
     ipcRenderer.invoke('status:setScreensaverConfig', enabled, graceMs),
+  // Phone-owned: resolves once the request is sent; the confirmed value
+  // arrives later via snapshot.camera once the phone applies it.
+  setCameraEnabled: (enabled: boolean): Promise<void> => ipcRenderer.invoke('status:setCameraEnabled', enabled),
+  // Mac-owned, applied live by core (no restart). Resolves with the written config.
+  setWakeEnabled: (enabled: boolean): Promise<Config> => ipcRenderer.invoke('config:setWakeEnabled', enabled),
   // Live push (snapshot after every mutation, log lines as they happen).
   // Returns an unsubscribe function, matching the cleanup shape a React
   // useEffect expects.
-  onStatusMessage: (cb: (msg: ToApp) => void): (() => void) => {
-    const listener = (_event: Electron.IpcRendererEvent, msg: ToApp) => cb(msg);
+  onStatusMessage: (cb: (msg: StatusMessage) => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, msg: StatusMessage) => cb(msg);
     ipcRenderer.on('status:message', listener);
     return () => ipcRenderer.removeListener('status:message', listener);
   },

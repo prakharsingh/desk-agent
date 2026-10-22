@@ -16,8 +16,14 @@ export function useConfig() {
     window.deskAgent.getConfig().then((c) => {
       if (!cancelled) setConfigState(c);
     });
+    // Refresh path for changes this renderer didn't make (e.g. Monitor wake
+    // toggled on the phone, persisted by main -- see main/wakeSync.ts).
+    const unsubscribe = window.deskAgent.onStatusMessage((msg) => {
+      if (msg.kind === 'configChanged') setConfigState(msg.config);
+    });
     return () => {
       cancelled = true;
+      unsubscribe();
     };
   }, []);
 
@@ -41,5 +47,21 @@ export function useConfig() {
     }
   }, [config]);
 
-  return { config, saving, error, updateConfig };
+  // Monitor wake on return: applied live by core, persisted by main WITHOUT a
+  // core restart (unlike updateConfig's config:set path). Optimistic, with
+  // the same revert-on-failure behavior as updateConfig.
+  const setWakeEnabled = useCallback(async (enabled: boolean) => {
+    const previous = config;
+    if (config) setConfigState({ ...config, presence: { ...config.presence, wakeEnabled: enabled } });
+    setError(null);
+    try {
+      const written = await window.deskAgent.setWakeEnabled(enabled);
+      setConfigState(written);
+    } catch (err) {
+      setConfigState(previous);
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, [config]);
+
+  return { config, saving, error, updateConfig, setWakeEnabled };
 }
