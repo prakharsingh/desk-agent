@@ -54,11 +54,19 @@ export function parseDeviceList(payload: string): Array<{ serial: string; state:
 // sent over stdin, so they are restricted to a metacharacter-free alphabet.
 const SAFE_VALUE = /^[A-Za-z0-9-]{1,128}$/;
 
+/**
+ * Deadline for every one-shot adb exec (reverse, reverse --remove, am start, getprop): Node kills the child and the
+ * call rejects. Without it one hung adb would wedge that port's ordered operation chain (TunnelSupervisor) for good.
+ */
+export const ADB_EXEC_TIMEOUT_MS = 10_000;
+
 export interface RealAdbRunnerOptions {
   /** Delay before respawning track-devices after a framing desync (tests shrink it). */
   trackRespawnDelayMs?: number;
   /** Deadline for deliverDisplayToken's `adb shell` (default 10000; tests shrink it). */
   deliverTimeoutMs?: number;
+  /** Deadline for the one-shot adb execs (default ADB_EXEC_TIMEOUT_MS; tests shrink it). */
+  execTimeoutMs?: number;
 }
 
 export function createRealAdbRunner(
@@ -68,10 +76,20 @@ export function createRealAdbRunner(
 ): AdbRunner {
   const trackRespawnDelayMs = opts.trackRespawnDelayMs ?? 1000;
   const deliverTimeoutMs = opts.deliverTimeoutMs ?? 10_000;
+  const execOpts = { timeout: opts.execTimeoutMs ?? ADB_EXEC_TIMEOUT_MS };
   return {
     async reverse(localPort, remotePort, serial) {
       const serialArgs = serial ? ['-s', serial] : [];
-      await execFileAsync(adbPath, [...serialArgs, 'reverse', `tcp:${localPort}`, `tcp:${remotePort}`]);
+      await execFileAsync(adbPath, [...serialArgs, 'reverse', `tcp:${localPort}`, `tcp:${remotePort}`], execOpts);
+    },
+    // Never rejects: a stale reverse is harmless enough that teardown must not fail its caller.
+    async removeReverse(port, serial) {
+      const serialArgs = serial ? ['-s', serial] : [];
+      try {
+        await execFileAsync(adbPath, [...serialArgs, 'reverse', '--remove', `tcp:${port}`], execOpts);
+      } catch (err) {
+        onLog('warn', `adb reverse --remove tcp:${port} failed: ${String(err)}`);
+      }
     },
     // The token goes over stdin to `adb shell`, never argv (visible in `ps`).
     async deliverDisplayToken(serial, sessionId, token) {
@@ -108,10 +126,10 @@ export function createRealAdbRunner(
     },
     async launchApp(serial) {
       const serialArgs = serial ? ['-s', serial] : [];
-      await execFileAsync(adbPath, [...serialArgs, 'shell', 'am', 'start', '-n', APP_COMPONENT]);
+      await execFileAsync(adbPath, [...serialArgs, 'shell', 'am', 'start', '-n', APP_COMPONENT], execOpts);
     },
     async getModel(serial) {
-      const { stdout } = await execFileAsync(adbPath, ['-s', serial, 'shell', MODEL_COMMANDS.join('; ')]);
+      const { stdout } = await execFileAsync(adbPath, ['-s', serial, 'shell', MODEL_COMMANDS.join('; ')], execOpts);
       return pickModelName(stdout);
     },
     trackDevices(onEvent) {

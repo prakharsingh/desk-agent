@@ -98,7 +98,7 @@ describe('full integration loop', () => {
     }, vi.fn());
 
     eventBus = new EventBus();
-    const adb: AdbRunner = { reverse: vi.fn(async () => {}), deliverDisplayToken: vi.fn(async () => {}), launchApp: vi.fn(async () => {}), trackDevices: (onEvent) => { onEvent({ type: 'attach', serial: 'p1' }); return { stop: vi.fn() }; } };
+    const adb: AdbRunner = { reverse: vi.fn(async () => {}), removeReverse: vi.fn(async () => {}), deliverDisplayToken: vi.fn(async () => {}), launchApp: vi.fn(async () => {}), trackDevices: (onEvent) => { onEvent({ type: 'attach', serial: 'p1' }); return { stop: vi.fn() }; } };
     const tunnelSupervisor = new TunnelSupervisor(adb, 8787, vi.fn());
 
     boot({ workerHost, gateway, tunnelSupervisor, eventBus, automationEngine });
@@ -167,10 +167,11 @@ describe('full integration loop', () => {
     expect(host.getStatus('system-stats')).toBe('starting');
   });
 
-  it('simulates tunnel-down/reconnect: adb reverse re-issued after detach then attach', () => {
+  it('simulates tunnel-down/reconnect: adb reverse re-issued after detach then attach', async () => {
     let handler: ((event: { type: 'attach' | 'detach'; serial: string }) => void) | undefined;
     const adb: AdbRunner = {
       reverse: vi.fn(async () => {}),
+      removeReverse: vi.fn(async () => {}),
       deliverDisplayToken: vi.fn(async () => {}),
       launchApp: vi.fn(async () => {}),
       trackDevices: (onEvent) => { handler = onEvent; return { stop: vi.fn() }; },
@@ -180,7 +181,8 @@ describe('full integration loop', () => {
     handler?.({ type: 'attach', serial: 'p1' });
     handler?.({ type: 'detach', serial: 'p1' });
     handler?.({ type: 'attach', serial: 'p1' });
-    expect(adb.reverse).toHaveBeenCalledTimes(2);
+    // Per-port adb ordering queues the second reverse behind the first.
+    await vi.waitFor(() => expect(adb.reverse).toHaveBeenCalledTimes(2));
   });
 
   it('drives sleep-display through sensor events -> PresenceEngine -> automation (Slice 1b path)', async () => {
