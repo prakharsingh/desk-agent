@@ -7,6 +7,14 @@ export interface FaceObservation {
   // resizeMode="contain" letterboxing (see mapBoxToPreview.ts).
   frameWidth?: number;
   frameHeight?: number;
+  // Raw MLKit face.bounds in pixels. MLKit receives the buffer plus its
+  // rotationDegrees, so these are already in the UPRIGHT frame's space
+  // (e.g. 720x1280 for a 1280x720 buffer rotated 270) and NOT mirrored.
+  // Used only by the visible-preview overlay (faceBoundsToOverlayRect.ts).
+  rawBounds?: { x: number; y: number; width: number; height: number };
+  // VisionCamera Frame.orientation / Frame.isMirrored for the same frame.
+  orientation?: 'up' | 'right' | 'down' | 'left';
+  isMirrored?: boolean;
   eulerX?: number;
   eulerY?: number;
   leftEyeOpenProbability?: number;

@@ -25,11 +25,15 @@ function buildBaseDeps() {
       getClientCount: vi.fn(() => 0),
       getLastHelloAt: vi.fn((): number | null => null),
       sendScreensaverConfig: vi.fn(),
+      sendCameraEnabled: vi.fn(),
     },
     phoneDisplay: { getStatus: vi.fn((): { enabled: boolean; graceMs: number } | null => null) },
+    camera: { getStatus: vi.fn((): { enabled: boolean } | null => null) },
+    wakeSetting: { set: vi.fn() },
     tunnelSupervisor: {
       getStatus: vi.fn(() => ({
         serial: null as string | null,
+        model: null as string | null,
         tunnelStatus: 'idle' as const,
         lastReissueAt: null as number | null,
         launchAppOnDock: true,
@@ -81,6 +85,7 @@ describe('ControlChannel', () => {
     expect(snap.core).toEqual({ uptimeMs: 0, wsPort: 8787, watchdogTimeoutMs: 30000 });
     expect(snap.device).toEqual({
       serial: null,
+      model: null,
       tunnelStatus: 'idle',
       lastReissueAt: null,
       launchAppOnDock: true,
@@ -232,5 +237,47 @@ describe('ControlChannel', () => {
     makeChannel(deps);
     deps.transport.receive({ kind: 'setScreensaverConfig', enabled: false, graceMs: 60000 });
     expect(deps.transport.sent).toHaveLength(1); // just the initial snapshot, no extra push
+  });
+});
+
+describe('ControlChannel camera presence + wake', () => {
+  it('snapshot.camera is null until the phone reports', () => {
+    const deps = makeDeps();
+    makeChannel(deps);
+    const snap = (deps.transport.sent[0] as any).data;
+    expect(snap.camera).toBeNull();
+  });
+
+  it('snapshot.camera mirrors the phone-reported camera setting', () => {
+    const deps = makeDeps();
+    deps.camera.getStatus.mockReturnValue({ enabled: true });
+    makeChannel(deps);
+    const snap = (deps.transport.sent[0] as any).data;
+    expect(snap.camera).toEqual({ enabled: true });
+  });
+
+  it('ToCore setCameraEnabled -> gateway.sendCameraEnabled (action.invoke to the phone), no optimistic snapshot', () => {
+    const deps = makeDeps();
+    makeChannel(deps);
+    const before = deps.transport.sent.length;
+    deps.transport.receive({ kind: 'setCameraEnabled', enabled: true });
+    expect(deps.gateway.sendCameraEnabled).toHaveBeenCalledWith(true);
+    expect(deps.transport.sent.length).toBe(before);
+  });
+
+  it('ToCore setWakeEnabled -> live wakeSetting.set(enabled, "mac")', () => {
+    const deps = makeDeps();
+    makeChannel(deps);
+    deps.transport.receive({ kind: 'setWakeEnabled', enabled: false });
+    expect(deps.wakeSetting.set).toHaveBeenCalledWith(false, 'mac');
+  });
+
+  it('notifyWakeEnabledChanged posts ToApp wakeEnabledChanged carrying the source', () => {
+    const deps = makeDeps();
+    const channel = makeChannel(deps);
+    channel.notifyWakeEnabledChanged(true, 'phone');
+    channel.notifyWakeEnabledChanged(false, 'mac');
+    expect(deps.transport.sent).toContainEqual({ kind: 'wakeEnabledChanged', enabled: true, source: 'phone' });
+    expect(deps.transport.sent).toContainEqual({ kind: 'wakeEnabledChanged', enabled: false, source: 'mac' });
   });
 });

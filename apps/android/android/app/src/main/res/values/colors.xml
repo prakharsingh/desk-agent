@@ -1,4 +1,6 @@
 <resources>
     <!-- Matches app/src/display/theme.ts colors.bg -->
     <color name="deskAgentBg">#050708</color>
+    <!-- Launcher icon tile: the background colour sampled from apps/mac/build/icon-source.png -->
+    <color name="ic_launcher_background">#FEFEFE</color>
 </resources>

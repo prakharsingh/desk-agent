@@ -1,12 +1,17 @@
 import { useEffect, useState } from 'react';
 import type { StatusSnapshot } from '@desk-agent/core';
-import { accent, monoFontFamily } from '../theme.js';
+import { fillColor, monoFontFamily, textColor } from '../theme.js';
+import { PushButton } from '../ui/PushButton.js';
+import { StatusDot } from '../ui/StatusDot.js';
 import { Switch } from '../ui/Switch.js';
 import { Row } from '../ui/Row.js';
 import { GroupLabel } from '../ui/GroupLabel.js';
+import { DeviceGlyph } from '../ui/DeviceGlyph.js';
+import { deviceCardTitle } from './deviceCard.js';
+import { overallHealth, type CoreHealth } from '../../../shared/health.js';
 import { Group } from '../ui/Group.js';
 
-export function DevicePane({ snapshot }: { snapshot: StatusSnapshot | null }) {
+export function DevicePane({ snapshot, health: coreHealth }: { snapshot: StatusSnapshot | null; health: CoreHealth | 'unknown' }) {
   const [reissuing, setReissuing] = useState(false);
   const [launchingApp, setLaunchingApp] = useState(false);
   const [launchAppOnDockPending, setLaunchAppOnDockPending] = useState(false);
@@ -109,6 +114,8 @@ export function DevicePane({ snapshot }: { snapshot: StatusSnapshot | null }) {
     }
   }
 
+  // Same rule as the tray dot and the Overview headline (core + tunnel + phone app).
+  const health = overallHealth(coreHealth, snapshot);
   const lastHello = snapshot.clients.lastHelloAt ? new Date(snapshot.clients.lastHelloAt).toLocaleTimeString() : 'never';
   const tunnelValue = `${snapshot.device.tunnelStatus}${snapshot.device.lastReissueAt ? ` · ${new Date(snapshot.device.lastReissueAt).toLocaleTimeString()}` : ''}`;
   // Both actions run a bare adb command with no device disambiguation when
@@ -120,44 +127,25 @@ export function DevicePane({ snapshot }: { snapshot: StatusSnapshot | null }) {
   // setScreensaverConfig command at all -- distinct from noDevicePaired,
   // which is a USB/adb-attachment signal, not a WS-liveness one.
   const phoneNotConnected = snapshot.clients.connected === 0;
+  const launchFailed = snapshot.device.appLaunchStatus === 'failed';
+  const noDeviceHint = noDevicePaired ? 'No phone paired over adb' : undefined;
+  const phoneHint = phoneNotConnected ? 'Phone app not connected' : undefined;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 22, maxWidth: 720 }}>
-      <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <GroupLabel>PAIRED DEVICE</GroupLabel>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
+      <section style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <GroupLabel>Paired device</GroupLabel>
         <div style={{ background: 'var(--group)', border: '0.5px solid var(--border)', borderRadius: 10, padding: 16, display: 'flex', alignItems: 'center', gap: 16 }}>
-          <div
-            style={{
-              width: 44,
-              height: 66,
-              borderRadius: 7,
-              border: '1.5px solid var(--fieldBorder)',
-              background: 'var(--content)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-            }}
-          >
-            <i
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: '50%',
-                background: accent.green,
-                boxShadow: `0 0 7px ${accent.green}`,
-                display: 'inline-block',
-              }}
-            />
+          {/* The menu-bar tray glyph (phone + box), with the shared health
+              badge at its top-right -- the empty corner above the box. */}
+          <div style={{ position: 'relative', width: 56, height: 56, flexShrink: 0 }}>
+            <DeviceGlyph size={56} strokeWidth={0.9} color="var(--text)" />
+            <span role="img" aria-label={`Status: ${health.text}`} title={health.text} style={{ position: 'absolute', top: 2, right: 2, display: 'flex' }}>
+              <StatusDot color={fillColor(health.tone)} />
+            </span>
           </div>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {/* StatusSnapshot['device'] has no model-name field (see
-                TunnelStatusSnapshot) -- unlike the mockup's "Pixel 4a" demo
-                text, show a generic label plus the real serial/last-hello
-                data instead of inventing a device model. */}
-            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>
-              {snapshot.device.serial ? 'Paired device' : 'No device paired'}
-            </span>
+            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>{deviceCardTitle(snapshot.device)}</span>
             <span className="mono" style={{ fontFamily: monoFontFamily, fontSize: 11, color: 'var(--text3)' }}>
               serial {snapshot.device.serial ?? 'none'}
             </span>
@@ -168,8 +156,8 @@ export function DevicePane({ snapshot }: { snapshot: StatusSnapshot | null }) {
         </div>
       </section>
 
-      <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <GroupLabel>CONNECTION</GroupLabel>
+      <section style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <GroupLabel>Connection</GroupLabel>
         <Group>
           <Row
             label="WebSocket port"
@@ -192,60 +180,38 @@ export function DevicePane({ snapshot }: { snapshot: StatusSnapshot | null }) {
           <Row
             label="adb reverse tunnel"
             value={tunnelValue}
+            valueColor={snapshot.device.tunnelStatus === 'failed' ? textColor('red') : undefined}
             action={
-              <button
-                type="button"
-                onClick={handleReissue}
-                disabled={reissuing || noDevicePaired}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  padding: 0,
-                  font: 'inherit',
-                  fontSize: 12,
-                  color: reissuing || noDevicePaired ? 'var(--text3)' : accent.blue,
-                  cursor: reissuing || noDevicePaired ? 'default' : 'pointer',
-                }}
-              >
+              <PushButton onClick={handleReissue} disabled={reissuing || noDevicePaired} title={noDeviceHint}>
                 {reissuing ? 'Re-issuing…' : 'Re-issue'}
-              </button>
+              </PushButton>
             }
           />
           <Row
             label="Launch app on phone"
             value={`${snapshot.device.appLaunchStatus}${snapshot.device.lastAppLaunchAt ? ` · ${new Date(snapshot.device.lastAppLaunchAt).toLocaleTimeString()}` : ''}`}
+            // A failed launch must read as failed, not as neutral gray text.
+            valueColor={launchFailed ? textColor('red') : undefined}
+            dot={launchFailed ? fillColor('red') : undefined}
             action={
-              <button
-                type="button"
-                onClick={handleLaunchApp}
-                disabled={launchingApp || noDevicePaired}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  padding: 0,
-                  font: 'inherit',
-                  fontSize: 12,
-                  color: launchingApp || noDevicePaired ? 'var(--text3)' : accent.blue,
-                  cursor: launchingApp || noDevicePaired ? 'default' : 'pointer',
-                }}
-              >
+              <PushButton onClick={handleLaunchApp} disabled={launchingApp || noDevicePaired} title={noDeviceHint}>
                 {launchingApp ? 'Launching…' : 'Launch now'}
-              </button>
+              </PushButton>
             }
           />
           <Row label="Watchdog timeout" value={`${snapshot.core.watchdogTimeoutMs / 1000}s`} last />
         </Group>
       </section>
 
-      <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <GroupLabel>STARTUP</GroupLabel>
+      <section style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <GroupLabel>Startup</GroupLabel>
         <Group>
           {launchAtLogin === null ? (
             <div style={{ padding: '13px 16px', borderBottom: '0.5px solid var(--sep)' }}>
               <span style={{ fontSize: 13, color: 'var(--text3)' }}>Loading…</span>
             </div>
           ) : (
-            <Row label="Launch Desk Agent at login" action={<Switch checked={launchAtLogin} onChange={handleLaunchAtLoginChange} label="" />} />
+            <Row label="Launch Desk Agent at login" action={<Switch checked={launchAtLogin} onChange={handleLaunchAtLoginChange} label="Launch Desk Agent at login" />} />
           )}
           {dockWatchEnabled === null ? (
             <div style={{ padding: '13px 16px', borderBottom: '0.5px solid var(--sep)' }}>
@@ -254,7 +220,7 @@ export function DevicePane({ snapshot }: { snapshot: StatusSnapshot | null }) {
           ) : (
             <Row
               label="Launch Desk Agent when phone is docked"
-              action={<Switch checked={dockWatchEnabled} onChange={handleDockWatchChange} label="" />}
+              action={<Switch checked={dockWatchEnabled} onChange={handleDockWatchChange} label="Launch Desk Agent when phone is docked" />}
             />
           )}
           <Row
@@ -263,7 +229,7 @@ export function DevicePane({ snapshot }: { snapshot: StatusSnapshot | null }) {
               <Switch
                 checked={snapshot.device.launchAppOnDock}
                 onChange={handleLaunchAppOnDockChange}
-                label=""
+                label="Launch app on phone when docked"
                 disabled={launchAppOnDockPending}
               />
             }
@@ -271,19 +237,19 @@ export function DevicePane({ snapshot }: { snapshot: StatusSnapshot | null }) {
           />
         </Group>
         {launchAtLoginError && (
-          <p style={{ fontSize: 12, color: accent.red, margin: '4px 0 0' }}>
+          <p style={{ fontSize: 12, color: textColor('red'), margin: '4px 0 0' }}>
             macOS didn't apply that change — showing the actual current setting.
           </p>
         )}
         {dockWatchError && (
-          <p style={{ fontSize: 12, color: accent.red, margin: '4px 0 0' }}>
+          <p style={{ fontSize: 12, color: textColor('red'), margin: '4px 0 0' }}>
             macOS didn't apply that change — showing the actual current setting.
           </p>
         )}
       </section>
 
-      <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <GroupLabel>PHONE SCREENSAVER</GroupLabel>
+      <section style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <GroupLabel>Phone screensaver</GroupLabel>
         <Group>
           {snapshot.screensaver === null ? (
             <div style={{ padding: '13px 16px' }}>
@@ -297,8 +263,9 @@ export function DevicePane({ snapshot }: { snapshot: StatusSnapshot | null }) {
                   <Switch
                     checked={snapshot.screensaver.enabled}
                     onChange={(enabled) => handleScreensaverChange(enabled, snapshot.screensaver!.graceMs)}
-                    label=""
+                    label="Phone screensaver enabled"
                     disabled={screensaverPending || phoneNotConnected}
+                    title={phoneHint}
                   />
                 }
               />
@@ -306,27 +273,20 @@ export function DevicePane({ snapshot }: { snapshot: StatusSnapshot | null }) {
                 label="Idle timeout"
                 value={`${snapshot.screensaver.graceMs / 60000} min`}
                 action={
-                  <div style={{ display: 'flex', gap: 6 }}>
+                  <div role="group" aria-label="Idle timeout" style={{ display: 'flex', gap: 6 }}>
                     {[1, 2, 5, 10, 30].map((min) => {
                       const active = snapshot.screensaver!.graceMs === min * 60000;
                       return (
-                        <button
+                        <PushButton
                           key={min}
-                          type="button"
+                          variant={active ? 'default' : 'normal'}
+                          ariaPressed={active}
                           onClick={() => handleScreensaverChange(snapshot.screensaver!.enabled, min * 60000)}
                           disabled={screensaverPending || phoneNotConnected}
-                          style={{
-                            background: active ? accent.blue : 'none',
-                            border: '0.5px solid var(--fieldBorder)',
-                            borderRadius: 6,
-                            padding: '3px 8px',
-                            fontSize: 11,
-                            color: active ? '#fff' : screensaverPending || phoneNotConnected ? 'var(--text3)' : 'var(--text2)',
-                            cursor: screensaverPending || phoneNotConnected ? 'default' : 'pointer',
-                          }}
+                          title={phoneHint}
                         >
                           {min}m
-                        </button>
+                        </PushButton>
                       );
                     })}
                   </div>

@@ -1,4 +1,4 @@
-// The pill-group segmented control used for Light/Dark and the Logs level
+// The pill-group segmented control used for the Logs level
 // filter, matching the mockup's seg()/segLight/segDark/segLog* styling.
 // Real <button> elements (not <span onClick>) so each option is keyboard-
 // focusable and screen-reader-navigable, with aria-pressed communicating

@@ -12,6 +12,8 @@ import { createRealAdbRunner } from './adbRunner.js';
 import { Watchdog } from './watchdog.js';
 import { ControlChannel, type ControlTransport } from './controlChannel.js';
 import { ScreensaverConfigStore } from './screensaverConfigStore.js';
+import { CameraConfigStore } from './cameraConfigStore.js';
+import { WakeSetting } from './wakeSetting.js';
 
 const require = createRequire(import.meta.url);
 
@@ -48,8 +50,16 @@ export function run(opts: RunOptions = {}) {
   };
   const specs = buildPluginSpecs(config, pluginRegistry, (level, message) => log('core', level, message));
 
+  // Live presence.wakeEnabled (seeded from config.json). Its sinks are only
+  // invoked later, at runtime, after gateway/controlChannel are assigned --
+  // same forward-reference pattern as the closures above.
+  const wakeSetting = new WakeSetting(config.presence.wakeEnabled, {
+    sendToPhone: (enabled) => gateway.sendWakeEnabled(enabled),
+    notifyApp: (enabled, source) => controlChannel?.notifyWakeEnabledChanged(enabled, source),
+  });
+
   const eventBus = new EventBus();
-  const automationEngine = new AutomationEngine(buildAutomationRules(config), {
+  const automationEngine = new AutomationEngine(buildAutomationRules(config, wakeSetting), {
     invoke: (pluginId, action, args) => workerHost.invokeAction(pluginId, action, args),
   }, (level, message) => log('automation', level, message));
 
@@ -62,6 +72,7 @@ export function run(opts: RunOptions = {}) {
   );
 
   const screensaverConfigStore = new ScreensaverConfigStore(() => controlChannel?.pushSnapshot());
+  const cameraConfigStore = new CameraConfigStore(() => controlChannel?.pushSnapshot());
 
   const workerHost = new WorkerHost(specs, {
     maxOldGenerationSizeMb: 128,
@@ -98,6 +109,11 @@ export function run(opts: RunOptions = {}) {
       return entries.flat();
     },
     getVisibleWidgets: () => config.visibleWidgets,
+    getWakeEnabled: () => wakeSetting.get(),
+    // The phone owns the camera setting; with no phone connected there is no
+    // owner, so drop the mirror rather than show a stale value to whichever
+    // (possibly older, non-reporting) phone app connects next.
+    onClientCountChange: (count) => cameraConfigStore.onClientCountChanged(count),
     onEventPublish: (raw) => eventBus.publish(raw),
     onActionInvoke: (pluginId, action, args) => workerHost.invokeAction(pluginId, action, args),
     onClientMessage: () => {
@@ -124,6 +140,8 @@ export function run(opts: RunOptions = {}) {
       presenceEngine,
       automationEngine,
       phoneDisplay: screensaverConfigStore,
+      camera: cameraConfigStore,
+      wakeSetting,
       wsPort: config.wsPort,
       watchdogTimeoutMs: config.watchdogTimeoutMs,
       pluginPermissions,
@@ -134,6 +152,8 @@ export function run(opts: RunOptions = {}) {
   workerHost.start().then(() => boot({
     workerHost, gateway, tunnelSupervisor, eventBus, automationEngine, watchdog, presenceEngine,
     screensaverConfigStore,
+    cameraConfigStore,
+    wakeSetting,
     onLog: (level, message) => log('core', level, message),
   })).catch((err) => {
     log('core', 'error', `startup failed: ${String(err)}`);

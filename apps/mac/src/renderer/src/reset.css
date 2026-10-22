@@ -26,3 +26,13 @@ html, body, #root {
 *, *::before, *::after {
   box-sizing: border-box;
 }
+
+/* Follow the macOS appearance for UA-drawn surfaces (scrollbars, form
+   controls, default canvas) before React mounts; App.tsx then pins the
+   resolved scheme on its root via colorScheme. Deliberately NO background
+   on html/body: the BrowserWindow uses 'sidebar' vibrancy, which only shows
+   through a transparent page (the content pane paints its own opaque
+   var(--content)). */
+html {
+  color-scheme: light dark;
+}

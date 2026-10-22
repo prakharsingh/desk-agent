@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildFaceVisibleFrame, buildGazeFrame, buildMotionFrame, buildCameraStateFrame, buildOverrideFrame, buildScreensaverConfigFrame } from './presenceEvents.js';
+import { buildFaceVisibleFrame, buildGazeFrame, buildMotionFrame, buildCameraStateFrame, buildOverrideFrame, buildScreensaverConfigFrame, buildCameraConfigFrame, buildWakeEnabledFrame } from './presenceEvents.js';
 
 describe('buildFaceVisibleFrame', () => {
   it('builds an event.publish frame for sensor.face_visible', () => {
@@ -48,5 +48,21 @@ describe('buildScreensaverConfigFrame', () => {
     const frame = buildScreensaverConfigFrame({ enabled: false, graceMs: 60000 });
     expect(frame.type).toBe('event.publish');
     expect(frame.payload).toEqual({ eventName: 'screensaver.config', data: { enabled: false, graceMs: 60000 } });
+  });
+});
+
+describe('buildCameraConfigFrame', () => {
+  it('builds an event.publish frame for presence.cameraConfig', () => {
+    const frame = buildCameraConfigFrame(true);
+    expect(frame.type).toBe('event.publish');
+    expect(frame.payload).toEqual({ eventName: 'presence.cameraConfig', data: { enabled: true } });
+  });
+});
+
+describe('buildWakeEnabledFrame', () => {
+  it('builds an event.publish frame for presence.wakeEnabled', () => {
+    const frame = buildWakeEnabledFrame(false);
+    expect(frame.type).toBe('event.publish');
+    expect(frame.payload).toEqual({ eventName: 'presence.wakeEnabled', data: { enabled: false } });
   });
 });

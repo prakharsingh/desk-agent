@@ -4,7 +4,6 @@ import { WIDGET_IDS } from '@desk-agent/protocol';
 import { Switch } from '../ui/Switch.js';
 import { Group } from '../ui/Group.js';
 import { toggleInList } from '../ui/toggleInList.js';
-import { monoFontFamily } from '../theme.js';
 
 const LABELS: Record<(typeof WIDGET_IDS)[number], string> = {
   clock: 'Clock',
@@ -33,16 +32,15 @@ function RoadmapBadge() {
   return (
     <span
       style={{
-        fontFamily: monoFontFamily,
-        fontSize: 8,
-        letterSpacing: 0.5,
+        fontSize: 11,
+        fontWeight: 500,
         color: 'var(--text3)',
         border: '0.5px solid var(--border)',
-        borderRadius: 3,
-        padding: '1px 5px',
+        borderRadius: 4,
+        padding: '0 5px',
       }}
     >
-      ROADMAP
+      Roadmap
     </span>
   );
 }
@@ -109,7 +107,7 @@ export function WidgetsPane({
   ];
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 720 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       <span style={{ fontSize: 12, color: 'var(--text2)', paddingLeft: 2, lineHeight: 1.5 }}>
         Choose which tiles appear on the docked phone and configure each. Reordering happens on the phone itself.
       </span>

@@ -1,17 +1,20 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, nativeTheme, shell } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { StatusSnapshot, ToApp, ToCore, LogEntry } from '@desk-agent/core';
+import type { ToApp, ToCore, LogEntry } from '@desk-agent/core';
+import type { StatusMessage } from '../shared/types.js';
 import { CoreSupervisor } from './coreSupervisor.js';
 import { TrayController } from './tray.js';
 import { ensureConfigExists, defaultConfigPath } from './firstRunConfig.js';
-import { readConfig, writeConfig } from './configStore.js';
+import { readConfig } from './configStore.js';
 import { debounce } from './debounce.js';
 import { LogBuffer } from './logBuffer.js';
+import { SnapshotCache } from './snapshotCache.js';
+import { WakeSync } from './wakeSync.js';
 import { augmentedPath, checkBinaries } from './binaries.js';
 import * as dockWatch from './dockWatch.js';
 import { startUpdateChecker } from './updateCheck.js';
-import { TRAFFIC_LIGHT_POSITION, WINDOW_BACKGROUND_COLOR } from '../shared/constants.js';
+import { TRAFFIC_LIGHT_POSITION, USE_SIDEBAR_VIBRANCY, windowBackgroundColor } from '../shared/constants.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -25,9 +28,16 @@ if (!gotLock) {
   let mainWindow: BrowserWindow | null = null;
   let tray: TrayController | null = null;
   let supervisor: CoreSupervisor | null = null;
-  let latestSnapshot: StatusSnapshot | null = null;
+  const snapshotCache = new SnapshotCache();
   const configPath = defaultConfigPath();
   const logBuffer = new LogBuffer(500);
+  // Monitor wake on return: persisted to config.json but applied LIVE by the
+  // core -- never routed through config:set's scheduleCoreRestart.
+  const wakeSync = new WakeSync({
+    configPath,
+    sendToCore: (msg) => sendToCore(msg),
+    notifyRenderer: (config) => mainWindow?.webContents.send('status:message', { kind: 'configChanged', config } satisfies StatusMessage),
+  });
 
   const updateChecker = startUpdateChecker({
     currentVersion: app.getVersion(),
@@ -48,10 +58,16 @@ if (!gotLock) {
   // snapshotIntervalMs for the next periodic push.
   function handleCoreMessage(msg: ToApp) {
     if (msg.kind === 'snapshot') {
-      latestSnapshot = msg.data;
+      snapshotCache.set(msg.data);
       tray?.refresh();
     } else if (msg.kind === 'log') {
       logBuffer.push(msg.entry);
+    } else if (msg.kind === 'wakeEnabledChanged') {
+      try {
+        wakeSync.handleCoreMessage(msg);
+      } catch (err) {
+        recordStderr(`failed to persist ${msg.source}-sourced wakeEnabled change: ${String(err)}`);
+      }
     }
     mainWindow?.webContents.send('status:message', msg);
   }
@@ -83,6 +99,8 @@ if (!gotLock) {
     mainWindow = new BrowserWindow({
       width: 1140,
       height: 748,
+      minWidth: 820,
+      minHeight: 560,
       title: 'Desk Agent',
       // Matches the design mockup's chrome-less sidebar: the renderer draws
       // its own branding/nav where a title bar would be, with only the
@@ -90,12 +108,17 @@ if (!gotLock) {
       // and not fake traffic-light dots -- those are real, OS-drawn ones).
       titleBarStyle: 'hiddenInset',
       trafficLightPosition: TRAFFIC_LIGHT_POSITION,
+      // Translucent Finder/System-Settings-style sidebar. The material
+      // follows the window's key state and the system appearance.
+      ...(USE_SIDEBAR_VIBRANCY ? { vibrancy: 'sidebar' as const, visualEffectState: 'followWindow' as const } : {}),
       // Electron's default native surface is white; it shows for the frames
       // before the renderer's first paint (open) and after its teardown
-      // (close), flashing white against the dark UI. Paint it the theme's
-      // --content instead, and don't show the window at all until the
-      // renderer has produced its first frame.
-      backgroundColor: WINDOW_BACKGROUND_COLOR,
+      // (close), flashing white against the UI. With vibrancy the surface
+      // is transparent so those frames show the (appearance-matched)
+      // sidebar material instead of white; without it, it's the current
+      // appearance's --content color. Either way the window isn't shown
+      // until the renderer has produced its first frame.
+      backgroundColor: windowBackgroundColor(nativeTheme.shouldUseDarkColors),
       show: false,
       webPreferences: {
         preload: path.join(__dirname, '../preload/index.cjs'),
@@ -121,6 +144,13 @@ if (!gotLock) {
     }
   }
 
+  // The renderer follows prefers-color-scheme; keep the native surface in
+  // step when the macOS appearance changes (a no-op with vibrancy on, where
+  // it stays transparent).
+  nativeTheme.on('updated', () => {
+    mainWindow?.setBackgroundColor(windowBackgroundColor(nativeTheme.shouldUseDarkColors));
+  });
+
   app.on('second-instance', () => {
     showSettingsWindow();
   });
@@ -132,12 +162,14 @@ if (!gotLock) {
     // Throws (rejecting the renderer's ipcRenderer.invoke promise) if
     // `config` fails ConfigSchema validation -- writeConfig guarantees it
     // never touches disk in that case, so the on-disk config and the
-    // running core are simply left as they were.
-    const written = writeConfig(configPath, config);
+    // running core are simply left as they were. presence.wakeEnabled is
+    // kept at its on-disk value (owned by the live WakeSync path), so a stale
+    // full-config save can't undo a phone-side wake toggle.
+    const written = wakeSync.writeRendererConfig(config);
     scheduleCoreRestart();
     return written;
   });
-  ipcMain.handle('status:getSnapshot', () => latestSnapshot);
+  ipcMain.handle('status:getSnapshot', () => snapshotCache.get());
   ipcMain.handle('status:getLogs', () => logBuffer.getAll());
   ipcMain.handle('status:reissueTunnel', () => sendToCore({ kind: 'reissueTunnel' }));
   ipcMain.handle('status:launchApp', () => sendToCore({ kind: 'launchApp' }));
@@ -147,7 +179,7 @@ if (!gotLock) {
   // A main-process-only concern (see binaries.ts): whether adb/nowplaying-cli
   // are resolvable, not part of the core's ControlChannel StatusSnapshot.
   // Computed once (which binaries are installed essentially never changes
-  // mid-session) and cached here, mirroring latestSnapshot's cache-and-serve
+  // mid-session) and cached here, mirroring snapshotCache's cache-and-serve
   // pattern, instead of re-doing sync fs.existsSync calls on every mount.
   let binaryStatus = checkBinaries();
   ipcMain.handle('binaries:getStatus', () => binaryStatus);
@@ -171,12 +203,18 @@ if (!gotLock) {
   ipcMain.handle('dockwatch:setEnabled', (_event, enabled: boolean) => (enabled ? dockWatch.install() : dockWatch.uninstall()));
   ipcMain.handle('status:setScreensaverConfig', (_event, enabled: boolean, graceMs: number) =>
     sendToCore({ kind: 'setScreensaverConfig', enabled, graceMs }));
+  // Phone-owned camera presence: a request to the phone, confirmed back via snapshot.camera.
+  ipcMain.handle('status:setCameraEnabled', (_event, enabled: boolean) => sendToCore({ kind: 'setCameraEnabled', enabled }));
+  // Mac-owned wake: persist + live core update, NO core restart (see wakeSync.ts).
+  ipcMain.handle('config:setWakeEnabled', (_event, enabled: boolean) => wakeSync.setFromMac(Boolean(enabled)));
 
   function sendToCore(msg: ToCore) {
     supervisor?.sendToCore(msg);
   }
 
   app.whenReady().then(() => {
+    // Follow System Settings > Appearance (no in-app override).
+    nativeTheme.themeSource = 'system';
     ensureConfigExists(configPath);
 
     supervisor = new CoreSupervisor({
@@ -189,14 +227,21 @@ if (!gotLock) {
       // picked up by the next restart rather than requiring a full quit.
       extraEnv: () => ({ PATH: augmentedPath(process.env.PATH ?? '') }),
       onStderr: recordStderr,
-      onHealthChange: () => tray?.refresh(),
+      onHealthChange: (health) => {
+        // Drop the snapshot once the core leaves 'running' so neither the tray
+        // nor the renderer keeps presenting a dead core's last state as live.
+        if (snapshotCache.onHealthChange(health)) {
+          mainWindow?.webContents.send('status:message', { kind: 'snapshotCleared' } satisfies StatusMessage);
+        }
+        tray?.refresh();
+      },
       onMessage: (msg) => handleCoreMessage(msg as ToApp),
     });
 
     tray = new TrayController({
       resourcesPath: resourcesPath(),
       getHealth: () => supervisor?.getHealth() ?? 'stopped',
-      getSnapshot: () => latestSnapshot,
+      getSnapshot: () => snapshotCache.get(),
       onOpenSettings: () => showSettingsWindow(),
       onToggleAutomation: (enabled) => sendToCore({ kind: 'setAutomationEnabled', enabled }),
       getUpdateAvailable: () => updateChecker.getAvailable(),

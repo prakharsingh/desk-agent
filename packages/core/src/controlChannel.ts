@@ -2,7 +2,8 @@ import type { LogLevel, Permission } from '@desk-agent/plugin-sdk';
 import type { PresenceState } from './presenceEngine.js';
 import type { AutomationRuleView } from './automationEngine.js';
 import type { TunnelStatusSnapshot } from './tunnelSupervisor.js';
-import type { ScreensaverConfig } from '@desk-agent/protocol';
+import type { ScreensaverConfig, CameraConfig } from '@desk-agent/protocol';
+import type { WakeChangeSource } from './wakeSetting.js';
 
 export interface LogEntry {
   ts: number;
@@ -22,11 +23,18 @@ export interface StatusSnapshot {
   // null until the phone has connected and reported its config at least
   // once, ever -- see ScreensaverConfigStore's doc comment.
   screensaver: ScreensaverConfig | null;
+  // Phone-owned camera-presence setting; null until the phone has reported
+  // it at least once (see CameraConfigStore).
+  camera: CameraConfig | null;
 }
 
 export type ToApp =
   | { kind: 'snapshot'; data: StatusSnapshot }
-  | { kind: 'log'; entry: LogEntry };
+  | { kind: 'log'; entry: LogEntry }
+  // Core applied a Monitor wake change (from the phone OR the Mac -- core is
+  // the serialization point, see wakeSetting.ts). The Mac main process
+  // persists core's latest reported value to config.json (no core restart).
+  | { kind: 'wakeEnabledChanged'; enabled: boolean; source: WakeChangeSource };
 
 // Deliberately narrower than the Phase 0 contract's original draft: it also
 // listed `setConfig`/`setPluginEnabled`, written before Phase 2 existed.
@@ -43,7 +51,12 @@ export type ToCore =
   | { kind: 'setLaunchAppOnDock'; enabled: boolean }
   | { kind: 'setAutomationEnabled'; enabled: boolean }
   | { kind: 'setRuleEnabled'; ruleId: string; enabled: boolean }
-  | { kind: 'setScreensaverConfig'; enabled: boolean; graceMs: number };
+  | { kind: 'setScreensaverConfig'; enabled: boolean; graceMs: number }
+  | { kind: 'setCameraEnabled'; enabled: boolean }
+  // Live wake toggle: main has persisted it optimistically; core applies it
+  // in memory (no restart), pushes it to the phone, and reports it back
+  // (ToApp wakeEnabledChanged) so main converges on core's apply order.
+  | { kind: 'setWakeEnabled'; enabled: boolean };
 
 export interface ControlTransport {
   postMessage(msg: ToApp): void;
@@ -54,10 +67,19 @@ interface GatewayLike {
   getClientCount(): number;
   getLastHelloAt(): number | null;
   sendScreensaverConfig(config: ScreensaverConfig): void;
+  sendCameraEnabled(enabled: boolean): void;
 }
 
 interface PhoneDisplayLike {
   getStatus(): ScreensaverConfig | null;
+}
+
+interface CameraLike {
+  getStatus(): CameraConfig | null;
+}
+
+interface WakeSettingLike {
+  set(enabled: boolean, source: WakeChangeSource): void;
 }
 
 interface TunnelLike {
@@ -86,6 +108,8 @@ export interface ControlChannelDeps {
   presenceEngine: PresenceLike;
   automationEngine: AutomationLike;
   phoneDisplay: PhoneDisplayLike;
+  camera: CameraLike;
+  wakeSetting: WakeSettingLike;
   wsPort: number;
   watchdogTimeoutMs: number;
   /** The full known plugin registry's permission grants, not just the enabled subset -- a disabled plugin's chips should still be visible. */
@@ -128,6 +152,10 @@ export class ControlChannel {
     this.deps.transport.postMessage({ kind: 'log', entry: { ts: Date.now(), level, source, message } });
   }
 
+  notifyWakeEnabledChanged(enabled: boolean, source: WakeChangeSource) {
+    this.deps.transport.postMessage({ kind: 'wakeEnabledChanged', enabled, source });
+  }
+
   private handleToCore(msg: ToCore) {
     if (msg.kind === 'getSnapshot') {
       this.pushSnapshot();
@@ -146,6 +174,12 @@ export class ControlChannel {
       this.pushSnapshot();
     } else if (msg.kind === 'setScreensaverConfig') {
       this.deps.gateway.sendScreensaverConfig({ enabled: msg.enabled, graceMs: msg.graceMs });
+    } else if (msg.kind === 'setCameraEnabled') {
+      // Same as screensaver: no optimistic snapshot -- the Mac sees the new
+      // value only once the phone applies it and reports presence.cameraConfig.
+      this.deps.gateway.sendCameraEnabled(msg.enabled);
+    } else if (msg.kind === 'setWakeEnabled') {
+      this.deps.wakeSetting.set(msg.enabled, 'mac');
     }
   }
 
@@ -163,6 +197,7 @@ export class ControlChannel {
       automation: { enabled: this.deps.automationEngine.isEnabled(), rules: this.deps.automationEngine.getRules() },
       denialsToday: this.denialsToday,
       screensaver: this.deps.phoneDisplay.getStatus(),
+      camera: this.deps.camera.getStatus(),
     };
   }
 }

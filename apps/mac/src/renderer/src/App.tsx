@@ -8,10 +8,11 @@ import { WidgetsPane } from './panes/WidgetsPane.js';
 import { AutomationPane } from './panes/AutomationPane.js';
 import { DevicePane } from './panes/DevicePane.js';
 import { LogsPane } from './panes/LogsPane.js';
-import { AppIcon } from './ui/AppIcon.js';
-import { Segmented } from './ui/Segmented.js';
-import { accent, darkTheme, lightTheme, sansFontFamily, monoFontFamily } from './theme.js';
-import { SIDEBAR_HEADER_DRAG_HEIGHT } from '../../shared/constants.js';
+import { StatusDot } from './ui/StatusDot.js';
+import { fillColor, monoFontFamily, resolveTheme, sansFontFamily, textColor } from './theme.js';
+import { useSystemDark, useWindowFocused } from './useSystemAppearance.js';
+import { CONTENT_HEADER_HEIGHT, SIDEBAR_HEADER_DRAG_HEIGHT, USE_SIDEBAR_VIBRANCY } from '../../shared/constants.js';
+import { coreHealthLabel, overallHealth, type CoreHealth } from '../../shared/health.js';
 
 type Pane = 'overview' | 'presence' | 'plugins' | 'widgets' | 'automation' | 'device' | 'logs';
 
@@ -35,18 +36,17 @@ function NavIcon({ paths }: { paths: string[] }) {
   );
 }
 
-const HEALTH_DOT: Record<string, string> = {
-  running: accent.green,
-  starting: '#6e6e73',
-  stopped: '#6e6e73',
-  crashed: accent.red,
-};
+// Panes laid out in the single left-aligned content column (maxWidth 680).
+// Logs (fills the window height) and Plugins (two-column master/detail) opt
+// out and use the full content width.
+const FULL_WIDTH_PANES: ReadonlySet<Pane> = new Set(['logs', 'plugins']);
 
 export function App() {
-  const [health, setHealth] = useState<string>('unknown');
+  const [health, setHealth] = useState<CoreHealth | 'unknown'>('unknown');
   const [pane, setPane] = useState<Pane>('overview');
-  const [dark, setDark] = useState(true);
-  const { config, saving, error, updateConfig } = useConfig();
+  const dark = useSystemDark();
+  const windowFocused = useWindowFocused();
+  const { config, saving, error, updateConfig, setWakeEnabled } = useConfig();
   const { snapshot, snapshotAt, logs } = useStatus();
 
   useEffect(() => {
@@ -63,97 +63,109 @@ export function App() {
     };
   }, []);
 
-  const vars = dark ? darkTheme : lightTheme;
+  const theme = resolveTheme(dark);
+  // Footer mirrors the tray's status item: same label (coreHealthLabel) and
+  // same dot rule (overallHealth -- core + phone + tunnel).
+  const footerTone = overallHealth(health, snapshot).tone;
   const rootStyle = {
-    ...vars,
+    ...theme.vars,
+    colorScheme: theme.colorScheme,
     display: 'flex',
     height: '100%',
     width: '100%',
-    background: 'var(--content)',
+    // Transparent so the native 'sidebar' vibrancy material shows through the
+    // sidebar; the content pane paints its own opaque var(--content).
+    background: USE_SIDEBAR_VIBRANCY ? 'transparent' : 'var(--content)',
+    color: 'var(--text)',
     fontFamily: sansFontFamily,
   } as CSSProperties;
+  const fullWidth = FULL_WIDTH_PANES.has(pane);
 
   return (
     <div style={rootStyle}>
       {/* SIDEBAR */}
-      <div style={{ width: 230, flex: '0 0 230px', background: 'var(--sidebar)', borderRight: '0.5px solid var(--sep)', display: 'flex', flexDirection: 'column' }}>
+      <nav
+        aria-label="Settings sections"
+        style={{
+          width: 230,
+          flex: '0 0 230px',
+          background: USE_SIDEBAR_VIBRANCY ? 'transparent' : 'var(--sidebar)',
+          borderRight: '0.5px solid var(--sep)',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
         {/* Reserved for the native macOS traffic lights (BrowserWindow uses
-            titleBarStyle: 'hiddenInset'), left as a plain drag region -- no
-            fake traffic-light dots drawn here, unlike the static mockup
-            image, since real ones are already provided by the OS. */}
-        <div style={{ height: SIDEBAR_HEADER_DRAG_HEIGHT, WebkitAppRegion: 'drag' } as CSSProperties} />
-        <div style={{ padding: '2px 14px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ width: 34, height: 34, flex: '0 0 34px' }}>
-            <AppIcon size={34} />
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Desk Agent</span>
-            <span style={{ fontFamily: monoFontFamily, fontSize: 9, color: 'var(--text3)' }}>core · macOS</span>
-          </div>
-        </div>
-        <div style={{ flex: 1, overflowY: 'auto', padding: '2px 10px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+            titleBarStyle: 'hiddenInset', positioned by TRAFFIC_LIGHT_POSITION
+            to sit centred in this band) -- a plain drag region the same
+            height as the content header so the two read as one toolbar.
+            No brand row: the Overview hero carries the app identity. */}
+        <div style={{ height: SIDEBAR_HEADER_DRAG_HEIGHT, flex: `0 0 ${SIDEBAR_HEADER_DRAG_HEIGHT}px`, WebkitAppRegion: 'drag' } as CSSProperties} />
+        <div style={{ flex: 1, overflowY: 'auto', padding: '0 10px', display: 'flex', flexDirection: 'column', gap: 2 }}>
           {NAV.map(({ id, label, icon }) => {
             const active = pane === id;
+            // Native source-list selection: accent while the window is key,
+            // neutral gray (with primary text) when it isn't.
+            const selBg = windowFocused ? 'var(--nav-sel-active)' : 'var(--nav-sel-inactive)';
+            const selFg = windowFocused ? '#fff' : 'var(--text)';
             return (
               <button
                 key={id}
                 type="button"
+                aria-current={active ? 'page' : undefined}
                 onClick={() => setPane(id)}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   gap: 10,
                   padding: '6px 9px',
-                  borderRadius: 7,
+                  borderRadius: 6,
                   fontSize: 13,
                   fontWeight: 500,
+                  fontFamily: 'inherit',
                   border: 'none',
                   cursor: 'pointer',
                   textAlign: 'left',
-                  background: active ? accent.blue : 'transparent',
-                  color: active ? '#fff' : 'var(--text2)',
+                  background: active ? selBg : 'transparent',
+                  color: active ? selFg : 'var(--text)',
                 }}
               >
                 <NavIcon paths={icon} />
                 {label}
                 {id === 'plugins' && config && (
-                  <span style={{ marginLeft: 'auto', fontFamily: monoFontFamily, fontSize: 10, opacity: 0.75 }}>{config.enabledPlugins.length}</span>
+                  <span style={{ marginLeft: 'auto', fontFamily: monoFontFamily, fontSize: 11, opacity: 0.75 }}>{config.enabledPlugins.length}</span>
                 )}
               </button>
             );
           })}
         </div>
         <div style={{ padding: '10px 16px', borderTop: '0.5px solid var(--sep)', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <i
-            style={{
-              width: 8,
-              height: 8,
-              borderRadius: '50%',
-              background: HEALTH_DOT[health] ?? '#6e6e73',
-              boxShadow: `0 0 8px ${HEALTH_DOT[health] ?? '#6e6e73'}`,
-              display: 'inline-block',
-            }}
-          />
-          <span data-testid="core-health" style={{ fontFamily: monoFontFamily, fontSize: 10, color: 'var(--text3)' }}>
-            Core status: {health}
+          <StatusDot color={fillColor(footerTone)} />
+          <span data-testid="core-health" style={{ fontSize: 11, color: 'var(--text2)' }}>
+            {coreHealthLabel(health)}
           </span>
         </div>
-      </div>
+      </nav>
 
       {/* CONTENT */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'var(--content)', minWidth: 0 }}>
-        <div style={{ height: 52, flex: '0 0 52px', borderBottom: '0.5px solid var(--sep)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 22px' }}>
-          <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)' }}>{paneTitle(pane)}</span>
-          <Segmented
-            options={
-              [
-                { value: 'light', label: 'Light' },
-                { value: 'dark', label: 'Dark' },
-              ] as const
-            }
-            value={dark ? 'dark' : 'light'}
-            onChange={(v) => setDark(v === 'dark')}
-          />
+        {/* 52pt header bar, same height as the sidebar's traffic-light band;
+            draggable like a native toolbar (nothing interactive lives here).
+            Appearance follows macOS -- there's no in-app Light/Dark control. */}
+        <div
+          style={
+            {
+              height: CONTENT_HEADER_HEIGHT,
+              flex: `0 0 ${CONTENT_HEADER_HEIGHT}px`,
+              borderBottom: '0.5px solid var(--sep)',
+              display: 'flex',
+              alignItems: 'center',
+              padding: '0 28px',
+              WebkitAppRegion: 'drag',
+            } as CSSProperties
+          }
+        >
+          <h1 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: 'var(--text)' }}>{paneTitle(pane)}</h1>
         </div>
 
         <div
@@ -168,18 +180,29 @@ export function App() {
             // this wrapper to actually fill 100% of it instead of shrinking
             // to content, so it opts out of the outer scroll instead.
             overflowY: pane === 'logs' ? 'hidden' : 'auto',
-            padding: '24px 26px 32px',
+            padding: '24px 28px',
           }}
         >
-          {error && <p style={{ color: accent.red }}>{error}</p>}
-          {pane === 'overview' && <OverviewPane snapshot={snapshot} snapshotAt={snapshotAt} />}
-          {pane === 'device' && <DevicePane snapshot={snapshot} />}
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              width: '100%',
+              maxWidth: fullWidth ? undefined : 680,
+              flex: pane === 'logs' ? '1 1 auto' : '0 0 auto',
+              minHeight: 0,
+            }}
+          >
+          {error && <p style={{ color: textColor('red'), fontSize: 13 }}>{error}</p>}
+          {pane === 'overview' && <OverviewPane snapshot={snapshot} snapshotAt={snapshotAt} health={health} />}
+          {pane === 'device' && <DevicePane snapshot={snapshot} health={health} />}
           {pane === 'automation' && <AutomationPane snapshot={snapshot} />}
           {pane === 'logs' && <LogsPane logs={logs} />}
-          {pane === 'presence' && (!config ? <Loading /> : <PresencePane config={config} onChange={updateConfig} snapshot={snapshot} restarting={health === 'starting'} />)}
+          {pane === 'presence' && (!config ? <Loading /> : <PresencePane config={config} onChange={updateConfig} onSetWakeEnabled={setWakeEnabled} snapshot={snapshot} restarting={health === 'starting'} />)}
           {pane === 'plugins' && (!config ? <Loading /> : <PluginsPane config={config} onChange={updateConfig} snapshot={snapshot} />)}
           {pane === 'widgets' && (!config ? <Loading /> : <WidgetsPane config={config} onChange={updateConfig} restarting={health === 'starting'} />)}
           {saving && <p style={{ fontSize: 12, color: 'var(--text3)' }}>Saving…</p>}
+          </div>
         </div>
       </div>
     </div>

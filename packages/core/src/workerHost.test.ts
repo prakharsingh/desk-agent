@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
-import { WorkerHost, buildWorkerData } from './index.js';
+import { WorkerHost, buildWorkerData, isReservedCoreEventName } from './index.js';
 import type { PluginSpec, WorkerLike } from './index.js';
 
 class FakeWorker extends EventEmitter implements WorkerLike {
@@ -161,4 +161,58 @@ describe('WorkerHost', () => {
     expect(host.getStatus('system-stats')).toBe('degraded');
     expect(fake.terminated).toBe(true);
   });
+
+  describe('plugin-published event names (core-owned names are reserved)', () => {
+    async function hostWith(onEventPublish = vi.fn(), onLog = vi.fn()) {
+      let fake!: FakeWorker;
+      const host = new WorkerHost([makeSpec({ id: 'rogue' })], {
+        maxOldGenerationSizeMb: 64, maxRestarts: 5, callTimeoutMs: 1000,
+        onLog, onEventPublish, onWidgetPublish: vi.fn(),
+        createWorker: () => { fake = new FakeWorker(); return fake; },
+      });
+      await host.start();
+      return { fake, onEventPublish, onLog };
+    }
+
+    it.each([
+      'presence.wakeEnabled',
+      'presence.cameraConfig',
+      'presence.returned',
+      'screensaver.config',
+      'sensor.face_visible',
+      'sensor.camera_state',
+      'display.sleep',
+      'person_present',
+      'automation.override',
+    ])('drops a plugin publishEvent for reserved %s and logs a warning', async (eventName) => {
+      const { fake, onEventPublish, onLog } = await hostWith();
+      fake.emit('message', { kind: 'publishEvent', eventName, data: { enabled: false } });
+      expect(onEventPublish).not.toHaveBeenCalled();
+      expect(onLog).toHaveBeenCalledWith('rogue', 'warn', expect.stringContaining(eventName));
+    });
+
+    it('still forwards a non-reserved plugin event', async () => {
+      const { fake, onEventPublish } = await hostWith();
+      fake.emit('message', { kind: 'publishEvent', eventName: 'weather.updated', data: { tempC: 12 } });
+      expect(onEventPublish).toHaveBeenCalledWith({ eventName: 'weather.updated', data: { tempC: 12 } });
+    });
+
+    it('drops a non-string event name instead of forwarding it', async () => {
+      const { fake, onEventPublish } = await hostWith();
+      fake.emit('message', { kind: 'publishEvent', eventName: 42, data: {} });
+      expect(onEventPublish).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('isReservedCoreEventName', () => {
+    it('reserves the core-owned prefixes and exact names, nothing else', () => {
+      for (const name of ['presence.x', 'sensor.x', 'display.x', 'screensaver.config', 'person_present', 'automation.override']) {
+        expect(isReservedCoreEventName(name)).toBe(true);
+      }
+      for (const name of ['presence', 'presencex.y', 'screensaver.other', 'weather.updated', 'system-stats.tick']) {
+        expect(isReservedCoreEventName(name)).toBe(false);
+      }
+    });
+  });
 });
+

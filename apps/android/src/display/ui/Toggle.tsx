@@ -2,7 +2,7 @@ import React from 'react';
 import { Pressable, View, StyleSheet } from 'react-native';
 import { theme } from '../theme.js';
 
-export function Toggle({ on, onToggle }: { on: boolean; onToggle?: () => void }) {
+export function Toggle({ on, onToggle, label }: { on: boolean; onToggle?: () => void; label?: string }) {
   const track = [
     styles.track,
     {
@@ -21,14 +21,14 @@ export function Toggle({ on, onToggle }: { on: boolean; onToggle?: () => void })
 
   if (!onToggle) {
     return (
-      <View style={track}>
+      <View style={track} accessible accessibilityRole="switch" accessibilityLabel={label} accessibilityState={{ checked: on, disabled: true }}>
         <View style={knob} />
       </View>
     );
   }
 
   return (
-    <Pressable onPress={onToggle} style={track}>
+    <Pressable onPress={onToggle} style={track} accessibilityRole="switch" accessibilityLabel={label} accessibilityState={{ checked: on, disabled: false }}>
       <View style={knob} />
     </Pressable>
   );

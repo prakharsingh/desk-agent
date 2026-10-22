@@ -14,6 +14,10 @@ export interface PresenceDetailProps {
   onToggleCamera: () => void;
   automationEnabled: boolean;
   onToggleAutomation?: () => void;
+  // Mac-owned Monitor wake (config.json), pushed live by core. null until the
+  // Mac has sent it; onToggleWake omitted (read-only) when unknown/offline.
+  wakeEnabled: boolean | null;
+  onToggleWake?: () => void;
   onBack: () => void;
   onSleepNow: () => void;
   onPreviewRect?: (rect: { x: number; y: number; width: number; height: number } | null) => void;
@@ -26,6 +30,8 @@ export function PresenceDetail({
   onToggleCamera,
   automationEnabled,
   onToggleAutomation,
+  wakeEnabled,
+  onToggleWake,
   onBack,
   onSleepNow,
   onPreviewRect,
@@ -87,19 +93,18 @@ export function PresenceDetail({
       <View style={styles.section}>
         <View style={styles.toggleRow}>
           <Text style={styles.toggleLabel}>Camera presence</Text>
-          <Toggle on={cameraEnabled} onToggle={onToggleCamera} />
+          <Toggle label="Camera presence" on={cameraEnabled} onToggle={onToggleCamera} />
         </View>
         <View style={styles.toggleRow}>
           <Text style={styles.toggleLabel}>Automation</Text>
-          <Toggle on={automationEnabled} onToggle={onToggleAutomation} />
+          <Toggle label="Automation" on={automationEnabled} onToggle={onToggleAutomation} />
         </View>
         <View style={styles.toggleRow}>
           <View>
             <Text style={styles.toggleLabel}>Monitor wake</Text>
-            <Text style={styles.readOnlyCaption}>configured on Mac</Text>
+            <Text style={styles.readOnlyCaption}>{wakeEnabled === null ? 'waiting for Mac…' : 'synced with Mac'}</Text>
           </View>
-          {/* Read-only: no onToggle prop passed -- this setting is Mac-config-only. */}
-          <Toggle on={false} />
+          <Toggle label="Monitor wake" on={wakeEnabled ?? false} onToggle={wakeEnabled === null ? undefined : onToggleWake} />
         </View>
       </View>
 
