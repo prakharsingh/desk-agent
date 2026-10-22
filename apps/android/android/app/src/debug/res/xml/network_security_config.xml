@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug-only override of src/main/res/xml/network_security_config.xml.
+  Debug builds load the JS bundle from Metro, which may be reached over a LAN
+  IP (not just localhost via adb reverse), so keep cleartext open here exactly
+  as the RN gradle plugin's usesCleartextTraffic="true" did before the
+  network security config existed. Release builds use the strict main config.
+-->
+<network-security-config xmlns:tools="http://schemas.android.com/tools">
+    <!-- Debug-only: cleartext everywhere so Metro is reachable over LAN. -->
+    <base-config cleartextTrafficPermitted="true" tools:ignore="InsecureBaseConfiguration" />
+</network-security-config>

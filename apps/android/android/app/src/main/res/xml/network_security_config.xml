@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The app talks to the Mac over `adb reverse` at ws://localhost:8787 (see
+  apps/android/src/App.tsx). The React Native gradle plugin injects
+  usesCleartextTraffic="false" into release builds, which silently blocks that
+  WebSocket. Permit cleartext ONLY for the loopback host; everything else stays
+  HTTPS-only. On API 24+ this config takes precedence over usesCleartextTraffic.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+    </domain-config>
+</network-security-config>
