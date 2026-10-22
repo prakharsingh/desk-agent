@@ -1,11 +1,14 @@
 import type { LogLevel } from '@desk-agent/plugin-sdk';
 
 export interface AdbRunner {
-  reverse(localPort: number, remotePort: number): Promise<void>;
+  /** Scoped to `serial` (`adb -s`) when known; null falls back to adb's default device. */
+  reverse(localPort: number, remotePort: number, serial: string | null): Promise<void>;
+  /** Hands a display session token to the phone app via `adb -s <serial> shell` stdin (never argv). Rejects on invalid values, non-zero exit, or `Error:` output. */
+  deliverDisplayToken(serial: string, sessionId: string, token: string): Promise<void>;
   launchApp(serial: string | null): Promise<void>;
   /** Human-readable device model for the Device pane card title (e.g. "OnePlus 6T"), or null if the device reports none. Optional so lightweight fakes needn't implement it -- the model then just stays null. */
   getModel?(serial: string): Promise<string | null>;
-  trackDevices(onEvent: (event: { type: 'attach' | 'detach'; serial: string }) => void): { stop: () => void };
+  trackDevices(onEvent: (event: { type: 'attach' | 'detach' | 'unauthorized'; serial: string }) => void): { stop: () => void };
 }
 
 export type TunnelStatus = 'idle' | 'reissued' | 'failed';
@@ -15,6 +18,8 @@ export interface TunnelStatusSnapshot {
   serial: string | null;
   /** Device model name, resolved once per attach; null until known, and cleared on detach. */
   model: string | null;
+  /** Serial of a connected device that has not authorized this Mac (RSA prompt pending); cleared on attach/detach of that serial. */
+  unauthorizedSerial: string | null;
   tunnelStatus: TunnelStatus;
   lastReissueAt: number | null;
   launchAppOnDock: boolean;
@@ -26,6 +31,7 @@ export class TunnelSupervisor {
   private tracker?: { stop: () => void };
   private serial: string | null = null;
   private model: string | null = null;
+  private unauthorizedSerial: string | null = null;
   private tunnelStatus: TunnelStatus = 'idle';
   private lastReissueAt: number | null = null;
   private appLaunchStatus: AppLaunchStatus = 'idle';
@@ -40,6 +46,14 @@ export class TunnelSupervisor {
 
   start() {
     this.tracker = this.adb.trackDevices((event) => {
+      if (event.type === 'unauthorized') {
+        this.unauthorizedSerial = event.serial;
+        return;
+      }
+      if (this.unauthorizedSerial === event.serial) this.unauthorizedSerial = null;
+      // A detach for a phone that is not the attached one (e.g. an
+      // unauthorized-only serial leaving) must not disturb the attached phone.
+      if (event.type === 'detach' && this.serial !== event.serial) return;
       if (event.type === 'attach') {
         this.serial = event.serial;
         this.model = null;
@@ -82,6 +96,7 @@ export class TunnelSupervisor {
     return {
       serial: this.serial,
       model: this.model,
+      unauthorizedSerial: this.unauthorizedSerial,
       tunnelStatus: this.tunnelStatus,
       lastReissueAt: this.lastReissueAt,
       launchAppOnDock: this.launchAppOnDock,
@@ -98,7 +113,7 @@ export class TunnelSupervisor {
   /** Public so a user-initiated "Re-issue" action (Device pane) can call it directly, not just the internal on-attach trigger. */
   async reissue() {
     try {
-      await this.adb.reverse(this.port, this.port);
+      await this.adb.reverse(this.port, this.port, this.serial);
       this.tunnelStatus = 'reissued';
       this.lastReissueAt = Date.now();
       this.onLog('info', `adb reverse tcp:${this.port} tcp:${this.port} re-issued`);

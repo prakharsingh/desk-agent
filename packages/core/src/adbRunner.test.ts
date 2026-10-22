@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
-import { createRealAdbRunner } from './adbRunner.js';
+import { createRealAdbRunner, parseDeviceList } from './adbRunner.js';
 
 // spawn passes through to the real implementation unless a test installs a
 // fake child (trackDevices framing tests), so the real-binary tests below are
@@ -123,6 +123,92 @@ describe('createRealAdbRunner', () => {
     it('rejects when adb fails (TunnelSupervisor handles it non-fatally)', async () => {
       const { adbPath } = stubAdb('', 1);
       await expect(createRealAdbRunner(vi.fn(), adbPath).getModel!('s')).rejects.toThrow();
+    });
+  });
+
+  describe('reverse and deliverDisplayToken (stub adb recording argv + stdin)', () => {
+    function stubAdb(stdout = '', exitCode = 0) {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'desk-agent-adb-rev-stub-'));
+      const adbPath = path.join(dir, 'adb');
+      const argsFile = path.join(dir, 'args');
+      const stdinFile = path.join(dir, 'stdin');
+      fs.writeFileSync(adbPath, `#!/bin/sh\nprintf '%s\\n' "$@" > "${argsFile}"\nfor a in "$@"; do [ "$a" = shell ] && cat > "${stdinFile}"; done\nprintf '%s' '${stdout}'\nexit ${exitCode}\n`);
+      fs.chmodSync(adbPath, 0o755);
+      const args = () => fs.readFileSync(argsFile, 'utf8').trim().split('\n');
+      const stdin = () => fs.readFileSync(stdinFile, 'utf8');
+      return { adbPath, argsFile, args, stdin };
+    }
+
+    it('scopes reverse to the serial', async () => {
+      const { adbPath, args } = stubAdb();
+      await createRealAdbRunner(vi.fn(), adbPath).reverse(8788, 8788, 'phone1');
+      expect(args()).toEqual(['-s', 'phone1', 'reverse', 'tcp:8788', 'tcp:8788']);
+    });
+
+    it('omits -s for reverse when no serial is known', async () => {
+      const { adbPath, args } = stubAdb();
+      await createRealAdbRunner(vi.fn(), adbPath).reverse(8787, 8787, null);
+      expect(args()).toEqual(['reverse', 'tcp:8787', 'tcp:8787']);
+    });
+
+    it('delivers the token on stdin, never in argv', async () => {
+      const { adbPath, args, stdin } = stubAdb();
+      await createRealAdbRunner(vi.fn(), adbPath).deliverDisplayToken('phone1', 's-1', 'abc123');
+      expect(args()).toEqual(['-s', 'phone1', 'shell']);
+      expect(args().join(' ')).not.toContain('abc123');
+      expect(stdin()).toBe('am start -n com.deskagentapp/.MainActivity --es displayToken abc123 --es displaySessionId s-1\nexit\n');
+    });
+
+    it('refuses values with shell metacharacters without spawning', async () => {
+      const { adbPath, argsFile } = stubAdb();
+      const runner = createRealAdbRunner(vi.fn(), adbPath);
+      await expect(runner.deliverDisplayToken('phone1', 's;rm', 'x')).rejects.toThrow(/invalid/);
+      await expect(runner.deliverDisplayToken('phone1', 's-1', 'a b')).rejects.toThrow(/invalid/);
+      await expect(runner.deliverDisplayToken('phone1', 's-1', '')).rejects.toThrow(/invalid/);
+      expect(fs.existsSync(argsFile)).toBe(false);
+    });
+
+    it('rejects when am reports an Error (exit 0)', async () => {
+      const { adbPath } = stubAdb('Error: Activity class does not exist');
+      await expect(createRealAdbRunner(vi.fn(), adbPath).deliverDisplayToken('phone1', 's-1', 'abc')).rejects.toThrow(/Error:/);
+    });
+
+    it('rejects on a non-zero exit', async () => {
+      const { adbPath } = stubAdb('', 1);
+      await expect(createRealAdbRunner(vi.fn(), adbPath).deliverDisplayToken('phone1', 's-1', 'abc')).rejects.toThrow();
+    });
+
+    it('redacts the token and session id from the rejection message', async () => {
+      const { adbPath } = stubAdb('Error: bad --es displayToken tok123 sess-9');
+      const err = await createRealAdbRunner(vi.fn(), adbPath).deliverDisplayToken('phone1', 'sess-9', 'tok123').then(() => new Error('resolved'), (e: Error) => e);
+      expect(err.message).toMatch(/Error:/);
+      expect(err.message).not.toContain('tok123');
+      expect(err.message).not.toContain('sess-9');
+    });
+
+    it('kills adb and rejects when the shell never exits (timeout)', async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'desk-agent-adb-hang-'));
+      const adbPath = path.join(dir, 'adb');
+      fs.writeFileSync(adbPath, '#!/bin/sh\nsleep 30\n');
+      fs.chmodSync(adbPath, 0o755);
+      const runner = createRealAdbRunner(vi.fn(), adbPath, { deliverTimeoutMs: 150 });
+      const t0 = Date.now();
+      await expect(runner.deliverDisplayToken('phone1', 's-1', 'abc')).rejects.toThrow(/timed out/);
+      expect(Date.now() - t0).toBeLessThan(3000);
+    });
+
+    it('rejects when adb is missing', async () => {
+      const runner = createRealAdbRunner(vi.fn(), '/nonexistent/definitely-not-adb');
+      await expect(runner.deliverDisplayToken('phone1', 's-1', 'abc')).rejects.toThrow();
+    });
+  });
+
+  describe('parseDeviceList', () => {
+    it('reports unauthorized devices', () => {
+      expect(parseDeviceList('abc\tunauthorized\nxyz\tdevice\n')).toEqual([{ serial: 'abc', state: 'unauthorized' }, { serial: 'xyz', state: 'device' }]);
+    });
+    it('skips blank and malformed lines and trims CRLF', () => {
+      expect(parseDeviceList('\nlonely\nabc\tdevice\r\n')).toEqual([{ serial: 'abc', state: 'device' }]);
     });
   });
 
@@ -333,9 +419,41 @@ describe('createRealAdbRunner', () => {
       ]);
     });
 
-    it('does not attach an unauthorized device', () => {
-      const payload = '78f2af2a\tunauthorized\n';
-      expect(track([payload.length.toString(16).padStart(4, '0') + payload])).toEqual([]);
+    it('emits unauthorized (not attach) once per serial, then attach when it authorizes', () => {
+      const f = (p: string) => p.length.toString(16).padStart(4, '0') + p;
+      const u = '78f2af2a\tunauthorized\n';
+      const d = '78f2af2a\tdevice\n';
+      expect(track([f(u), f(u), f(d)])).toEqual([
+        { type: 'unauthorized', serial: '78f2af2a' },
+        { type: 'attach', serial: '78f2af2a' },
+      ]);
+    });
+
+    it('re-emits unauthorized after the serial leaves and returns unauthorized', () => {
+      const f = (p: string) => p.length.toString(16).padStart(4, '0') + p;
+      const u = '78f2af2a\tunauthorized\n';
+      expect(track([f(u), '0000', f(u)])).toEqual([
+        { type: 'unauthorized', serial: '78f2af2a' },
+        { type: 'detach', serial: '78f2af2a' },
+        { type: 'unauthorized', serial: '78f2af2a' },
+      ]);
+    });
+
+    it('detaches a serial that was only ever unauthorized when it disappears', () => {
+      const u = '78f2af2a\tunauthorized\n';
+      expect(track([u.length.toString(16).padStart(4, '0') + u, '0000'])).toEqual([
+        { type: 'unauthorized', serial: '78f2af2a' },
+        { type: 'detach', serial: '78f2af2a' },
+      ]);
+    });
+
+    it('detaches an attached device that turns unauthorized', () => {
+      const f = (p: string) => p.length.toString(16).padStart(4, '0') + p;
+      expect(track([f('a\tdevice\n'), f('a\tunauthorized\n')])).toEqual([
+        { type: 'attach', serial: 'a' },
+        { type: 'detach', serial: 'a' },
+        { type: 'unauthorized', serial: 'a' },
+      ]);
     });
   });
 });

@@ -39,6 +39,7 @@ function buildBaseDeps() {
         launchAppOnDock: true,
         appLaunchStatus: 'idle' as const,
         lastAppLaunchAt: null as number | null,
+        unauthorizedSerial: null as string | null,
       })),
       reissue: vi.fn(async () => {}),
       launchApp: vi.fn(async () => {}),
@@ -91,6 +92,7 @@ describe('ControlChannel', () => {
       launchAppOnDock: true,
       appLaunchStatus: 'idle',
       lastAppLaunchAt: null,
+      unauthorizedSerial: null,
     });
     expect(snap.clients).toEqual({ connected: 0, lastHelloAt: null });
     expect(snap.presence).toEqual({ state: 'present', since: 1000 });

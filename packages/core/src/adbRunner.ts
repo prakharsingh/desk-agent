@@ -40,9 +40,25 @@ export function pickModelName(output: string): string | null {
 const MAX_TRACK_FRAME_BYTES = 16 * 1024;
 const HEX_PREFIX = /^[0-9a-fA-F]{4}$/;
 
+/** Pure: one `<serial>\t<state>` entry per line of a track-devices payload; blank/malformed lines are skipped. */
+export function parseDeviceList(payload: string): Array<{ serial: string; state: string }> {
+  const out: Array<{ serial: string; state: string }> = [];
+  for (const line of payload.split('\n')) {
+    const [serial, state] = line.trim().split('\t');
+    if (serial && state) out.push({ serial, state });
+  }
+  return out;
+}
+
+// Serial and token/session values are interpolated into a shell command line
+// sent over stdin, so they are restricted to a metacharacter-free alphabet.
+const SAFE_VALUE = /^[A-Za-z0-9-]{1,128}$/;
+
 export interface RealAdbRunnerOptions {
   /** Delay before respawning track-devices after a framing desync (tests shrink it). */
   trackRespawnDelayMs?: number;
+  /** Deadline for deliverDisplayToken's `adb shell` (default 10000; tests shrink it). */
+  deliverTimeoutMs?: number;
 }
 
 export function createRealAdbRunner(
@@ -51,9 +67,44 @@ export function createRealAdbRunner(
   opts: RealAdbRunnerOptions = {},
 ): AdbRunner {
   const trackRespawnDelayMs = opts.trackRespawnDelayMs ?? 1000;
+  const deliverTimeoutMs = opts.deliverTimeoutMs ?? 10_000;
   return {
-    async reverse(localPort, remotePort) {
-      await execFileAsync(adbPath, ['reverse', `tcp:${localPort}`, `tcp:${remotePort}`]);
+    async reverse(localPort, remotePort, serial) {
+      const serialArgs = serial ? ['-s', serial] : [];
+      await execFileAsync(adbPath, [...serialArgs, 'reverse', `tcp:${localPort}`, `tcp:${remotePort}`]);
+    },
+    // The token goes over stdin to `adb shell`, never argv (visible in `ps`).
+    async deliverDisplayToken(serial, sessionId, token) {
+      if (!SAFE_VALUE.test(sessionId) || !SAFE_VALUE.test(token)) {
+        throw new Error('invalid display session id or token');
+      }
+      await new Promise<void>((resolve, reject) => {
+        const child = spawn(adbPath, ['-s', serial, 'shell']);
+        let output = '';
+        let settled = false;
+        const redact = (text: string) => text.split(token).join('***').split(sessionId).join('***');
+        const finish = (err?: Error) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          if (err) reject(err); else resolve();
+        };
+        const timer = setTimeout(() => {
+          child.kill();
+          finish(new Error(`adb shell timed out after ${deliverTimeoutMs}ms delivering the display token`));
+        }, deliverTimeoutMs);
+        child.stdout?.on('data', (c: Buffer) => { output += c.toString('utf8'); });
+        child.stderr?.on('data', (c: Buffer) => { output += c.toString('utf8'); });
+        child.on('error', (err) => finish(err));
+        child.on('close', (code) => {
+          if (code !== 0) finish(new Error(`adb shell exited with code ${code}`));
+          else if (output.includes('Error:')) finish(new Error(`am start failed: ${redact(output.trim())}`));
+          else finish();
+        });
+        // EPIPE if adb dies early surfaces via 'close'/'error' above.
+        child.stdin?.on('error', () => {});
+        child.stdin?.end(`am start -n ${APP_COMPONENT} --es displayToken ${token} --es displaySessionId ${sessionId}\nexit\n`);
+      });
     },
     async launchApp(serial) {
       const serialArgs = serial ? ['-s', serial] : [];
@@ -68,22 +119,36 @@ export function createRealAdbRunner(
       // current device list, which reconciles against this (no duplicate
       // attach for a device that stayed, a detach for one that vanished).
       let previouslySeen = new Set<string>();
+      let previouslyUnauthorized = new Set<string>();
       let child: ReturnType<typeof spawn> | null = null;
       let respawnTimer: ReturnType<typeof setTimeout> | undefined;
       let stopped = false;
 
       const handlePayload = (payload: string) => {
         const seenNow = new Set<string>();
-        for (const line of payload.split('\n')) {
-          const [serial, state] = line.trim().split('\t');
-          if (!serial || state !== 'device') continue;
+        const unauthorizedNow = new Set<string>();
+        for (const { serial, state } of parseDeviceList(payload)) {
+          if (state === 'unauthorized') {
+            unauthorizedNow.add(serial);
+            continue;
+          }
+          if (state !== 'device') continue;
           seenNow.add(serial);
           if (!previouslySeen.has(serial)) onEvent({ type: 'attach', serial });
         }
         for (const serial of previouslySeen) {
           if (!seenNow.has(serial)) onEvent({ type: 'detach', serial });
         }
+        // An unauthorized-only serial that vanished must still be reported
+        // gone, or consumers keep showing "tap Allow" for a phone that left.
+        for (const serial of previouslyUnauthorized) {
+          if (!unauthorizedNow.has(serial) && !seenNow.has(serial)) onEvent({ type: 'detach', serial });
+        }
+        for (const serial of unauthorizedNow) {
+          if (!previouslyUnauthorized.has(serial)) onEvent({ type: 'unauthorized', serial });
+        }
         previouslySeen = seenNow;
+        previouslyUnauthorized = unauthorizedNow;
       };
 
       const start = () => {

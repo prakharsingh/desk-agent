@@ -2,14 +2,16 @@ import { describe, it, expect, vi } from 'vitest';
 import { TunnelSupervisor } from './index.js';
 import type { AdbRunner } from './index.js';
 
-function makeFakeAdb(): AdbRunner & { emitAttach: () => void; emitDetach: () => void } {
-  let handler: ((event: { type: 'attach' | 'detach'; serial: string }) => void) | undefined;
+function makeFakeAdb(): AdbRunner & { emitAttach: () => void; emitDetach: () => void; emitUnauthorized: () => void } {
+  let handler: ((event: { type: 'attach' | 'detach' | 'unauthorized'; serial: string }) => void) | undefined;
   return {
     reverse: vi.fn(async () => {}),
+    deliverDisplayToken: vi.fn(async () => {}),
     launchApp: vi.fn(async () => {}),
     trackDevices: (onEvent) => { handler = onEvent; return { stop: vi.fn() }; },
     emitAttach: () => handler?.({ type: 'attach', serial: 'phone1' }),
     emitDetach: () => handler?.({ type: 'detach', serial: 'phone1' }),
+    emitUnauthorized: () => handler?.({ type: 'unauthorized', serial: 'phone1' }),
   };
 }
 
@@ -19,7 +21,7 @@ describe('TunnelSupervisor', () => {
     const supervisor = new TunnelSupervisor(adb, 8787, vi.fn());
     supervisor.start();
     adb.emitAttach();
-    expect(adb.reverse).toHaveBeenCalledWith(8787, 8787);
+    expect(adb.reverse).toHaveBeenCalledWith(8787, 8787, 'phone1');
   });
 
   it('re-issues adb reverse again after a simulated detach then re-attach', () => {
@@ -36,6 +38,7 @@ describe('TunnelSupervisor', () => {
     const onLog = vi.fn();
     const adb: AdbRunner = {
       reverse: vi.fn(async () => { throw new Error('adb not found'); }),
+      deliverDisplayToken: vi.fn(async () => {}),
       launchApp: vi.fn(async () => {}),
       trackDevices: (onEvent) => { onEvent({ type: 'attach', serial: 'p' }); return { stop: vi.fn() }; },
     };
@@ -50,6 +53,7 @@ describe('TunnelSupervisor', () => {
       expect(supervisor.getStatus()).toEqual({
         serial: null,
         model: null,
+        unauthorizedSerial: null,
         tunnelStatus: 'idle',
         lastReissueAt: null,
         launchAppOnDock: true,
@@ -83,13 +87,14 @@ describe('TunnelSupervisor', () => {
       const adb = makeFakeAdb();
       const supervisor = new TunnelSupervisor(adb, 8787, vi.fn());
       await supervisor.reissue();
-      expect(adb.reverse).toHaveBeenCalledWith(8787, 8787);
+      expect(adb.reverse).toHaveBeenCalledWith(8787, 8787, null);
       expect(supervisor.getStatus().tunnelStatus).toBe('reissued');
     });
 
     it('reports failed (with a timestamp) when adb reverse rejects', async () => {
       const adb: AdbRunner = {
         reverse: vi.fn(async () => { throw new Error('adb not found'); }),
+        deliverDisplayToken: vi.fn(async () => {}),
         launchApp: vi.fn(async () => {}),
         trackDevices: (onEvent) => { onEvent({ type: 'attach', serial: 'p' }); return { stop: vi.fn() }; },
       };
@@ -100,6 +105,49 @@ describe('TunnelSupervisor', () => {
     });
   });
 
+  describe('unauthorized device', () => {
+    it('records the unauthorized serial without issuing reverse, and clears it on attach', () => {
+      const adb = makeFakeAdb();
+      const supervisor = new TunnelSupervisor(adb, 8787, vi.fn());
+      supervisor.start();
+      adb.emitUnauthorized();
+      expect(supervisor.getStatus().unauthorizedSerial).toBe('phone1');
+      expect(adb.reverse).not.toHaveBeenCalled();
+      adb.emitAttach();
+      expect(supervisor.getStatus().unauthorizedSerial).toBeNull();
+    });
+
+    it('clears it on the detach the runner emits when that serial vanishes', () => {
+      const adb = makeFakeAdb();
+      const supervisor = new TunnelSupervisor(adb, 8787, vi.fn());
+      supervisor.start();
+      adb.emitUnauthorized();
+      adb.emitDetach();
+      expect(supervisor.getStatus().unauthorizedSerial).toBeNull();
+    });
+
+    it('an unauthorized phone B vanishing does not disturb attached phone A', async () => {
+      let handler!: (e: { type: 'attach' | 'detach' | 'unauthorized'; serial: string }) => void;
+      const adb: AdbRunner = {
+        reverse: vi.fn(async () => {}),
+        deliverDisplayToken: vi.fn(async () => {}),
+        launchApp: vi.fn(async () => {}),
+        trackDevices: (onEvent) => { handler = onEvent; return { stop: vi.fn() }; },
+      };
+      const supervisor = new TunnelSupervisor(adb, 8787, vi.fn());
+      supervisor.start();
+      handler({ type: 'attach', serial: 'A' });
+      await vi.waitFor(() => expect(supervisor.getStatus().tunnelStatus).toBe('reissued'));
+      handler({ type: 'unauthorized', serial: 'B' });
+      expect(supervisor.getStatus().unauthorizedSerial).toBe('B');
+      handler({ type: 'detach', serial: 'B' });
+      const st = supervisor.getStatus();
+      expect(st.unauthorizedSerial).toBeNull();
+      expect(st.serial).toBe('A');
+      expect(st.tunnelStatus).toBe('reissued');
+    });
+  });
+
   describe('launching the phone app on dock (backlog: auto-launch on USB dock)', () => {
     it('launches the app with the attached serial after re-issuing the tunnel', async () => {
       const adb = makeFakeAdb();
@@ -107,7 +155,7 @@ describe('TunnelSupervisor', () => {
       supervisor.start();
       adb.emitAttach();
       await vi.waitFor(() => expect(adb.launchApp).toHaveBeenCalledWith('phone1'));
-      expect(adb.reverse).toHaveBeenCalledWith(8787, 8787);
+      expect(adb.reverse).toHaveBeenCalledWith(8787, 8787, 'phone1');
     });
 
     it('does not launch the app on attach when launchAppOnDock has been disabled', async () => {
@@ -140,6 +188,7 @@ describe('TunnelSupervisor', () => {
       const onLog = vi.fn();
       const adb: AdbRunner = {
         reverse: vi.fn(async () => {}),
+        deliverDisplayToken: vi.fn(async () => {}),
         launchApp: vi.fn(async () => { throw new Error('app not installed'); }),
         trackDevices: (onEvent) => { onEvent({ type: 'attach', serial: 'p' }); return { stop: vi.fn() }; },
       };
@@ -157,6 +206,7 @@ describe('TunnelSupervisor', () => {
       const reversePromise = new Promise<void>((resolve) => { resolveReverse = resolve; });
       const adb: AdbRunner = {
         reverse: vi.fn(async () => { await reversePromise; }),
+        deliverDisplayToken: vi.fn(async () => {}),
         launchApp: vi.fn(async () => {}),
         trackDevices: (onEvent) => { onEvent({ type: 'attach', serial: 'p' }); return { stop: vi.fn() }; },
       };
@@ -181,9 +231,10 @@ describe('TunnelSupervisor', () => {
   });
   describe('device model name (Device pane card title)', () => {
     function fakeAdbWithModel(getModel: AdbRunner['getModel']) {
-      let handler: ((event: { type: 'attach' | 'detach'; serial: string }) => void) | undefined;
+      let handler: ((event: { type: 'attach' | 'detach' | 'unauthorized'; serial: string }) => void) | undefined;
       const adb: AdbRunner = {
         reverse: vi.fn(async () => {}),
+        deliverDisplayToken: vi.fn(async () => {}),
         launchApp: vi.fn(async () => {}),
         getModel,
         trackDevices: (onEvent) => { handler = onEvent; return { stop: vi.fn() }; },

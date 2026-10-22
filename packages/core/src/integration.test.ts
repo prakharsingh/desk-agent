@@ -98,12 +98,12 @@ describe('full integration loop', () => {
     }, vi.fn());
 
     eventBus = new EventBus();
-    const adb: AdbRunner = { reverse: vi.fn(async () => {}), launchApp: vi.fn(async () => {}), trackDevices: (onEvent) => { onEvent({ type: 'attach', serial: 'p1' }); return { stop: vi.fn() }; } };
+    const adb: AdbRunner = { reverse: vi.fn(async () => {}), deliverDisplayToken: vi.fn(async () => {}), launchApp: vi.fn(async () => {}), trackDevices: (onEvent) => { onEvent({ type: 'attach', serial: 'p1' }); return { stop: vi.fn() }; } };
     const tunnelSupervisor = new TunnelSupervisor(adb, 8787, vi.fn());
 
     boot({ workerHost, gateway, tunnelSupervisor, eventBus, automationEngine });
 
-    expect(adb.reverse).toHaveBeenCalledWith(8787, 8787);
+    expect(adb.reverse).toHaveBeenCalledWith(8787, 8787, 'p1');
 
     const client = new FakeWsClient();
     wsServer.emit('connection', client);
@@ -171,6 +171,7 @@ describe('full integration loop', () => {
     let handler: ((event: { type: 'attach' | 'detach'; serial: string }) => void) | undefined;
     const adb: AdbRunner = {
       reverse: vi.fn(async () => {}),
+      deliverDisplayToken: vi.fn(async () => {}),
       launchApp: vi.fn(async () => {}),
       trackDevices: (onEvent) => { handler = onEvent; return { stop: vi.fn() }; },
     };
