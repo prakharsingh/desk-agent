@@ -10,6 +10,11 @@ extraction of H.264 parameter sets from the sample's format description. The sur
 pipeline (ScreenCaptureKit source, flow-control gating, Annex-B conversion, error mapping)
 was written for Desk Agent.
 
+Portions of `apps/android/android/app/src/main/java/com/deskagentapp/display/HardwareDecoder.kt`
+are adapted from SideScreen's `VideoDecoder.kt`: the MediaCodec configure-retry pattern
+(low-latency format first, then progressively simpler formats when configure fails). The
+codec selection, Annex-B input handling, vendor keys and callbacks were written for Desk Agent.
+
 ```
 MIT License
 
