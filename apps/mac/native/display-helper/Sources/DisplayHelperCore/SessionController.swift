@@ -62,10 +62,17 @@ public final class SessionController {
     public static let surfaceRange = 320...8192
 
     public private(set) var endedReason: EndReason?
-    /// Wired in Task 4.3. Phase 1 ignores `input` messages and never invokes this.
+    /// Authenticated `input` messages, only when PostEvent access was granted at hello. Never called
+    /// once the session has started ending.
     public var onInput: ((InputEvent) -> Void)?
-    /// Wired in Task 4.3. Phase 1 ignores `setTrackpad` messages and never invokes this.
+    /// `setTrackpad` from the phone, after the captured cursor visibility was updated.
     public var onTrackpadChanged: ((Bool) -> Void)?
+    /// Invoked exactly once per session, from every end path, BEFORE the display is destroyed: the
+    /// owner releases any held mouse button while the display (and its coordinates) still exist.
+    public var onTeardown: (() -> Void)?
+    /// The display's global bounds (points) changed: after the hello implicit resize, after every
+    /// applied resize and from `displayReconfigured()`. Input mapping must follow it.
+    public var onBoundsChanged: ((CGRect) -> Void)?
 
     private let start: StartCommand
     private let backend: DisplayBackend
@@ -103,6 +110,8 @@ public final class SessionController {
     private var surface = (w: 0, h: 0)
     private var decoderMax = (w: 0, h: 0)
     private var showsCursor = false
+    /// `preflightPostEvent()` at hello; `input` is dropped while false.
+    private var inputEnabled = false
     private var lastKeepaliveAt: TimeInterval = 0
     private var statsWindowStart: TimeInterval = 0
     private var framesInWindow = 0
@@ -189,6 +198,8 @@ public final class SessionController {
         guard endedReason == nil else { return }
         endedReason = reason
         deadline = nil
+        // Before the display goes away (and before any later input can arrive: `endedReason` is set).
+        onTeardown?()
         if let authed {
             send(.end(reason: reason.rawValue), to: authed)
             authed.connection.close()
@@ -312,10 +323,11 @@ public final class SessionController {
         lastKeepaliveAt = t
         statsWindowStart = t
         decoderMax = (hello.maxW, hello.maxH)
-        showsCursor = hello.trackpad
+        showsCursor = hello.trackpad   // initial captured-cursor visibility (applied by startCapture)
+        inputEnabled = backend.preflightPostEvent()
 
         sink.emit(.connected)
-        send(.helloAck(inputEnabled: backend.preflightPostEvent()), to: conn)
+        send(.helloAck(inputEnabled: inputEnabled), to: conn)
 
         var modes: [ModeSpec]?
         if hello.surfaceW != start.surfaceW || hello.surfaceH != start.surfaceH {
@@ -377,15 +389,19 @@ public final class SessionController {
             terminate(.phoneBye)
         case .hello:
             logOnce("hello", level: "warn", "duplicate hello ignored")
-        case .resize, .setTrackpad, .input:
-            // Phase 1: no handler until Tasks 4.3 / 4.5.
-            let name: String
-            switch message {
-            case .resize: name = "resize"
-            case .setTrackpad: name = "setTrackpad"
-            default: name = "input"
+        case .setTrackpad(let on):
+            showsCursor = on   // kept for every later capture (re)start
+            backend.setShowsCursor(on)
+            onTrackpadChanged?(on)
+        case .input(let event):
+            // Never log per event (volume); once is enough to explain a dead touch screen.
+            guard inputEnabled else {
+                return logOnce("input-disabled", level: "warn", "input dropped: PostEvent access is missing")
             }
-            logOnce(name, level: "info", "\(name) ignored (not supported yet)")
+            onInput?(event)
+        case .resize:
+            // No handler until Task 4.5.
+            logOnce("resize", level: "info", "resize ignored (not supported yet)")
         case .unknown(let type):
             logOnce(type, level: "warn", "unknown message type ignored: \(type)")
         }
@@ -412,6 +428,7 @@ public final class SessionController {
                 self.activating = false
                 switch result {
                 case .success:
+                    self.onBoundsChanged?(self.backend.displayBounds())
                     if !self.paused { self.startCapture() }
                 case .failure(let error):
                     self.log("error", "capture start failed: \(error)")
@@ -423,6 +440,17 @@ public final class SessionController {
         // The in-flight activation starts capture when it lands.
         guard !activating else { return }
         startCapture()
+    }
+
+    /// The display was reconfigured (the user picked another scale in Displays, or moved it in the
+    /// arrangement, which moves its origin). Call on the session queue. Always reports the new bounds;
+    /// a running capture restarts at the same stream size with an IDR. Paused, mid-activation (that
+    /// completion starts capture) or before hello: bounds only.
+    public func displayReconfigured() {
+        guard endedReason == nil, displayCreated else { return }
+        onBoundsChanged?(backend.displayBounds())
+        guard capturing else { return }
+        restartCapture(surfaceW: surface.w, surfaceH: surface.h, modes: nil)
     }
 
     private func startCapture() {

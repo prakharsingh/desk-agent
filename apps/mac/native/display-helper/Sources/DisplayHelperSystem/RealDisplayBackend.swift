@@ -9,9 +9,16 @@ import Foundation
 /// and `waitUntilCapturable` completions arrive on that same queue.
 public final class RealDisplayBackend: DisplayBackend {
     public let encoder: CaptureEncoder
+    /// Our display was reconfigured (scale change, moved in the arrangement). Delivered on the session
+    /// queue, coalesced; wire it to `SessionController.displayReconfigured()`.
+    public var onReconfigured: (() -> Void)?
+    /// Helper log lines `(level, message)`, delivered on the session queue (main → `HelperEvent.log`).
+    public var onLog: ((String, String) -> Void)?
     private let queue: DispatchQueue
     private var display: VirtualDisplayController?
     private let screenCapture: ScreenCaptureAccess
+    private var reconfiguration: ReconfigurationObserver?
+    private var reconfigurationToken: Unmanaged<ReconfigurationObserver>?
 
     public init(queue: DispatchQueue, screenCapture: ScreenCaptureAccess = .system) {
         self.queue = queue
@@ -31,6 +38,7 @@ public final class RealDisplayBackend: DisplayBackend {
         let vd = try VirtualDisplayController(maxPixels: maxPixels, sizeInMillimeters: sizeInMillimeters,
                                               serialNum: serialNum, vendorId: vendorId, productId: productId)
         display = vd
+        watchReconfiguration(of: vd.displayId)
         return vd.displayId
     }
 
@@ -61,7 +69,108 @@ public final class RealDisplayBackend: DisplayBackend {
     /// Idempotent: stops capture first so nothing keeps streaming a display that is going away.
     public func destroyDisplay() {
         encoder.stop()
+        unwatchReconfiguration()   // before destroy: its own remove callbacks must not reach the session
         display?.destroy()
         display = nil
+    }
+
+    deinit { unwatchReconfiguration() }
+
+    // MARK: - Display reconfiguration
+
+    private static let reconfigurationCallback: CGDisplayReconfigurationCallBack = { display, flags, userInfo in
+        guard let userInfo else { return }
+        Unmanaged<ReconfigurationObserver>.fromOpaque(userInfo).takeUnretainedValue()
+            .notify(display: display, flags: flags)
+    }
+
+    private func watchReconfiguration(of displayId: UInt32) {
+        unwatchReconfiguration()
+        let observer = ReconfigurationObserver(displayId: displayId, queue: queue, onFirstCallback: { [weak self] onMain in
+            // Hardware check for the release-on-main reasoning in `unwatchReconfiguration`.
+            self?.onLog?("info", "display reconfiguration callback runs on the main thread: \(onMain)")
+        }) { [weak self] in
+            guard let self, self.display != nil else { return }
+            self.onReconfigured?()
+        }
+        // Retained for the registration's lifetime; released in `unwatchReconfiguration`.
+        let token = Unmanaged.passRetained(observer)
+        let err = CGDisplayRegisterReconfigurationCallback(Self.reconfigurationCallback, token.toOpaque())
+        guard err == .success else {
+            token.release()
+            return Stderr.diag("display reconfiguration callback not registered (\(err.rawValue)); input bounds may go stale")
+        }
+        reconfiguration = observer
+        reconfigurationToken = token
+    }
+
+    private func unwatchReconfiguration() {
+        guard let token = reconfigurationToken else { return }
+        reconfiguration?.cancel()
+        CGDisplayRemoveReconfigurationCallback(Self.reconfigurationCallback, token.toOpaque())
+        reconfiguration = nil
+        reconfigurationToken = nil
+        // Callbacks are delivered on the main run loop: release there, after any callback already
+        // running has returned. `cancel()` already made a late one a no-op.
+        DispatchQueue.main.async { token.release() }
+    }
+}
+
+/// Filters and coalesces `CGDisplayRegisterReconfigurationCallback` notifications for one display.
+///
+/// `notify` may be called on any thread. Relevant notifications (our display id, not the
+/// `beginConfigurationFlag` phase) schedule ONE `handler` call on `queue` after `window`; any further
+/// ones before it runs are absorbed, so a burst never stacks capture restarts. The very first
+/// notification (relevant or not) reports, once and on `queue`, whether it arrived on the main thread.
+final class ReconfigurationObserver {
+    let displayId: UInt32
+    private let queue: DispatchQueue
+    private let window: TimeInterval
+    private let lock = NSLock()
+    private var handler: (() -> Void)?
+    private var scheduled = false
+    private var onFirstCallback: ((Bool) -> Void)?
+
+    init(displayId: UInt32, queue: DispatchQueue, window: TimeInterval = 0.1,
+         onFirstCallback: ((Bool) -> Void)? = nil, handler: @escaping () -> Void) {
+        self.displayId = displayId
+        self.queue = queue
+        self.window = window
+        self.onFirstCallback = onFirstCallback
+        self.handler = handler
+    }
+
+    static func isRelevant(display: CGDirectDisplayID, flags: CGDisplayChangeSummaryFlags, ours: UInt32) -> Bool {
+        display == ours && !flags.contains(.beginConfigurationFlag)
+    }
+
+    func notify(display: CGDirectDisplayID, flags: CGDisplayChangeSummaryFlags) {
+        let onMain = Thread.isMainThread
+        lock.lock()
+        defer { lock.unlock() }
+        if let first = onFirstCallback {
+            onFirstCallback = nil
+            queue.async { first(onMain) }
+        }
+        guard Self.isRelevant(display: display, flags: flags, ours: displayId) else { return }
+        guard handler != nil, !scheduled else { return }
+        scheduled = true
+        queue.asyncAfter(deadline: .now() + window) { [weak self] in self?.fire() }
+    }
+
+    /// No handler call after this returns (a scheduled one becomes a no-op), and no first-callback report.
+    func cancel() {
+        lock.lock()
+        handler = nil
+        onFirstCallback = nil
+        lock.unlock()
+    }
+
+    private func fire() {
+        lock.lock()
+        scheduled = false
+        let handler = self.handler
+        lock.unlock()
+        handler?()
     }
 }

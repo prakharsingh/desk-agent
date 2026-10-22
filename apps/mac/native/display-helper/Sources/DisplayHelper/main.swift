@@ -44,6 +44,10 @@ final class ServeMode {
     private var server: VideoServer?
     private var tickTimer: DispatchSourceTimer?
     private var exiting = false
+    private let injector = InputInjector()
+    /// Created on first use from the live display bounds (before `ready` the display does not exist
+    /// yet, so its bounds would be empty); kept current by `onBoundsChanged`. Session queue only.
+    private var planner: InputPlanner?
 
     /// Installs the watchers; the caller then runs the AppKit run loop.
     func install() {
@@ -102,6 +106,31 @@ final class ServeMode {
         }
         encoder.onError = { [weak controller] error in controller?.captureError(error) }
 
+        // Input (Contract D). Every callback below runs on `queue`: the controller invokes them from its
+        // own calls, and the backend hops reconfiguration notifications onto `queue` before delivering.
+        controller.onInput = { [unowned self, unowned backend] event in
+            var planner = self.planner ?? Self.makePlanner(bounds: backend.displayBounds())
+            // The Mac's own mouse may have moved the pointer since our last event: trackpad-relative
+            // input starts from where the pointer really is (ignored when it is on another display).
+            if InputPlanner.actsAtCursor(event), let real = InputInjector.currentCursor() {
+                planner.syncCursor(real)
+            }
+            let events = planner.plan(event, at: ProcessInfo.processInfo.systemUptime)
+            self.planner = planner
+            self.injector.post(events)
+        }
+        controller.onBoundsChanged = { [unowned self] bounds in
+            if self.planner == nil { self.planner = Self.makePlanner(bounds: bounds) } else { self.planner?.updateBounds(bounds) }
+        }
+        // Runs before the display is destroyed: release a held button so no drag is left stuck.
+        controller.onTeardown = { [unowned self] in
+            guard var planner = self.planner else { return }
+            self.injector.post(planner.teardown())
+            self.planner = planner
+        }
+        backend.onReconfigured = { [weak controller] in controller?.displayReconfigured() }
+        backend.onLog = { [unowned self] level, message in self.sink.emit(.log(level: level, message: message)) }
+
         // Pre-flight: bind the listener BEFORE the display exists; `begin()` runs only once it is
         // listening, so `port-in-use` can never follow `ready` and a busy port never creates a display.
         do {
@@ -125,6 +154,10 @@ final class ServeMode {
         } catch {
             controller.stopWithLog("video listener could not be created: \(error)", .portInUse)
         }
+    }
+
+    private static func makePlanner(bounds: CGRect) -> InputPlanner {
+        InputPlanner(bounds: bounds, cursor: CGPoint(x: bounds.midX, y: bounds.midY))
     }
 
     private func listening() {

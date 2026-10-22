@@ -68,7 +68,9 @@ final class FakeBackend: DisplayBackend {
         completion(.success(()))
     }
     func currentWidthPoints() -> Int { widthPoints }
-    func displayBounds() -> CGRect { CGRect(x: 0, y: 0, width: widthPoints, height: 432) }
+    /// Overrides `displayBounds()` (e.g. after the user moved the display in the arrangement).
+    var bounds: CGRect?
+    func displayBounds() -> CGRect { bounds ?? CGRect(x: 0, y: 0, width: widthPoints, height: 432) }
     func destroyDisplay() { destroyCalls += 1; log.append("destroyDisplay") }
 }
 
@@ -579,19 +581,16 @@ final class Harness {
         #expect(h.sink.logs(level: "warn").count == 2)
     }
 
-    @Test func phase1ResizeTrackpadAndInputAreIgnored() {
+    @Test func resizeIsStillIgnored() {
         let h = Harness()
         let (c, id) = h.authed()
         let calls = h.backend.log.count
         h.ctrl.receive(jsonFrame(#"{"t":"resize","surfaceW":1080,"surfaceH":2340,"orientation":"portrait"}"#), on: id)
-        h.ctrl.receive(jsonFrame(#"{"t":"setTrackpad","enabled":true}"#), on: id)
-        h.ctrl.receive(jsonFrame(#"{"t":"input","e":"click","x":0.5,"y":0.5}"#), on: id)
-        h.ctrl.receive(jsonFrame(#"{"t":"input","e":"click","x":0.5,"y":0.5}"#), on: id)
+        h.ctrl.receive(jsonFrame(#"{"t":"resize","surfaceW":1080,"surfaceH":2340,"orientation":"portrait"}"#), on: id)
         #expect(h.backend.log.count == calls)
-        #expect(h.backend.cursorCalls.isEmpty)
         #expect(h.ctrl.endedReason == nil)
         #expect(!c.closed)
-        #expect(h.sink.logs(level: "info").count == 3)   // once per type
+        #expect(h.sink.logs(level: "info").count == 1)   // once per type
         #expect(h.sink.logs(level: "warn").isEmpty)
     }
 
@@ -958,5 +957,176 @@ final class Harness {
         #expect(late.closed)
         #expect(h.sink.ended.count == 1)
         #expect(h.ctrl.shouldEncodeNextFrame() == false)
+    }
+
+    // MARK: input, trackpad and teardown (Task 4.3)
+
+    @Test func stopInvokesTeardownBeforeDestroyingTheDisplay() {
+        let h = Harness()
+        _ = h.authed()
+        var teardowns = 0
+        h.ctrl.onTeardown = {
+            teardowns += 1
+            h.backend.log.append("teardown")
+        }
+        h.ctrl.stop(.stopRequested)
+        h.ctrl.stop(.watchdog)
+        #expect(teardowns == 1)
+        let order = h.backend.log.filter { ["teardown", "destroyDisplay"].contains($0) }
+        #expect(order == ["teardown", "destroyDisplay"])
+    }
+
+    @Test func everyEndPathInvokesTeardownOnceBeforeDestroy() {
+        let paths: [(String, (Harness, ConnectionID) -> Void)] = [
+            ("captureError", { h, _ in h.ctrl.captureError(BackendError.captureFailed("x")) }),
+            ("bye", { h, id in h.ctrl.receive(jsonFrame(#"{"t":"bye","reason":"user-exit"}"#), on: id) }),
+            ("watchdog", { h, _ in h.advance(2.01); h.ctrl.tick() }),
+            ("closed", { h, id in h.ctrl.closed(id) }),
+            ("parentExit", { h, _ in h.ctrl.stop(.parentExit) }),
+        ]
+        for (name, end) in paths {
+            let h = Harness()
+            let (_, id) = h.authed()
+            var teardowns = 0
+            h.ctrl.onTeardown = {
+                teardowns += 1
+                h.backend.log.append("teardown")
+            }
+            end(h, id)
+            h.ctrl.stop(.stopRequested)
+            #expect(h.ctrl.endedReason != nil, "\(name)")
+            #expect(teardowns == 1, "\(name)")
+            let order = h.backend.log.filter { ["teardown", "destroyDisplay"].contains($0) }
+            #expect(order == ["teardown", "destroyDisplay"], "\(name)")
+        }
+    }
+
+    @Test func authenticatedInputReachesOnInput() {
+        let h = Harness()
+        let (_, id) = h.authed()
+        var got: [InputEvent] = []
+        h.ctrl.onInput = { got.append($0) }
+        h.ctrl.receive(jsonFrame(#"{"t":"input","e":"click","x":0.25,"y":0.75}"#), on: id)
+        h.ctrl.receive(jsonFrame(#"{"t":"input","e":"move","dx":0.01,"dy":-0.02}"#), on: id)
+        #expect(got.count == 2)
+        #expect(got.first?.kind == .click)
+        #expect(got.first?.x == 0.25)
+        #expect(got.last?.kind == .move)
+        #expect(h.sink.logs(level: "info").isEmpty)
+    }
+
+    @Test func dropsInputWhenPostEventAccessIsMissing() {
+        let h = Harness()
+        h.backend.postEvent = false
+        let (c, id) = h.authed()
+        var got = 0
+        h.ctrl.onInput = { _ in got += 1 }
+        h.ctrl.receive(jsonFrame(#"{"t":"input","e":"click","x":0.5,"y":0.5}"#), on: id)
+        h.ctrl.receive(jsonFrame(#"{"t":"input","e":"click","x":0.5,"y":0.5}"#), on: id)
+        #expect(got == 0)
+        #expect(h.ctrl.endedReason == nil)
+        #expect(!c.closed)
+        #expect(h.sink.logs.count == 1)   // logged once, not per event
+    }
+
+    @Test func inputAfterTheSessionEndedIsDropped() {
+        let h = Harness()
+        let (_, id) = h.authed()
+        var got = 0
+        h.ctrl.onInput = { _ in got += 1 }
+        // bye and an input in the same read: the input after the end is never delivered.
+        var both = jsonFrame(#"{"t":"bye","reason":"user-exit"}"#)
+        both.append(jsonFrame(#"{"t":"input","e":"click","x":0.5,"y":0.5}"#))
+        h.ctrl.receive(both, on: id)
+        h.ctrl.receive(jsonFrame(#"{"t":"input","e":"click","x":0.5,"y":0.5}"#), on: id)
+        #expect(got == 0)
+        #expect(h.ctrl.endedReason == .phoneBye)
+    }
+
+    @Test func setTrackpadTogglesTheCapturedCursor() {
+        let h = Harness()
+        let (_, id) = h.authed()
+        var changes: [Bool] = []
+        h.ctrl.onTrackpadChanged = { changes.append($0) }
+        h.ctrl.receive(jsonFrame(#"{"t":"setTrackpad","enabled":true}"#), on: id)
+        #expect(h.backend.cursorCalls == [true])
+        #expect(changes == [true])
+        // A capture restart keeps the toggled cursor.
+        h.ctrl.receive(jsonFrame(#"{"t":"pause"}"#), on: id)
+        h.ctrl.receive(jsonFrame(#"{"t":"resume"}"#), on: id)
+        #expect(h.backend.startCalls.last?.cursor == true)
+        h.ctrl.receive(jsonFrame(#"{"t":"setTrackpad","enabled":false}"#), on: id)
+        #expect(h.backend.cursorCalls == [true, false])
+        #expect(changes == [true, false])
+        #expect(h.sink.logs.isEmpty)
+    }
+
+    @Test func reconfigurationUpdatesInputBounds() {
+        let h = Harness()
+        _ = h.authed()
+        var bounds: [CGRect] = []
+        h.ctrl.onBoundsChanged = { bounds.append($0) }
+        let starts = h.backend.startCalls.count
+        let keyframes = h.backend.forceKeyframeCalls
+        h.backend.bounds = CGRect(x: 0, y: -432, width: 1170, height: 540)
+        h.ctrl.displayReconfigured()
+        #expect(bounds == [CGRect(x: 0, y: -432, width: 1170, height: 540)])
+        #expect(h.backend.startCalls.count == starts + 1)
+        #expect(h.backend.startCalls.last?.w == 2340)
+        #expect(h.backend.startCalls.last?.h == 1080)
+        #expect(h.backend.forceKeyframeCalls == keyframes + 1)
+        #expect(h.ctrl.endedReason == nil)
+    }
+
+    @Test func reconfigurationBeforeHelloOnlyReportsBounds() {
+        let h = Harness().ready()
+        var bounds: [CGRect] = []
+        h.ctrl.onBoundsChanged = { bounds.append($0) }
+        h.ctrl.displayReconfigured()
+        #expect(bounds.count == 1)
+        #expect(h.backend.startCalls.isEmpty)
+        #expect(h.backend.forceKeyframeCalls == 0)
+    }
+
+    @Test func reconfigurationWhilePausedDoesNotRestartCapture() {
+        let h = Harness()
+        let (_, id) = h.authed()
+        h.ctrl.receive(jsonFrame(#"{"t":"pause"}"#), on: id)
+        var bounds = 0
+        h.ctrl.onBoundsChanged = { _ in bounds += 1 }
+        h.ctrl.displayReconfigured()
+        #expect(bounds == 1)
+        #expect(h.backend.startCalls.count == 1)
+    }
+
+    @Test func reconfigurationAfterTheEndIsIgnored() {
+        let h = Harness()
+        _ = h.authed()
+        h.ctrl.stop(.stopRequested)
+        var bounds = 0
+        h.ctrl.onBoundsChanged = { _ in bounds += 1 }
+        h.ctrl.displayReconfigured()
+        #expect(bounds == 0)
+        #expect(h.backend.startCalls.count == 1)
+    }
+
+    @Test func implicitHelloResizeReportsBounds() {
+        let h = Harness().ready()
+        var bounds: [CGRect] = []
+        h.ctrl.onBoundsChanged = { bounds.append($0) }
+        h.backend.deferApply = true
+        h.connect(helloFrame(w: 1080, h: 2340, orientation: "portrait"))
+        #expect(bounds.isEmpty)   // not until the new mode is active
+        h.backend.widthPoints = 432
+        h.backend.completeApply()
+        #expect(bounds == [CGRect(x: 0, y: 0, width: 432, height: 432)])
+    }
+
+    @Test func helloAtTheStartSizeDoesNotReportBounds() {
+        let h = Harness().ready()
+        var bounds = 0
+        h.ctrl.onBoundsChanged = { _ in bounds += 1 }
+        h.connect(helloFrame())
+        #expect(bounds == 0)
     }
 }
