@@ -282,4 +282,33 @@ describe('ControlChannel camera presence + wake', () => {
     expect(deps.transport.sent).toContainEqual({ kind: 'wakeEnabledChanged', enabled: true, source: 'phone' });
     expect(deps.transport.sent).toContainEqual({ kind: 'wakeEnabledChanged', enabled: false, source: 'mac' });
   });
+
+  it('routes displaySession and displayToken to the extendedDisplay deps', () => {
+    const extendedDisplay = { onDisplaySession: vi.fn(async () => {}), onDisplayToken: vi.fn(async () => {}) };
+    const deps = { ...makeDeps(), extendedDisplay };
+    makeChannel(deps);
+    deps.transport.receive({ kind: 'displaySession', active: true, sessionId: 's1', videoPort: 8788 });
+    deps.transport.receive({ kind: 'displaySession', active: false, sessionId: 's1', videoPort: null, reason: 'phone-bye' });
+    deps.transport.receive({ kind: 'displayToken', sessionId: 's1', token: 'abc' });
+    expect(extendedDisplay.onDisplaySession).toHaveBeenNthCalledWith(1, { active: true, sessionId: 's1', videoPort: 8788 });
+    expect(extendedDisplay.onDisplaySession).toHaveBeenNthCalledWith(2, { active: false, sessionId: 's1', videoPort: null, reason: 'phone-bye' });
+    expect(extendedDisplay.onDisplayToken).toHaveBeenCalledWith({ sessionId: 's1', token: 'abc' });
+  });
+
+  it('ignores display messages when no extendedDisplay dep is wired', () => {
+    const deps = makeDeps();
+    makeChannel(deps);
+    expect(() => deps.transport.receive({ kind: 'displayToken', sessionId: 's1', token: 'abc' })).not.toThrow();
+  });
+
+  it('notifyDisplayStartRequest / notifyDisplayStopRequest post the Contract B messages', () => {
+    const deps = makeDeps();
+    const channel = makeChannel(deps);
+    channel.notifyDisplayStartRequest({ w: 2340, h: 1080, orientation: 'landscape', deviceSerial: 'phone1', dpi: 402 });
+    channel.notifyDisplayStopRequest({ sessionId: 's1', reason: 'user-exit' });
+    channel.notifyDisplayStopRequest({ sessionId: null, reason: 'token-delivery-failed' });
+    expect(deps.transport.sent).toContainEqual({ kind: 'displayStartRequest', w: 2340, h: 1080, orientation: 'landscape', deviceSerial: 'phone1', dpi: 402 });
+    expect(deps.transport.sent).toContainEqual({ kind: 'displayStopRequest', sessionId: 's1', reason: 'user-exit' });
+    expect(deps.transport.sent).toContainEqual({ kind: 'displayStopRequest', sessionId: null, reason: 'token-delivery-failed' });
+  });
 });

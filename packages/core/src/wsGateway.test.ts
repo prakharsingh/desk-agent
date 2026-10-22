@@ -380,3 +380,70 @@ describe('WsGateway client verification (Origin)', () => {
   });
 });
 
+
+describe('WsGateway extended display', () => {
+  const READY = { state: 'ready' as const, sessionId: 's1', videoPort: 8788 };
+
+  it('routes display.start frames to onDisplayStart', () => {
+    const server = new FakeServer();
+    const onDisplayStart = vi.fn();
+    const onDisplayStop = vi.fn();
+    const onActionInvoke = vi.fn();
+    const gateway = new WsGateway({ port: 8787, heartbeatMs: 5000, getSnapshot: async () => [], onEventPublish: vi.fn(), onActionInvoke, onDisplayStart, onDisplayStop, wssFactory: () => server });
+    gateway.start();
+    const client = connectClient(server);
+    client.emit('message', JSON.stringify(createFrame('display.start', { w: 2340, h: 1080, orientation: 'landscape', dpi: 402 })));
+    expect(onDisplayStart).toHaveBeenCalledWith({ w: 2340, h: 1080, orientation: 'landscape', dpi: 402 });
+    client.emit('message', JSON.stringify(createFrame('display.stop', { sessionId: 's1', reason: 'reply-timeout' })));
+    expect(onDisplayStop).toHaveBeenCalledWith({ sessionId: 's1', reason: 'reply-timeout' });
+    expect(onActionInvoke).not.toHaveBeenCalled();
+    gateway.stop();
+  });
+
+  it('drops an invalid display.start payload', () => {
+    const server = new FakeServer();
+    const onDisplayStart = vi.fn();
+    const gateway = new WsGateway({ port: 8787, heartbeatMs: 5000, getSnapshot: async () => [], onEventPublish: vi.fn(), onDisplayStart, wssFactory: () => server });
+    const client = connectClient(server);
+    client.emit('message', JSON.stringify({ ...createFrame('display.start', { w: 2340, h: 1080, orientation: 'landscape' }), payload: { w: 10, h: 1080, orientation: 'landscape' } }));
+    expect(onDisplayStart).not.toHaveBeenCalled();
+    gateway.stop();
+  });
+
+  it('broadcastDisplaySession sends a display.session frame to every client', () => {
+    const server = new FakeServer();
+    const gateway = new WsGateway({ port: 8787, heartbeatMs: 5000, getSnapshot: async () => [], onEventPublish: vi.fn(), wssFactory: () => server });
+    const a = connectClient(server);
+    const b = connectClient(server);
+    gateway.broadcastDisplaySession(READY);
+    for (const c of [a, b]) {
+      const frame: Frame = JSON.parse(c.sent[0]);
+      expect(frame.type).toBe('display.session');
+      expect(frame.payload).toEqual(READY);
+    }
+    gateway.stop();
+  });
+
+  it('sends the current display.session after hello', async () => {
+    const server = new FakeServer();
+    let session: typeof READY | null = READY;
+    const gateway = new WsGateway({
+      port: 8787, heartbeatMs: 5000, getSnapshot: async () => [], onEventPublish: vi.fn(), wssFactory: () => server,
+      getWakeEnabled: () => true,
+      getDisplaySession: () => session,
+    });
+    const client = connectClient(server);
+    client.emit('message', JSON.stringify(createFrame('hello', { clientVersion: '1.0.0' })));
+    await vi.waitFor(() => expect(client.sent.length).toBe(3));
+    expect(client.sent.map((s) => JSON.parse(s).type)).toEqual(['widget.update', 'action.invoke', 'display.session']);
+    expect(JSON.parse(client.sent[2]).payload).toEqual(READY);
+
+    session = null;
+    const idle = connectClient(server);
+    idle.emit('message', JSON.stringify(createFrame('hello', { clientVersion: '1.0.0' })));
+    await vi.waitFor(() => expect(idle.sent.length).toBe(2));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(idle.sent.map((s) => JSON.parse(s).type)).toEqual(['widget.update', 'action.invoke']);
+    gateway.stop();
+  });
+});

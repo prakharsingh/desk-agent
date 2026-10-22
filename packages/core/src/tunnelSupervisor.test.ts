@@ -635,6 +635,41 @@ describe('TunnelSupervisor', () => {
       expect(adb.reverse).toHaveBeenCalledWith(8787, 8787, 'phone1');
     });
 
+    it('does not auto-launch the app on attach while a display session is active (no extras-less am start mid-session)', async () => {
+      const adb = makeFakeAdb();
+      let displayActive = true;
+      const supervisor = new TunnelSupervisor(adb, 8787, vi.fn(), true, () => displayActive);
+      supervisor.start();
+      adb.emitAttach();
+      await vi.waitFor(() => expect(supervisor.getStatus().tunnelStatus).toBe('reissued'));
+      await Promise.resolve();
+      expect(adb.launchApp).not.toHaveBeenCalled();
+      // The gate is read at launch time, not construction time.
+      displayActive = false;
+      adb.emitDetach();
+      adb.emitAttach();
+      await vi.waitFor(() => expect(adb.launchApp).toHaveBeenCalledWith('phone1'));
+    });
+
+    it('reads the display gate after the tunnel is up, so a session learned during the reissue still blocks the launch', async () => {
+      const adb = makeFakeAdb();
+      let displayActive = false;
+      (adb.reverse as ReturnType<typeof vi.fn>).mockImplementation(async () => { displayActive = true; });
+      const supervisor = new TunnelSupervisor(adb, 8787, vi.fn(), true, () => displayActive);
+      supervisor.start();
+      adb.emitAttach();
+      await vi.waitFor(() => expect(supervisor.getStatus().tunnelStatus).toBe('reissued'));
+      await Promise.resolve();
+      expect(adb.launchApp).not.toHaveBeenCalled();
+    });
+
+    it('a manual launchApp() still launches during a display session', async () => {
+      const adb = makeFakeAdb();
+      const supervisor = new TunnelSupervisor(adb, 8787, vi.fn(), true, () => true);
+      await supervisor.launchApp();
+      expect(adb.launchApp).toHaveBeenCalled();
+    });
+
     it('does not launch the app on attach when launchAppOnDock has been disabled', async () => {
       const adb = makeFakeAdb();
       const supervisor = new TunnelSupervisor(adb, 8787, vi.fn());

@@ -12,4 +12,5 @@ export * from './presenceEngine.js';
 export * from './controlChannel.js';
 export * from './cameraConfigStore.js';
 export * from './wakeSetting.js';
+export * from './displayCoordinator.js';
 export * from './main.js';

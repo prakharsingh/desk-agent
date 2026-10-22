@@ -8,6 +8,9 @@ import {
   type WidgetEntry,
   type Widget,
   type ScreensaverConfig,
+  type DisplayStartPayload,
+  type DisplayStopPayload,
+  type DisplaySessionPayload,
 } from '@desk-agent/protocol';
 import type { LogLevel } from '@desk-agent/plugin-sdk';
 
@@ -30,6 +33,8 @@ export interface WsGatewayOptions {
   getVisibleWidgets?: () => string[];
   /** Mac-owned presence.wakeEnabled, sent to a client right after its hello-reply snapshot (action.invoke phone-display/setWakeEnabled) so a freshly (re)connected phone always shows the live value. */
   getWakeEnabled?: () => boolean;
+  /** Current extended-display session (the ready payload while one is active, else null), sent to a client right after its hello-reply -- same resync pattern as getWakeEnabled. */
+  getDisplaySession?: () => DisplaySessionPayload | null;
   onEventPublish: (raw: unknown) => void;
   /** Invoked when a client sends an action.invoke frame (e.g. media transport buttons). */
   onActionInvoke?: (pluginId: string, action: string, args?: Record<string, unknown>) => void;
@@ -38,6 +43,10 @@ export interface WsGatewayOptions {
   /** Invoked with the new connected-client count on every connect and close. */
   onClientCountChange?: (count: number) => void;
   onLog?: (level: LogLevel, message: string) => void;
+  /** Phone asked to start an extended-display session (display.start frame). */
+  onDisplayStart?: (p: DisplayStartPayload) => void;
+  /** Phone asked to stop its extended-display session (display.stop frame). */
+  onDisplayStop?: (p: DisplayStopPayload) => void;
   wssFactory?: () => WsServerLike;
 }
 
@@ -149,11 +158,17 @@ export class WsGateway {
       const visibleWidgets = this.opts.getVisibleWidgets?.();
       client.send(JSON.stringify(createFrame('widget.update', { widgets, ...(visibleWidgets ? { visibleWidgets } : {}) })));
       if (this.opts.getWakeEnabled) client.send(JSON.stringify(this.wakeEnabledFrame(this.opts.getWakeEnabled())));
+      const ds = this.opts.getDisplaySession?.();
+      if (ds) client.send(JSON.stringify(createFrame('display.session', ds)));
     } else if (frame.type === 'event.publish') {
       this.opts.onEventPublish(frame.payload);
     } else if (frame.type === 'action.invoke') {
       const { pluginId, action, args } = frame.payload;
       this.opts.onActionInvoke?.(pluginId, action, args);
+    } else if (frame.type === 'display.start') {
+      this.opts.onDisplayStart?.(frame.payload);
+    } else if (frame.type === 'display.stop') {
+      this.opts.onDisplayStop?.(frame.payload);
     }
   }
 
@@ -181,6 +196,11 @@ export class WsGateway {
   // hello path above covers (re)connects).
   sendWakeEnabled(enabled: boolean) {
     this.broadcast(this.wakeEnabledFrame(enabled));
+  }
+
+  // Core -> phone: extended-display session state (ready / ended / error).
+  broadcastDisplaySession(p: DisplaySessionPayload) {
+    this.broadcast(createFrame('display.session', p));
   }
 
   private wakeEnabledFrame(enabled: boolean) {

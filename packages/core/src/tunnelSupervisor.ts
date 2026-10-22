@@ -55,6 +55,8 @@ export class TunnelSupervisor {
     private port: number,
     private onLog: (level: LogLevel, message: string) => void,
     private launchAppOnDock: boolean = true,
+    /** True while an extended-display session is active: the dock auto-launch (an extras-less `am start`) is skipped then. */
+    private isDisplayActive: () => boolean = () => false,
   ) {
     this.ports.add(port);
   }
@@ -93,7 +95,13 @@ export class TunnelSupervisor {
   // than racing two independent adb child processes.
   private async onAttach() {
     await this.reissue();
-    if (this.launchAppOnDock) await this.launchApp();
+    if (!this.launchAppOnDock) return;
+    // Read after the reissue, so a session main resyncs during it (core restart) still counts.
+    if (this.isDisplayActive()) {
+      this.onLog('info', 'skipping the phone app launch: a display session is active');
+      return;
+    }
+    await this.launchApp();
   }
 
   // Runs alongside (not before) the tunnel/app-launch sequence: it's purely
