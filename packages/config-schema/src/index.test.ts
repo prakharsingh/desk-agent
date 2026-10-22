@@ -42,7 +42,15 @@ describe('ConfigSchema', () => {
 
   it('defaults visibleWidgets to every known widget id, sourced from @desk-agent/protocol\'s WIDGET_IDS', () => {
     const config = parseConfig({});
-    expect(config.visibleWidgets).toEqual(['clock', 'system', 'weather', 'presence', 'playing', 'light']);
+    expect(config.visibleWidgets).toEqual(['clock', 'system', 'weather', 'presence', 'playing', 'light', 'display']);
+    expect(config.visibleWidgets).toContain('display');
+  });
+
+  it('defaults the display helper vendor/product ids and validates their range', () => {
+    expect(parseConfig({}).display).toEqual({ vendorId: 0x3456, productId: 0x4d44 });
+    expect(ConfigSchema.safeParse({ display: { vendorId: 0 } }).success).toBe(false);
+    expect(ConfigSchema.safeParse({ display: { productId: 0x10000 } }).success).toBe(false);
+    expect(parseConfig({ display: { vendorId: 1234 } }).display).toEqual({ vendorId: 1234, productId: 0x4d44 });
   });
 
   it('accepts an explicit, narrower visibleWidgets list', () => {

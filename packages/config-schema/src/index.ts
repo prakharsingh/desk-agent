@@ -74,6 +74,14 @@ export const ConfigSchema = z.object({
   // (Voice, Steam Deck) aren't in WIDGET_IDS at all -- they're always shown,
   // always disabled, never toggleable.
   visibleWidgets: z.array(z.string()).default([...WIDGET_IDS]),
+  // Phone-as-extended-display: USB vendor/product ids the helper gives the
+  // virtual display (spike-proven defaults).
+  display: z
+    .object({
+      vendorId: z.number().int().min(1).max(0xffff).default(0x3456),
+      productId: z.number().int().min(1).max(0xffff).default(0x4d44),
+    })
+    .default({}),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

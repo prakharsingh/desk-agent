@@ -8,7 +8,7 @@ export const PROTOCOL_VERSION = 1 as const;
 // check) -- both import this instead of hand-copying the list. Voice/Steam
 // Deck are permanently roadmap tiles (never toggleable, always shown
 // disabled) and deliberately excluded here.
-export const WIDGET_IDS = ['clock', 'system', 'weather', 'presence', 'playing', 'light'] as const;
+export const WIDGET_IDS = ['clock', 'system', 'weather', 'presence', 'playing', 'light', 'display'] as const;
 export type WidgetId = (typeof WIDGET_IDS)[number];
 
 export const WidgetSchema = z.object({
@@ -127,6 +127,50 @@ export function parseSensorEvent(eventName: string, data: unknown): ParseResult<
   return { ok: true, value: { eventName, data: result.data } as SensorEvent };
 }
 
+// Phone as a Mac extended display. Separate surface from PHONE_DISPLAY_PLUGIN_ID
+// / action.invoke: these are dedicated frame types, never routed through the
+// plugin action path. Additive, so PROTOCOL_VERSION stays 1.
+export const DISPLAY_VIDEO_PORT = 8788 as const;
+
+export const DISPLAY_REASONS = [
+  'unsupported', 'unsupported-host', 'no-device', 'permission-screen-recording', 'helper-crashed',
+  'token-delivery-failed', 'superseded', 'mac-disconnect', 'stop-requested', 'phone-bye', 'watchdog',
+  'connect-timeout', 'parent-exit', 'capture-failed', 'port-in-use', 'signal',
+  'user-exit', 'link-lost', 'grace-expired', 'token-timeout', 'connect-failed', 'decoder-error', 'mac-not-connected', 'reply-timeout',
+  'version-mismatch', 'protocol-error', 'capture-unavailable',
+] as const;
+export type DisplayReason = (typeof DISPLAY_REASONS)[number];
+
+export const DisplayOrientationSchema = z.enum(['portrait', 'landscape']);
+export type DisplayOrientation = z.infer<typeof DisplayOrientationSchema>;
+
+// Physical px from the phone's surfaceChanged. dpi = displayMetrics.xdpi; it
+// only feeds the virtual display's physical size (absent -> Mac-side fallback).
+const displayDimension = z.number().int().min(320).max(8192);
+export const DisplayStartPayloadSchema = z.object({
+  w: displayDimension,
+  h: displayDimension,
+  orientation: DisplayOrientationSchema,
+  dpi: z.number().positive().max(1000).optional(),
+});
+export type DisplayStartPayload = z.infer<typeof DisplayStartPayloadSchema>;
+
+// reason stays a free string on the wire (forward compatible); producers only
+// emit DisplayReason values.
+export const DisplayStopPayloadSchema = z.object({
+  sessionId: z.string().min(1).nullable(),
+  reason: z.string().optional(),
+});
+export type DisplayStopPayload = z.infer<typeof DisplayStopPayloadSchema>;
+
+export const DisplaySessionPayloadSchema = z.object({
+  state: z.enum(['ready', 'ended', 'error']),
+  sessionId: z.string().min(1).nullable(),
+  videoPort: z.number().int().positive().optional(),
+  reason: z.string().optional(),
+});
+export type DisplaySessionPayload = z.infer<typeof DisplaySessionPayloadSchema>;
+
 const versionLiteral = z.literal(PROTOCOL_VERSION);
 
 export const FrameSchema = z.discriminatedUnion('type', [
@@ -135,6 +179,9 @@ export const FrameSchema = z.discriminatedUnion('type', [
   z.object({ v: versionLiteral, type: z.literal('widget.update'), id: z.string(), ts: z.number(), payload: WidgetUpdatePayloadSchema }),
   z.object({ v: versionLiteral, type: z.literal('action.invoke'), id: z.string(), ts: z.number(), payload: ActionInvokePayloadSchema }),
   z.object({ v: versionLiteral, type: z.literal('event.publish'), id: z.string(), ts: z.number(), payload: EventPublishPayloadSchema }),
+  z.object({ v: versionLiteral, type: z.literal('display.start'), id: z.string(), ts: z.number(), payload: DisplayStartPayloadSchema }),
+  z.object({ v: versionLiteral, type: z.literal('display.stop'), id: z.string(), ts: z.number(), payload: DisplayStopPayloadSchema }),
+  z.object({ v: versionLiteral, type: z.literal('display.session'), id: z.string(), ts: z.number(), payload: DisplaySessionPayloadSchema }),
 ]);
 export type Frame = z.infer<typeof FrameSchema>;
 
