@@ -8,6 +8,10 @@ export interface FaceBoxObservation {
   /** Camera frame dimensions the bbox is normalized against -- needed to
    * account for resizeMode="contain" letterboxing (see mapBoxToPreview.ts). */
   frameSize: FrameSize;
+  /** UPRIGHT size of the preview stream the PreviewView displays (wider FOV
+   * than the analysis frame -- see analysisCropInPreview). Optional: when
+   * unknown, the analysis frame is assumed to be what is displayed. */
+  previewFrameSize?: FrameSize | null;
 }
 
 /**
@@ -43,7 +47,7 @@ export const FaceBoxOverlay = React.forwardRef<FaceBoxOverlayHandle, FaceBoxOver
 
     if (!observation) return null;
 
-    const pixelRect = mapBoxToPreview(observation.bbox, rect, observation.frameSize);
+    const pixelRect = mapBoxToPreview(observation.bbox, rect, observation.frameSize, observation.previewFrameSize);
 
     return (
       <Svg width={rect.width} height={rect.height}>

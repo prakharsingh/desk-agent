@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mapBoxToPreview } from './mapBoxToPreview.js';
+import { mapBoxToPreview, analysisCropInPreview } from './mapBoxToPreview.js';
 
 // A frameSize whose aspect ratio matches rect exactly means resizeMode="contain"
 // fills the whole rect (scale=1, no letterbox offset) -- this reduces to the
@@ -42,9 +42,8 @@ describe('mapBoxToPreview', () => {
   });
 
   it('does not mirror the X coordinate: a box at the left edge of the frame stays at the left edge of the preview', () => {
-    // CameraPresence's <Camera mirrorMode="on"> mirrors the entire pipeline
-    // (confirmed on-device), so face.bounds already arrives in
-    // display-matching coordinates -- this function must NOT re-mirror.
+    // Mirroring is applied once upstream (faceBoundsToOverlayRect.ts), so
+    // this function must NOT re-mirror.
     const bbox = { x: 0, y: 0.5, width: 0.1, height: 0.1 };
     const result = mapBoxToPreview(bbox, FILL_RECT_200, FILL_FRAME_200);
     // left = 0 * 200 = 0
@@ -177,5 +176,84 @@ describe('mapBoxToPreview', () => {
     expect(result.top).toBeCloseTo(37.5); // 0.25*150
     expect(result.width).toBeCloseTo(150);
     expect(result.height).toBeCloseTo(75);
+  });
+});
+
+// Field-of-view mismatch (on-device: front sensor active array 4608x3456 =
+// 4:3, preview stream 1440x1080 = 4:3 full FOV, analysis stream 1280x720 =
+// 16:9). No CameraX ViewPort is set by VisionCamera, so each stream is the
+// HAL's centred max-FOV crop of the sensor for its own aspect ratio: the
+// 16:9 analysis frame is a centred crop of the 4:3 preview, and the
+// PreviewView (FIT_CENTER) shows the WHOLE 4:3 preview image.
+describe('analysisCropInPreview', () => {
+  it('portrait (upright 9:16 analysis inside upright 3:4 preview): full height, centred 75% width', () => {
+    const crop = analysisCropInPreview({ width: 720, height: 1280 }, { width: 1080, height: 1440 });
+    expect(crop.x).toBeCloseTo(0.125);
+    expect(crop.y).toBeCloseTo(0);
+    expect(crop.width).toBeCloseTo(0.75);
+    expect(crop.height).toBeCloseTo(1);
+  });
+
+  it('landscape (16:9 analysis inside 4:3 preview): full width, centred 75% height', () => {
+    const crop = analysisCropInPreview({ width: 1280, height: 720 }, { width: 1440, height: 1080 });
+    expect(crop.x).toBeCloseTo(0);
+    expect(crop.y).toBeCloseTo(0.125);
+    expect(crop.width).toBeCloseTo(1);
+    expect(crop.height).toBeCloseTo(0.75);
+  });
+
+  it('same aspect ratio -> identity crop', () => {
+    expect(analysisCropInPreview({ width: 640, height: 480 }, { width: 1440, height: 1080 })).toEqual({
+      x: 0,
+      y: 0,
+      width: 1,
+      height: 1,
+    });
+  });
+});
+
+describe('mapBoxToPreview against the displayed PREVIEW image (previewFrameSize)', () => {
+  it('landscape: maps the analysis frame as a centred crop of the contain-fit 4:3 preview, not a contain-fit of the 16:9 frame', () => {
+    const rect = { width: 352, height: 140 };
+    // preview 1440x1080 contain-fit: scale = min(352/1440, 140/1080) = 0.12963
+    // -> displayed 186.667 x 140, offsetX = (352-186.667)/2 = 82.667
+    // analysis crop = full width, y 0.125..0.875 -> 186.667 x 105 at top 17.5
+    const full = mapBoxToPreview(
+      { x: 0, y: 0, width: 1, height: 1 },
+      rect,
+      { width: 1280, height: 720 },
+      { width: 1440, height: 1080 },
+    );
+    expect(full.left).toBeCloseTo(82.667, 2);
+    expect(full.top).toBeCloseTo(17.5, 2);
+    expect(full.width).toBeCloseTo(186.667, 2);
+    expect(full.height).toBeCloseTo(105, 2);
+  });
+
+  it('portrait in a wide card (the on-device geometry): coincides with the plain contain-fit of the upright analysis frame', () => {
+    const rect = { width: 352, height: 140 };
+    const bbox = { x: 0.3, y: 0.44, width: 0.29, height: 0.165 };
+    const viaPreview = mapBoxToPreview(bbox, rect, { width: 720, height: 1280 }, { width: 1080, height: 1440 });
+    const plain = mapBoxToPreview(bbox, rect, { width: 720, height: 1280 });
+    expect(viaPreview.left).toBeCloseTo(plain.left, 6);
+    expect(viaPreview.top).toBeCloseTo(plain.top, 6);
+    expect(viaPreview.width).toBeCloseTo(plain.width, 6);
+    expect(viaPreview.height).toBeCloseTo(plain.height, 6);
+  });
+
+  it('portrait in a narrow/tall card: preview width constrains, so the crop-aware mapping differs from plain contain-fit', () => {
+    const rect = { width: 90, height: 400 };
+    // preview 1080x1440 contain: scale = min(90/1080, 400/1440) = 0.08333
+    // -> 90 x 120, offsetY = 140; crop x 0.125..0.875 -> 67.5 x 120 at left 11.25
+    const full = mapBoxToPreview(
+      { x: 0, y: 0, width: 1, height: 1 },
+      rect,
+      { width: 720, height: 1280 },
+      { width: 1080, height: 1440 },
+    );
+    expect(full.left).toBeCloseTo(11.25, 4);
+    expect(full.top).toBeCloseTo(140, 4);
+    expect(full.width).toBeCloseTo(67.5, 4);
+    expect(full.height).toBeCloseTo(120, 4);
   });
 });

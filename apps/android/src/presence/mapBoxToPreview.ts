@@ -59,17 +59,13 @@ export interface PixelRect {
  * bars.
  *
  * **No mirroring here:**
- * This function does NOT flip the X axis. `CameraPresence`'s `<Camera>`
- * sets `mirrorMode="on"`, and on-device verification (a static face,
- * confirmed non-tracking/non-latency via repeated identical screenshots)
- * showed VisionCamera mirrors the ENTIRE pipeline under that setting --
- * not just the displayed `PreviewView`, but also the analysis frames MLKit
- * reads. `face.bounds` therefore already arrives in already-mirrored,
- * display-matching coordinates; an earlier version of this function
- * additionally flipped the X axis (assuming `bbox` was raw/unmirrored),
- * which double-mirrored the box back to the wrong side of the frame. If
- * `mirrorMode` is ever changed to `"off"`, this function would need a
- * mirror step reinstated to match.
+ * This function does NOT flip the X axis and expects `bbox` to already be
+ * in the displayed preview's (upright, selfie-mirrored) coordinate space.
+ * MLKit's `face.bounds` arrive upright but UNmirrored (the analysis buffer
+ * is never physically mirrored; VisionCamera only flags it via
+ * `frame.isMirrored`), so the single mirror step happens upstream in
+ * `faceBoundsToOverlayRect.ts`'s `faceBoundsToNormalizedBox`. `frameSize`
+ * must likewise be the UPRIGHT frame size (see `uprightFrameSize`).
  *
  * **Clamping:**
  * Bounding boxes are clamped to [0,1] before scaling. This handles edge cases
@@ -86,7 +82,51 @@ export interface PixelRect {
  * @param frameSize Camera frame dimensions the bbox is normalized against
  * @returns Pixel coordinates for SVG rect positioning, relative to rect's origin
  */
-export function mapBoxToPreview(bbox: NormalizedBBox, rect: PreviewRect, frameSize: FrameSize): PixelRect {
+/**
+ * Where the analysis frame sits inside the preview image, as a normalized
+ * [0,1] rect of the preview -- both sizes UPRIGHT.
+ *
+ * VisionCamera 5.1 binds Preview + ImageAnalysis via a plain CameraX
+ * `SessionConfig` with no `ViewPort` (session/ConstraintResolver.kt:69-72),
+ * so each stream is the camera HAL's centred, maximum-FOV crop of the
+ * sensor active array for that stream's own aspect ratio. On device the
+ * front sensor is 4608x3456 (4:3), the preview stream 1440x1080 (4:3, the
+ * full FOV) and the analysis stream 1280x720 (16:9) -- i.e. the analysis
+ * frame is a centred crop of the preview. This assumes the preview is the
+ * wider-FOV reference (true whenever its aspect matches the sensor's).
+ */
+export function analysisCropInPreview(analysis: FrameSize, preview: FrameSize): NormalizedBBox {
+  if (!(analysis.width > 0 && analysis.height > 0 && preview.width > 0 && preview.height > 0)) {
+    return { x: 0, y: 0, width: 1, height: 1 };
+  }
+  const analysisAspect = analysis.width / analysis.height;
+  const previewAspect = preview.width / preview.height;
+  if (Math.abs(analysisAspect - previewAspect) < 1e-6) {
+    return { x: 0, y: 0, width: 1, height: 1 };
+  }
+  if (analysisAspect > previewAspect) {
+    // Analysis is wider: it keeps the full width, crops top/bottom.
+    const height = previewAspect / analysisAspect;
+    return { x: 0, y: (1 - height) / 2, width: 1, height };
+  }
+  // Analysis is narrower: full height, crops left/right.
+  const width = analysisAspect / previewAspect;
+  return { x: (1 - width) / 2, y: 0, width, height: 1 };
+}
+
+/**
+ * @param previewFrameSize Optional UPRIGHT size of the preview stream that
+ *   the PreviewView actually displays. When given, the contain-fit is done
+ *   on the PREVIEW image (what is on screen) and the analysis frame is
+ *   mapped into it as a centred crop (see `analysisCropInPreview`). When
+ *   omitted, the analysis frame itself is assumed to be what is displayed.
+ */
+export function mapBoxToPreview(
+  bbox: NormalizedBBox,
+  rect: PreviewRect,
+  frameSize: FrameSize,
+  previewFrameSize?: FrameSize | null,
+): PixelRect {
   // Clamp bbox coordinates and dimensions to [0,1]
   const x = Math.max(0, Math.min(1, bbox.x));
   const y = Math.max(0, Math.min(1, bbox.y));
@@ -97,14 +137,19 @@ export function mapBoxToPreview(bbox: NormalizedBBox, rect: PreviewRect, frameSi
   // center the result within rect. Guard against a zero-dimension frameSize
   // (division by zero) by treating it the same as a same-aspect-ratio frame,
   // i.e. no letterboxing -- there's no meaningful frame to fit otherwise.
+  // The image actually displayed: the preview stream when known, else the
+  // analysis frame.
+  const shown = previewFrameSize ?? frameSize;
   const scale =
-    frameSize.width > 0 && frameSize.height > 0
-      ? Math.min(rect.width / frameSize.width, rect.height / frameSize.height)
-      : 1;
-  const displayedWidth = frameSize.width > 0 ? frameSize.width * scale : rect.width;
-  const displayedHeight = frameSize.height > 0 ? frameSize.height * scale : rect.height;
-  const offsetX = (rect.width - displayedWidth) / 2;
-  const offsetY = (rect.height - displayedHeight) / 2;
+    shown.width > 0 && shown.height > 0 ? Math.min(rect.width / shown.width, rect.height / shown.height) : 1;
+  const imageWidth = shown.width > 0 ? shown.width * scale : rect.width;
+  const imageHeight = shown.height > 0 ? shown.height * scale : rect.height;
+  // ...and the analysis frame's region within it.
+  const crop = previewFrameSize ? analysisCropInPreview(frameSize, previewFrameSize) : { x: 0, y: 0, width: 1, height: 1 };
+  const displayedWidth = imageWidth * crop.width;
+  const displayedHeight = imageHeight * crop.height;
+  const offsetX = (rect.width - imageWidth) / 2 + crop.x * imageWidth;
+  const offsetY = (rect.height - imageHeight) / 2 + crop.y * imageHeight;
 
   // Position within the displayed sub-rect, no mirror (see doc comment above)
   const subX = x * displayedWidth;

@@ -1,6 +1,15 @@
-import React, { useEffect, useRef } from 'react';
-import { NativeModules, View } from 'react-native';
-import { useCameraDevice, Camera } from 'react-native-vision-camera';
+import React, { useEffect, useMemo, useRef } from 'react';
+import { NativeModules, StyleSheet, View } from 'react-native';
+import {
+  useCamera,
+  useCameraDevice,
+  usePreviewOutput,
+  NativePreviewView,
+  type CameraDevice,
+  type CameraFrameOutput,
+  type CameraOutput,
+  type CameraPreviewOutput,
+} from 'react-native-vision-camera';
 import { useCameraLifecycle } from './useCameraLifecycle.js';
 import { useFaceFrameProcessor } from './frameProcessor.js';
 import { deriveSignals, type MotionSourceState, type FaceObservation } from './signalDeriver.js';
@@ -8,7 +17,11 @@ import { deriveEdges, INITIAL_EDGE_EMITTER_STATE, type EdgeEmitterState } from '
 import { buildFaceVisibleFrame, buildGazeFrame, buildMotionFrame, buildCameraStateFrame } from '../presenceEvents.js';
 import type { SensorFrame } from '../display/sensorFrame.js';
 import { FaceBoxOverlay, type FaceBoxOverlayHandle } from './FaceBoxOverlay.js';
-import { orientBBoxForPreview } from './orientBBoxForPreview.js';
+import {
+  faceBoundsToNormalizedBox,
+  orientationToRotationDegrees,
+  uprightFrameSize,
+} from './faceBoundsToOverlayRect.js';
 
 const MIN_DWELL_MS = 2000;
 
@@ -18,6 +31,10 @@ const MIN_DWELL_MS = 2000;
 // real mechanism is a `{ fps }` entry in the `constraints` array, which the
 // CameraSession negotiates against the device's supported configs.
 const TARGET_FPS = 15;
+// Hoisted so the array identity is stable across renders.
+const CAMERA_CONSTRAINTS = [{ fps: TARGET_FPS }];
+// Throttle for the on-device "facebox" debug log (see handleObservation).
+const FACEBOX_LOG_INTERVAL_MS = 1000;
 
 /**
  * CORRECTION (post-C2, verified against real installed types -- same
@@ -40,7 +57,7 @@ const TARGET_FPS = 15;
  *     number }` as one of the `Constraint` union members, with a worked
  *     example `{ fps: 60 }` in the module doc comment (Constraint.ts:19-22,
  *     181-187). This *is* Task C6's fps-control knob: pass
- *     `constraints={[{ fps: TARGET_FPS }]}` on `<Camera>`.
+ *     `constraints: [{ fps: TARGET_FPS }]` (now passed to `useCamera`).
  *
  * `useCameraDevice('front')` (Task C2/brief) is unchanged and confirmed real
  * (`hooks/useCameraDevice.d.ts:20`).
@@ -75,8 +92,8 @@ export const CameraPresence = React.memo(function CameraPresence({
    * Window-absolute pixel rect (as returned by RN's `measureInWindow`) to
    * render a visible camera preview + face-box overlay into. Supplied only
    * on the PRESENCE screen (wired up in later tasks); `null`/`undefined`
-   * everywhere else, which preserves the original invisible `1x1, opacity 0`
-   * render used purely to keep face detection running off-screen.
+   * everywhere else, in which case the camera runs headless (frame output
+   * only, no preview surface at all) to keep face detection running.
    */
   previewRect?: { x: number; y: number; width: number; height: number } | null;
 }) {
@@ -94,6 +111,12 @@ export const CameraPresence = React.memo(function CameraPresence({
   // pushing bbox updates through a ref rather than state avoids forcing a
   // CameraPresence re-render on every camera frame.
   const overlayRef = useRef<FaceBoxOverlayHandle>(null);
+  const lastFaceboxLogRef = useRef(0);
+  // The preview output while it is attached (set by PresenceCameraSession),
+  // read per observation for its negotiated stream size -- the overlay maps
+  // against the displayed PREVIEW image, whose FOV is wider than the
+  // analysis frame's (see analysisCropInPreview in mapBoxToPreview.ts).
+  const previewOutputRef = useRef<CameraPreviewOutput | null>(null);
 
   useEffect(() => {
     // NativeModules.PresenceService is added in Task C5 -- guarded so this
@@ -149,33 +172,51 @@ export const CameraPresence = React.memo(function CameraPresence({
   const handleObservation = (obs: FaceObservation) => {
     // Push the bbox to the visible-preview overlay every frame (not gated on
     // edges -- the box should track continuously). No-op when there's no
-    // visible preview to overlay onto (previewRect unset), which preserves
-    // the exact current per-frame work/re-render profile on every screen
-    // other than PRESENCE.
+    // visible preview to overlay onto (previewRect unset).
     //
-    // obs.bbox/frameWidth/frameHeight are in the camera's raw sensor buffer
-    // orientation (landscape), not the portrait orientation the preview
-    // displays -- confirmed on-device (see orientBBoxForPreview.ts's doc
-    // comment). Corrected here (JS thread), not in frameProcessor.ts's
-    // worklet, because the worklet runtime cannot synchronously call a
-    // plain function from a regular module. frameWidth/frameHeight are
-    // swapped to match the corrected bbox, both required together for
-    // mapBoxToPreview's letterbox math (resizeMode="contain") to line up
-    // with the displayed image.
-    //
-    // obs itself (raw orientation) is passed to deriveSignals/deriveEdges
-    // below unchanged -- motion detection there only compares bbox centroid
-    // deltas frame-to-frame, which a fixed, consistent transform doesn't
-    // affect.
+    // MLKit's face.bounds (obs.rawBounds) are already upright (it is given
+    // the buffer's rotationDegrees) and unmirrored, while the buffer itself
+    // stays landscape. faceBoundsToNormalizedBox normalizes against the
+    // UPRIGHT size and mirrors X once for the selfie preview; the overlay's
+    // mapBoxToPreview then contain-fits that upright frame into the rect.
+    // obs itself is passed to deriveSignals/deriveEdges below unchanged.
     if (previewRect) {
-      overlayRef.current?.setBBox(
-        obs.bbox && obs.frameWidth && obs.frameHeight
-          ? {
-              bbox: orientBBoxForPreview(obs.bbox),
-              frameSize: { width: obs.frameHeight, height: obs.frameWidth },
-            }
-          : null
-      );
+      if (obs.rawBounds && obs.frameWidth && obs.frameHeight) {
+        const geometry = {
+          frameWidth: obs.frameWidth,
+          frameHeight: obs.frameHeight,
+          rotationDegrees: orientationToRotationDegrees(obs.orientation ?? 'up'),
+          mirrored: obs.isMirrored ?? false,
+        };
+        // Preview resolution is reported in sensor orientation like the
+        // analysis buffer, so it is rotated upright by the same amount.
+        const previewRes = previewOutputRef.current?.currentResolution;
+        const previewFrameSize = previewRes
+          ? uprightFrameSize(previewRes.width, previewRes.height, geometry.rotationDegrees)
+          : null;
+        overlayRef.current?.setBBox({
+          bbox: faceBoundsToNormalizedBox(obs.rawBounds, geometry),
+          frameSize: uprightFrameSize(geometry.frameWidth, geometry.frameHeight, geometry.rotationDegrees),
+          previewFrameSize,
+        });
+        // Single on-device debug line for the face-box alignment check:
+        // `adb logcat -s ReactNativeJS | grep facebox`. Throttled to <=1/s
+        // and only while the Presence preview is visible.
+        const now = Date.now();
+        if (now - lastFaceboxLogRef.current >= FACEBOX_LOG_INTERVAL_MS) {
+          lastFaceboxLogRef.current = now;
+          const b = obs.rawBounds;
+          console.log(
+            `facebox bounds=${Math.round(b.x)},${Math.round(b.y)},${Math.round(b.width)},${Math.round(b.height)} ` +
+              `frame=${obs.frameWidth}x${obs.frameHeight} rot=${geometry.rotationDegrees} ` +
+              `orientation=${obs.orientation} mirrored=${geometry.mirrored} ` +
+              `preview=${previewRes ? `${previewRes.width}x${previewRes.height}` : 'unknown'} ` +
+              `rect=${Math.round(previewRect.width)}x${Math.round(previewRect.height)}`
+          );
+        }
+      } else {
+        overlayRef.current?.setBBox(null);
+      }
     }
     const { signals, nextMotionState } = deriveSignals(obs, motionStateRef.current);
     motionStateRef.current = nextMotionState;
@@ -198,77 +239,133 @@ export const CameraPresence = React.memo(function CameraPresence({
   const cameraFrameOutput = useFaceFrameProcessor(handleObservation);
 
   // Real teardown: when disabled (or permission/device aren't ready), this
-  // component returns null and unmounts `<Camera>` entirely rather than
-  // rendering it with isActive={false} -- unmounting drops the underlying
-  // CameraSession/capture pipeline, which is what actually releases the OS
-  // camera-in-use indicator. isActive is still passed through below for the
-  // brief window while mounted and enabled toggles mid-lifecycle.
+  // component renders nothing and PresenceCameraSession unmounts, which
+  // disposes its CameraSession (useCamera's teardown: stop() +
+  // configure([])) -- that is what actually releases the OS camera-in-use
+  // indicator.
   if (!enabled || lifecycle !== 'granted' || !device) return null;
 
-  // `resizeMode`/`mirrorMode` are always passed with a constant value on
-  // every render of this <Camera>, regardless of previewRect -- ONLY `style`
-  // (and whether the overlay View is mounted) varies with previewRect.
-  //
-  // BUGFIX (found via on-device crash + logcat, HostFunction exception
-  // `PreviewView.resizeMode: Value is null, expected a String`, thrown from
-  // React Fabric's `cloneNodeWithNewProps`): this used to be two separate
-  // conditional `return` statements -- one <Camera> with resizeMode+
-  // mirrorMode set (visible-preview branch), one without (1x1 fallback
-  // branch). Fabric reconciled navigating away from PRESENCE (previewRect
-  // set -> null) as an UPDATE of the same native view, not a fresh mount,
-  // and represented "resizeMode was removed" as an explicit `null` sent to
-  // the native setter -- which is typed non-nullable and crashed, freezing
-  // the JS render tree. Passing the same resizeMode/mirrorMode value on
-  // every render, unconditionally, means Fabric never has to clear them.
-  //
-  // `resizeMode` is a real prop on CameraViewProps, sourced from
-  // `PreviewViewProps` (node_modules/react-native-vision-camera/lib/
-  // specs/views/PreviewView.nitro.d.ts: `resizeMode?: PreviewResizeMode`,
-  // `'cover' | 'contain'`, default `'cover'`) -- 'contain' keeps the full
-  // frame visible without cropping, which is what keeps the mapping
-  // between the normalized face bbox and the displayed image proportional
-  // (accounted for via mapBoxToPreview's letterbox-aware math).
-  //
-  // `mirrorMode` is a real prop on `CameraProps`
-  // (node_modules/react-native-vision-camera/lib/hooks/useCamera.d.ts:67,
-  // type `MirrorMode` from `specs/common-types/MirrorMode.d.ts`), defaulting
-  // to `'auto'`, which already mirrors selfie/front cameras automatically.
-  // Passed explicitly as `"on"` rather than relying on that `'auto'`
-  // default, since this is always a front camera and always wanted
-  // mirrored. `mapBoxToPreview` already assumes a mirrored preview when
-  // mapping the normalized bbox to preview pixels, so this must keep
-  // producing a mirrored image to match that assumption. At 1x1/opacity 0
-  // (previewRect unset) neither prop is visually observable, so a constant
-  // value here has no effect on the invisible-detection-only behavior.
-  const previewStyle = previewRect
-    ? {
-        position: 'absolute' as const,
-        left: previewRect.x,
-        top: previewRect.y,
-        width: previewRect.width,
-        height: previewRect.height,
-      }
-    : { width: 1, height: 1, opacity: 0 };
+  return (
+    <PresenceCameraSession
+      device={device}
+      frameOutput={cameraFrameOutput}
+      previewRect={previewRect ?? null}
+      overlayRef={overlayRef}
+      previewOutputRef={previewOutputRef}
+    />
+  );
+});
 
+/**
+ * Owns the single CameraSession for presence detection.
+ *
+ * BLACK-BLOCK FIX: VisionCamera's `<Camera>` view ALWAYS adds a
+ * PreviewOutput (node_modules/react-native-vision-camera/src/views/
+ * Camera.tsx:167-175: `usePreviewOutput()` then `outputs: [previewOutput,
+ * ...outputs]`) and renders a CameraX PreviewView, whose child SurfaceView
+ * gets a full-size buffer and punches a hole through the app window no
+ * matter how small/transparent the RN view is (`opacity` can't hide a
+ * SurfaceView). The old hidden fallback (`<Camera style={{width:1,height:1,
+ * opacity:0}}>`) therefore drew a black block over the app on a cold start
+ * with camera presence already on.
+ *
+ * Instead this uses VisionCamera's headless `useCamera` hook
+ * (src/hooks/useCamera.ts:222 -- "creates a CameraSession, manages the
+ * input and outputs ... and returns a CameraController"; its own doc
+ * example passes `outputs: []` with no view) with ONLY the frame output
+ * when hidden, so no Preview use case and no PreviewView/SurfaceView exist
+ * at all. When the Presence screen supplies a previewRect, the preview
+ * output is added to the same session and a `NativePreviewView` (the host
+ * view `<Camera>` itself renders, src/views/NativePreviewView.tsx:42) is
+ * mounted at that rect. Toggling visibility only changes `outputs`, which
+ * re-runs `session.configure(...)` on the SAME session (internal/
+ * useCameraController.ts:72-128 -> HybridCameraSession.kt:54-95 unbindAll +
+ * bindToLifecycle while the lifecycle stays active), so detection resumes
+ * after a single CameraX rebind instead of a full session teardown.
+ *
+ * `mirrorMode="on"` applies to every output (useCameraController.ts:91-94):
+ * the preview is shown mirrored, and frames report `isMirrored=true`
+ * (HybridFrameOutput.kt:129) while the buffer itself is not flipped -- the
+ * overlay math mirrors X once to match.
+ */
+function PresenceCameraSession({
+  device,
+  frameOutput,
+  previewRect,
+  overlayRef,
+  previewOutputRef,
+}: {
+  device: CameraDevice;
+  frameOutput: CameraFrameOutput;
+  previewRect: { x: number; y: number; width: number; height: number } | null;
+  overlayRef: React.RefObject<FaceBoxOverlayHandle | null>;
+  previewOutputRef: React.MutableRefObject<CameraPreviewOutput | null>;
+}) {
+  const previewOutput = usePreviewOutput();
+  const showPreview = previewRect != null;
+  // Memoized on visibility only (not on the rect's identity, which changes
+  // on every layout) so the session is reconfigured only on a real
+  // hidden <-> visible switch.
+  const outputs = useMemo<CameraOutput[]>(
+    () => (showPreview ? [previewOutput, frameOutput] : [frameOutput]),
+    [showPreview, previewOutput, frameOutput]
+  );
+
+  useCamera({
+    device,
+    isActive: true,
+    outputs,
+    constraints: CAMERA_CONSTRAINTS,
+    mirrorMode: 'on',
+  });
+
+  useEffect(() => {
+    previewOutputRef.current = showPreview ? previewOutput : null;
+    return () => {
+      previewOutputRef.current = null;
+    };
+  }, [showPreview, previewOutput, previewOutputRef]);
+
+  if (!previewRect) return null;
+
+  const previewStyle = {
+    position: 'absolute' as const,
+    left: previewRect.x,
+    top: previewRect.y,
+    width: previewRect.width,
+    height: previewRect.height,
+  };
+
+  // POSITIONING: the rect's left/top go on a plain RN host View, never on
+  // NativePreviewView itself. VisionCamera's HybridPreviewView calls
+  // `previewView.installHierarchyFitter()` (views/HybridPreviewView.kt init),
+  // whose onChildViewAdded does `parent.layout(0, 0, measuredW, measuredH)`
+  // on the PreviewView when CameraX adds its SurfaceView child
+  // (extensions/ViewGroup+installHierarchyFitter.kt) -- re-laying the
+  // PreviewView at (0,0) of ITS parent and discarding RN's left/top while
+  // keeping width/height. That put the preview at the top-left of the
+  // screen, over the header and BACK. Inside a wrapper sized/positioned at
+  // the rect, (0,0) IS the correct spot, so the fitter becomes harmless.
+  // `<Camera>` never hits this because it renders the view at 0,0 itself.
+  //
+  // `resizeMode="contain"` (FIT_CENTER) shows the whole preview stream,
+  // letterboxed; the overlay maps against that image (mapBoxToPreview with
+  // previewFrameSize). Always passed with the same value: this view only
+  // ever mounts/unmounts, it is never updated to a state without resizeMode
+  // (see the Fabric null-prop crash that the old single-<Camera> design had
+  // to guard against).
   return (
     <>
-      <Camera
-        style={previewStyle}
-        resizeMode="contain"
-        mirrorMode="on"
-        device={device}
-        isActive={enabled}
-        outputs={[cameraFrameOutput]}
-        constraints={[{ fps: TARGET_FPS }]}
-      />
-      {previewRect && (
-        <View style={previewStyle}>
-          <FaceBoxOverlay
-            ref={overlayRef}
-            rect={{ width: previewRect.width, height: previewRect.height }}
-          />
-        </View>
-      )}
+      <View style={[previewStyle, styles.previewClip]} pointerEvents="none">
+        <NativePreviewView style={StyleSheet.absoluteFill} previewOutput={previewOutput} resizeMode="contain" />
+      </View>
+      <View style={previewStyle}>
+        <FaceBoxOverlay ref={overlayRef} rect={{ width: previewRect.width, height: previewRect.height }} />
+      </View>
     </>
   );
+}
+
+const styles = StyleSheet.create({
+  previewClip: { overflow: 'hidden' },
 });
