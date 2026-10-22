@@ -67,6 +67,18 @@ final class FakeBackend: DisplayBackend {
         if let applyError { return completion(.failure(applyError)) }
         completion(.success(()))
     }
+    /// When true, `refreshCaptureTarget` completions are held in `pendingRefreshes`.
+    var deferRefresh = false
+    var pendingRefreshes: [(Result<Void, BackendError>) -> Void] = []
+    var refreshCalls = 0
+    var refreshResult: Result<Void, BackendError> = .success(())
+    func refreshCaptureTarget(completion: @escaping (Result<Void, BackendError>) -> Void) {
+        refreshCalls += 1
+        log.append("refreshCaptureTarget")
+        if deferRefresh { return pendingRefreshes.append(completion) }
+        completion(refreshResult)
+    }
+    func completeRefresh(_ result: Result<Void, BackendError> = .success(())) { pendingRefreshes.removeFirst()(result) }
     func currentWidthPoints() -> Int { widthPoints }
     /// Overrides `displayBounds()` (e.g. after the user moved the display in the arrangement).
     var bounds: CGRect?
@@ -132,6 +144,10 @@ func helloFrame(v: Int = 1, token: String = "tok", sessionId: String = "s1", w: 
 }
 
 func ackFrame(_ seq: UInt64) -> Data { jsonFrame(#"{"t":"ack","seq":\#(seq)}"#) }
+
+func resizeFrame(w: Int, h: Int) -> Data {
+    jsonFrame(#"{"t":"resize","surfaceW":\#(w),"surfaceH":\#(h),"orientation":"\#(w >= h ? "landscape" : "portrait")"}"#)
+}
 
 // MARK: - Harness
 
@@ -581,24 +597,21 @@ final class Harness {
         #expect(h.sink.logs(level: "warn").count == 2)
     }
 
-    @Test func resizeIsStillIgnored() {
+    @Test func resizeWithOutOfRangeSizeIsDropped() {
         let h = Harness()
         let (c, id) = h.authed()
+        var debug: [String] = []
+        h.ctrl.debugLog = { debug.append($0) }
         let calls = h.backend.log.count
-        h.ctrl.receive(jsonFrame(#"{"t":"resize","surfaceW":1080,"surfaceH":2340,"orientation":"portrait"}"#), on: id)
-        h.ctrl.receive(jsonFrame(#"{"t":"resize","surfaceW":1080,"surfaceH":2340,"orientation":"portrait"}"#), on: id)
-        #expect(h.backend.log.count == calls)
+        h.ctrl.receive(resizeFrame(w: 0, h: 2340), on: id)
+        h.ctrl.receive(resizeFrame(w: 1080, h: 9000), on: id)
+        h.advance(0.5)
+        h.ctrl.tick()
         #expect(h.ctrl.endedReason == nil)
         #expect(!c.closed)
-        #expect(h.sink.logs(level: "info").count == 1)   // once per type
+        #expect(h.backend.log.count == calls)
+        #expect(debug.count == 2)
         #expect(h.sink.logs(level: "warn").isEmpty)
-    }
-
-    @Test func resizeWithOutOfRangeSizeIsAProtocolError() {
-        let h = Harness()
-        let (_, id) = h.authed()
-        h.ctrl.receive(jsonFrame(#"{"t":"resize","surfaceW":0,"surfaceH":2340,"orientation":"portrait"}"#), on: id)
-        #expect(h.ctrl.endedReason == .protocolError)
     }
 
     @Test func videoFromPhoneIsAProtocolError() {
@@ -1046,18 +1059,14 @@ final class Harness {
     @Test func setTrackpadTogglesTheCapturedCursor() {
         let h = Harness()
         let (_, id) = h.authed()
-        var changes: [Bool] = []
-        h.ctrl.onTrackpadChanged = { changes.append($0) }
         h.ctrl.receive(jsonFrame(#"{"t":"setTrackpad","enabled":true}"#), on: id)
         #expect(h.backend.cursorCalls == [true])
-        #expect(changes == [true])
         // A capture restart keeps the toggled cursor.
         h.ctrl.receive(jsonFrame(#"{"t":"pause"}"#), on: id)
         h.ctrl.receive(jsonFrame(#"{"t":"resume"}"#), on: id)
         #expect(h.backend.startCalls.last?.cursor == true)
         h.ctrl.receive(jsonFrame(#"{"t":"setTrackpad","enabled":false}"#), on: id)
         #expect(h.backend.cursorCalls == [true, false])
-        #expect(changes == [true, false])
         #expect(h.sink.logs.isEmpty)
     }
 
@@ -1128,5 +1137,448 @@ final class Harness {
         h.ctrl.onBoundsChanged = { _ in bounds += 1 }
         h.connect(helloFrame())
         #expect(bounds == 0)
+    }
+
+    // MARK: rotation renegotiation (Task 4.5)
+
+    /// Portrait session (start + hello at 1080x2340), streaming.
+    private func portraitSession() -> (Harness, FakeConnection, ConnectionID) {
+        let h = Harness(w: 1080, h: 2340)
+        h.backend.widthPoints = 432   // 1080 / 2.5
+        h.ready()
+        let (c, id) = h.connect(helloFrame(w: 1080, h: 2340, orientation: "portrait"))
+        return (h, c, id)
+    }
+
+    @Test func coalescesResizesWithin300ms() {
+        let (h, _, id) = portraitSession()
+        #expect(h.backend.applied.count == 1)   // begin()
+        h.ctrl.receive(resizeFrame(w: 1080, h: 2340), on: id)
+        h.advance(0.1)
+        h.ctrl.receive(resizeFrame(w: 2340, h: 1080), on: id)
+        h.advance(0.25)
+        h.ctrl.tick()
+        #expect(h.backend.applied.count == 1)   // 250 ms after the last one: still waiting
+        h.advance(0.1)
+        h.ctrl.tick()
+        #expect(h.backend.applied.count == 2)
+        #expect(h.backend.applied.last == DisplayModes.modes(surfaceW: 2340, surfaceH: 1080, preferredDivisor: 2.5))
+        h.advance(1)
+        h.ctrl.tick()
+        #expect(h.backend.applied.count == 2)   // applied once
+    }
+
+    @Test func resizeKeepsTheUsersChosenScale() {
+        let h = Harness()
+        let (_, id) = h.authed()
+        h.backend.widthPoints = 1170   // the user picked the 2.0 (pixel-exact) mode on the 2340 surface
+        h.ctrl.receive(resizeFrame(w: 1080, h: 2340), on: id)
+        h.advance(0.35)
+        h.ctrl.tick()
+        #expect(h.backend.applied.last?.first == ModeSpec(widthPoints: 540, heightPoints: 1170))
+        #expect(h.backend.applied.last == DisplayModes.modes(surfaceW: 1080, surfaceH: 2340, preferredDivisor: 2.0))
+    }
+
+    @Test func resizeRestartsCaptureWithAnIDR() {
+        let h = Harness()
+        let (c, id) = h.authed()
+        h.ctrl.parameterSets(annexB: Data([0, 0, 0, 1, 0x67]), width: 2340, height: 1080)
+        h.encode(3)
+        h.backend.log.removeAll()
+        h.ctrl.receive(resizeFrame(w: 1080, h: 2340), on: id)
+        h.advance(0.35)
+        h.ctrl.tick()
+        #expect(h.backend.log == ["stopCapture", "applyModes", "refreshCaptureTarget", "startCapture", "forceKeyframe"])
+        #expect(h.backend.startCalls.last?.w == 1080)
+        #expect(h.backend.startCalls.last?.h == 2340)
+        // Flow control: window cleared (3 unacked frames no longer block), seq continues.
+        #expect(h.ctrl.shouldEncodeNextFrame())
+        h.ctrl.parameterSets(annexB: Data([0, 0, 0, 1, 0x67]), width: 1080, height: 2340)
+        h.encode(1)
+        #expect(c.videoFrames.last?.seq == 4)
+        let configs = c.json.filter { $0["t"] as? String == "streamConfig" }
+        #expect(configs.last?["w"] as? Int == 1080)
+        #expect(configs.last?["h"] as? Int == 2340)
+        // streamConfig is the frame right before the new config frame.
+        let frames = c.frames
+        if let cfg = frames.lastIndex(where: { if case .video(let f, _, _) = $0 { return f.contains(.config) } else { return false } }) {
+            if case .json(let body) = frames[cfg - 1] {
+                #expect(String(decoding: body, as: UTF8.self).contains("streamConfig"))
+            } else { Issue.record("no streamConfig before the config frame") }
+        } else { Issue.record("no config frame") }
+    }
+
+    @Test func resizeReportsBoundsOnlyAfterTheModeIsActiveThenStartsCapture() {
+        let h = Harness()
+        let (c, id) = h.authed()
+        var order: [String] = []
+        h.ctrl.onBoundsChanged = { _ in order.append("bounds:\(h.backend.startCalls.count)") }
+        h.backend.deferApply = true
+        h.ctrl.receive(resizeFrame(w: 1080, h: 2340), on: id)
+        h.advance(0.35)
+        h.ctrl.tick()
+        #expect(h.backend.pendingApplies.count == 1)
+        #expect(order.isEmpty)
+        // The session queue is never blocked meanwhile: keepalives flow and the watchdog is fed.
+        for _ in 0..<5 {
+            h.advance(0.5)
+            h.ctrl.receive(jsonFrame(#"{"t":"keepalive"}"#), on: id)
+            h.ctrl.tick()
+        }
+        #expect(h.ctrl.endedReason == nil)
+        #expect(c.jsonTypes.filter { $0 == "keepalive" }.count >= 2)
+        #expect(h.backend.startCalls.count == 1)
+        h.backend.completeApply()
+        #expect(order == ["bounds:1"])   // bounds first, then capture
+        #expect(h.backend.startCalls.count == 2)
+        #expect(h.backend.startCalls.last?.w == 1080)
+    }
+
+    @Test func resizeEqualToTheCurrentSurfaceIsIgnored() {
+        let h = Harness()
+        let (_, id) = h.authed()
+        let calls = h.backend.log.count
+        h.ctrl.receive(resizeFrame(w: 2340, h: 1080), on: id)
+        h.advance(0.5)
+        h.ctrl.tick()
+        #expect(h.backend.log.count == calls)
+    }
+
+    @Test func resizeThereAndBackWithinTheWindowDoesNothing() {
+        let h = Harness()
+        let (_, id) = h.authed()
+        let calls = h.backend.log.count
+        h.ctrl.receive(resizeFrame(w: 1080, h: 2340), on: id)
+        h.advance(0.1)
+        h.ctrl.receive(resizeFrame(w: 2340, h: 1080), on: id)
+        h.advance(0.5)
+        h.ctrl.tick()
+        #expect(h.backend.log.count == calls)
+    }
+
+    @Test func resizeDuringTheHelloActivationIsAppliedOnceItLands() {
+        let (h, _, id) = resizingSession()   // hello 1080x2340 on a 2340x1080 display, activation in flight
+        h.ctrl.receive(resizeFrame(w: 2340, h: 1080), on: id)
+        h.advance(0.5)
+        h.ctrl.tick()
+        #expect(h.backend.applied.count == 2)   // begin + hello: the resize waits
+        h.backend.widthPoints = 432   // macOS activated the portrait 2.5 mode
+        h.backend.completeApply()
+        #expect(h.backend.startCalls.count == 1)
+        h.ctrl.tick()
+        #expect(h.backend.applied.count == 3)
+        #expect(h.backend.applied.last == DisplayModes.modes(surfaceW: 2340, surfaceH: 1080, preferredDivisor: 2.5))
+        h.backend.completeApply()
+        #expect(h.backend.startCalls.last?.w == 2340)
+        #expect(h.backend.startCalls.last?.h == 1080)
+    }
+
+    @Test func resizesDuringAnInFlightResizeActivationAreCoalescedAfterIt() {
+        let h = Harness()
+        let (_, id) = h.authed()
+        h.backend.deferApply = true
+        h.ctrl.receive(resizeFrame(w: 1080, h: 2340), on: id)
+        h.advance(0.35)
+        h.ctrl.tick()
+        #expect(h.backend.applied.count == 2)
+        h.ctrl.receive(resizeFrame(w: 2340, h: 1080), on: id)
+        h.advance(0.1)
+        h.ctrl.receive(resizeFrame(w: 1200, h: 2600), on: id)
+        h.advance(0.5)
+        h.ctrl.tick()
+        #expect(h.backend.applied.count == 2)   // never two activations at once
+        h.backend.widthPoints = 432   // macOS activated the portrait 2.5 mode
+        h.backend.completeApply()
+        h.ctrl.tick()
+        #expect(h.backend.applied.count == 3)
+        #expect(h.backend.applied.last?.first == DisplayModes.modes(surfaceW: 1200, surfaceH: 2600).first)
+        h.backend.completeApply()
+        #expect(h.backend.startCalls.map { $0.w } == [2340, 1080, 1200])
+    }
+
+    @Test func reconfigurationDuringOurResizeDoesNotStartASecondCapture() {
+        let h = Harness()
+        let (_, id) = h.authed()
+        h.backend.deferApply = true
+        h.ctrl.receive(resizeFrame(w: 1080, h: 2340), on: id)
+        h.advance(0.35)
+        h.ctrl.tick()
+        h.ctrl.displayReconfigured()   // our own mode change, observed mid-activation
+        #expect(h.backend.startCalls.count == 1)
+        h.backend.completeApply()
+        #expect(h.backend.startCalls.count == 2)
+        #expect(h.backend.startCalls.last?.w == 1080)
+    }
+
+    @Test func theReconfigurationEchoOfOurResizeReportsBoundsWithoutASecondRestart() {
+        let h = Harness()
+        let (_, id) = h.authed()
+        var bounds = 0
+        h.ctrl.onBoundsChanged = { _ in bounds += 1 }
+        h.ctrl.receive(resizeFrame(w: 1080, h: 2340), on: id)
+        h.advance(0.35)
+        h.ctrl.tick()
+        #expect(h.backend.startCalls.count == 2)
+        #expect(bounds == 1)
+        h.advance(0.1)
+        h.ctrl.displayReconfigured()   // the echo of our own mode change
+        #expect(bounds == 2)
+        #expect(h.backend.startCalls.count == 2)
+        h.advance(1)
+        h.ctrl.displayReconfigured()   // a later change (the user picked another scale): restart
+        #expect(bounds == 3)
+        #expect(h.backend.startCalls.count == 3)
+        #expect(h.backend.startCalls.last?.w == 1080)
+    }
+
+    @Test func resizeWhilePausedAppliesTheModeAndStartsCaptureOnResume() {
+        let h = Harness()
+        let (_, id) = h.authed()
+        h.ctrl.receive(jsonFrame(#"{"t":"pause"}"#), on: id)
+        h.ctrl.receive(resizeFrame(w: 1080, h: 2340), on: id)
+        h.advance(0.35)
+        h.ctrl.tick()
+        #expect(h.backend.applied.count == 2)
+        #expect(h.backend.startCalls.count == 1)   // still paused
+        h.ctrl.receive(jsonFrame(#"{"t":"resume"}"#), on: id)
+        #expect(h.backend.startCalls.count == 2)
+        #expect(h.backend.startCalls.last?.w == 1080)
+    }
+
+    /// M4: a failed rotation activation keeps the old mode instead of ending the session.
+    @Test func resizeActivationFailureKeepsTheOldModeAndSession() {
+        let h = Harness()
+        let (c, id) = h.authed()
+        var bounds: [CGRect] = []
+        h.ctrl.onBoundsChanged = { bounds.append($0) }
+        h.backend.log.removeAll()
+        let keyframes = h.backend.forceKeyframeCalls
+        h.backend.applyError = BackendError.captureFailed("mode")
+        h.ctrl.receive(resizeFrame(w: 1080, h: 2340), on: id)
+        h.advance(0.35)
+        h.ctrl.tick()
+        #expect(h.ctrl.endedReason == nil)
+        #expect(h.backend.destroyCalls == 0)
+        #expect(!c.jsonTypes.contains("end"))
+        #expect(h.sink.logs(level: "warn").contains { $0.contains("keeping 2340x1080") })
+        #expect(h.sink.logs(level: "error").isEmpty)
+        #expect(h.backend.log == ["stopCapture", "applyModes", "refreshCaptureTarget", "startCapture", "forceKeyframe"])
+        #expect(h.backend.startCalls.last?.w == 2340)
+        #expect(h.backend.startCalls.last?.h == 1080)
+        #expect(h.backend.forceKeyframeCalls == keyframes + 1)
+        #expect(bounds.count == 1)
+        // `surface` is the old size again: a resize back to it is a no-op, a retry renegotiates.
+        h.backend.applyError = nil
+        h.ctrl.receive(resizeFrame(w: 2340, h: 1080), on: id)
+        h.advance(0.35)
+        h.ctrl.tick()
+        #expect(h.backend.applied.count == 2)
+        h.ctrl.receive(resizeFrame(w: 1080, h: 2340), on: id)
+        h.advance(0.35)
+        h.ctrl.tick()
+        #expect(h.backend.applied.count == 3)
+        #expect(h.backend.startCalls.last?.w == 1080)
+    }
+
+    @Test func resizeActivationFailureWhilePausedResumesAtTheOldSize() {
+        let h = Harness()
+        let (_, id) = h.authed()
+        h.ctrl.receive(jsonFrame(#"{"t":"pause"}"#), on: id)
+        h.backend.applyError = BackendError.unsupported
+        h.ctrl.receive(resizeFrame(w: 1080, h: 2340), on: id)
+        h.advance(0.35)
+        h.ctrl.tick()
+        #expect(h.ctrl.endedReason == nil)
+        #expect(h.backend.startCalls.count == 1)   // still paused
+        h.ctrl.receive(jsonFrame(#"{"t":"resume"}"#), on: id)
+        #expect(h.backend.startCalls.count == 2)
+        #expect(h.backend.startCalls.last?.w == 2340)
+    }
+
+    @Test func pendingResizeIsDroppedWhenTheSessionEnds() {
+        let h = Harness()
+        let (_, id) = h.authed()
+        h.ctrl.receive(resizeFrame(w: 1080, h: 2340), on: id)
+        h.ctrl.stop(.stopRequested)
+        let calls = h.backend.log.count
+        h.advance(0.5)
+        h.ctrl.tick()
+        #expect(h.backend.log.count == calls)
+    }
+
+    // MARK: fix round 1 — fresh capture target after a mode change; release a held button on resize
+
+    @Test func helloAtTheStartSizeDoesNotRefreshTheCaptureTarget() {
+        let h = Harness()
+        _ = h.authed()
+        #expect(h.backend.refreshCalls == 0)   // waitUntilCapturable's snapshot is current
+    }
+
+    @Test func implicitHelloResizeRefreshesTheCaptureTargetBeforeStarting() {
+        let h = Harness().ready()
+        h.connect(helloFrame(w: 1080, h: 2340, orientation: "portrait"))
+        let order = h.backend.log.filter { ["applyModes", "refreshCaptureTarget", "startCapture"].contains($0) }
+        #expect(order == ["applyModes", "applyModes", "refreshCaptureTarget", "startCapture"])
+    }
+
+    @Test func resizeWaitsForTheRefreshedCaptureTargetWithoutBlocking() {
+        let h = Harness()
+        let (c, id) = h.authed()
+        h.backend.deferRefresh = true
+        h.ctrl.receive(resizeFrame(w: 1080, h: 2340), on: id)
+        h.advance(0.35)
+        h.ctrl.tick()
+        #expect(h.backend.pendingRefreshes.count == 1)
+        #expect(h.backend.startCalls.count == 1)
+        h.advance(1)
+        h.ctrl.receive(jsonFrame(#"{"t":"keepalive"}"#), on: id)
+        h.ctrl.tick()
+        #expect(c.jsonTypes.contains("keepalive"))
+        // A resize meanwhile waits for this restart (never two in flight).
+        h.ctrl.receive(resizeFrame(w: 2340, h: 1080), on: id)
+        h.advance(0.5)
+        h.ctrl.tick()
+        #expect(h.backend.applied.count == 2)
+        h.backend.completeRefresh()
+        #expect(h.backend.startCalls.count == 2)
+        #expect(h.backend.startCalls.last?.w == 1080)
+    }
+
+    @Test func reconfigurationRestartRefreshesTheCaptureTarget() {
+        let h = Harness()
+        _ = h.authed()
+        h.backend.log.removeAll()
+        h.ctrl.displayReconfigured()
+        #expect(h.backend.log == ["stopCapture", "refreshCaptureTarget", "startCapture", "forceKeyframe"])
+    }
+
+    @Test func reconfigurationWhilePausedRefreshesOnResume() {
+        let h = Harness()
+        let (_, id) = h.authed()
+        h.ctrl.receive(jsonFrame(#"{"t":"pause"}"#), on: id)
+        h.ctrl.displayReconfigured()
+        #expect(h.backend.refreshCalls == 0)
+        h.ctrl.receive(jsonFrame(#"{"t":"resume"}"#), on: id)
+        #expect(h.backend.refreshCalls == 1)
+        #expect(h.backend.startCalls.count == 2)
+        h.ctrl.receive(jsonFrame(#"{"t":"pause"}"#), on: id)
+        h.ctrl.receive(jsonFrame(#"{"t":"resume"}"#), on: id)
+        #expect(h.backend.refreshCalls == 1)   // nothing changed since
+    }
+
+    @Test func aLateRefreshAfterTheEndIsIgnored() {
+        let h = Harness()
+        _ = h.authed()
+        h.backend.deferRefresh = true
+        h.ctrl.displayReconfigured()
+        h.ctrl.stop(.stopRequested)
+        h.backend.completeRefresh()
+        #expect(h.backend.startCalls.count == 1)
+    }
+
+    @Test func aRefreshLandingWhilePausedDefersCaptureToResume() {
+        let h = Harness()
+        let (_, id) = h.authed()
+        h.backend.deferRefresh = true
+        h.ctrl.displayReconfigured()
+        h.ctrl.receive(jsonFrame(#"{"t":"pause"}"#), on: id)
+        h.backend.completeRefresh()
+        #expect(h.backend.startCalls.count == 1)
+        h.ctrl.receive(jsonFrame(#"{"t":"resume"}"#), on: id)
+        #expect(h.backend.startCalls.count == 2)
+        #expect(h.backend.refreshCalls == 1)
+    }
+
+    @Test func pauseAndResumeDuringARefreshStartCaptureOnce() {
+        let h = Harness()
+        let (_, id) = h.authed()
+        h.backend.deferRefresh = true
+        h.ctrl.displayReconfigured()
+        h.ctrl.receive(jsonFrame(#"{"t":"pause"}"#), on: id)
+        h.ctrl.receive(jsonFrame(#"{"t":"resume"}"#), on: id)
+        #expect(h.backend.startCalls.count == 1)
+        h.backend.completeRefresh()
+        #expect(h.backend.startCalls.count == 2)
+        #expect(h.backend.pendingRefreshes.isEmpty)
+    }
+
+    @Test func applyingAResizeReleasesAHeldButtonBeforeTheBoundsChange() {
+        let h = Harness()
+        let (_, id) = h.authed()
+        var order: [String] = []
+        h.ctrl.onResizeApplied = { order.append("release") }
+        h.ctrl.onBoundsChanged = { _ in order.append("bounds") }
+        h.ctrl.receive(resizeFrame(w: 1080, h: 2340), on: id)
+        #expect(order.isEmpty)   // not before it is applied
+        h.advance(0.35)
+        h.ctrl.tick()
+        #expect(order == ["release", "bounds"])
+    }
+
+    @Test func anIgnoredResizeReleasesNothing() {
+        let h = Harness()
+        let (_, id) = h.authed()
+        var released = 0
+        h.ctrl.onResizeApplied = { released += 1 }
+        h.ctrl.receive(resizeFrame(w: 2340, h: 1080), on: id)
+        h.advance(0.35)
+        h.ctrl.tick()
+        #expect(released == 0)
+    }
+
+    // MARK: fix round 2 — reconfiguration during the refresh; permission revoked
+
+    @Test func aReconfigurationDuringTheRefreshRefreshesAgainThenStartsOnce() {
+        let h = Harness()
+        _ = h.authed()
+        h.backend.deferRefresh = true
+        h.ctrl.displayReconfigured()
+        #expect(h.backend.refreshCalls == 1)
+        h.ctrl.displayReconfigured()   // the display changed again while we were reading it
+        #expect(h.backend.refreshCalls == 1)
+        h.backend.completeRefresh()
+        #expect(h.backend.refreshCalls == 2)
+        #expect(h.backend.startCalls.count == 1)   // not yet: the snapshot may be stale
+        h.backend.completeRefresh()
+        #expect(h.backend.startCalls.count == 2)
+        #expect(h.backend.pendingRefreshes.isEmpty)
+    }
+
+    @Test func extraRefreshesAreBoundedThenCaptureStartsWithTheLatestSnapshot() {
+        let h = Harness()
+        _ = h.authed()
+        h.backend.deferRefresh = true
+        h.ctrl.displayReconfigured()
+        for _ in 0..<3 {
+            h.ctrl.displayReconfigured()
+            h.backend.completeRefresh()
+        }
+        #expect(h.backend.refreshCalls == 1 + SessionController.maxExtraTargetRefreshes)
+        #expect(h.backend.pendingRefreshes.isEmpty)
+        #expect(h.backend.startCalls.count == 2)
+        #expect(h.sink.logs(level: "info").contains { $0.contains("latest snapshot") })
+    }
+
+    @Test func permissionRevokedDuringTheRefreshEndsWithThePermissionReason() {
+        let h = Harness()
+        let (c, id) = h.authed()
+        h.backend.refreshResult = .failure(.permissionDenied)
+        h.ctrl.receive(resizeFrame(w: 1080, h: 2340), on: id)
+        h.advance(0.35)
+        h.ctrl.tick()
+        #expect(h.ctrl.endedReason == .permissionScreenRecording)
+        #expect(h.sink.events.last == .ended(.permissionScreenRecording))
+        #expect(h.backend.startCalls.count == 1)   // no capture start after the refresh
+        #expect(c.jsonTypes.last == "end")
+        #expect(h.backend.destroyCalls == 1)
+    }
+
+    @Test func aNonPermissionRefreshFailureFallsBackToThePreviousSnapshot() {
+        let h = Harness()
+        _ = h.authed()
+        h.backend.refreshResult = .failure(.captureUnavailable)
+        h.ctrl.displayReconfigured()
+        #expect(h.ctrl.endedReason == nil)
+        #expect(h.backend.startCalls.count == 2)
     }
 }

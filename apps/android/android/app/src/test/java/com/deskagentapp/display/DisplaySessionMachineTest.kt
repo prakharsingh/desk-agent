@@ -6,6 +6,7 @@ import com.deskagentapp.display.SessionAction.Emit
 import com.deskagentapp.display.SessionAction.OpenLink
 import com.deskagentapp.display.SessionAction.ReleaseDecoder
 import com.deskagentapp.display.SessionAction.SendBye
+import com.deskagentapp.display.SessionAction.SendResize
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -121,6 +122,56 @@ class DisplaySessionMachineTest {
         val m = m().toStreaming()
         assertEquals(emptyList<SessionAction>(), m.handle(SessionInput.SurfaceReady(10, 20)))
         assertEquals(SessionState.Streaming("s1", true), m.state)
+    }
+
+    // ---- rotation (Task 4.5) ----
+
+    @Test fun `a new surface size while streaming sends resize not bye`() {
+        val m = m().toStreaming() // hello at 1080x2400
+        assertEquals(listOf<SessionAction>(SendResize(2400, 1080)), m.handle(SessionInput.SurfaceResized(2400, 1080)))
+        assertEquals(SessionState.Streaming("s1", true), m.state)
+        // and back again
+        assertEquals(listOf<SessionAction>(SendResize(1080, 2400)), m.handle(SessionInput.SurfaceResized(1080, 2400)))
+    }
+
+    @Test fun `the same size does nothing`() {
+        val m = m().toStreaming()
+        assertEquals(emptyList<SessionAction>(), m.handle(SessionInput.SurfaceResized(1080, 2400)))
+        m.handle(SessionInput.SurfaceResized(2400, 1080))
+        assertEquals(emptyList<SessionAction>(), m.handle(SessionInput.SurfaceResized(2400, 1080)))
+        assertEquals(SessionState.Streaming("s1", true), m.state)
+    }
+
+    @Test fun `a resize before streaming only replaces the pending size`() {
+        val m = m()
+        m.handle(SessionInput.Start("s1", 9000, 0))
+        m.handle(SessionInput.SurfaceReady(1080, 2400))
+        assertEquals(emptyList<SessionAction>(), m.handle(SessionInput.SurfaceResized(2400, 1080)))
+        assertEquals(listOf<SessionAction>(OpenLink(9000, "tok", "s1")), m.handle(SessionInput.TokenAvailable("s1", "tok")))
+        // The hello carried 2400x1080: nothing to reconcile at helloAck.
+        assertEquals(listOf<SessionAction>(Emit("streaming", inputEnabled = true)), m.handle(SessionInput.HelloAck(true)))
+    }
+
+    @Test fun `a rotation after hello but before helloAck is sent once streaming`() {
+        val m = m().toConnecting() // hello at 1080x2400
+        assertEquals(emptyList<SessionAction>(), m.handle(SessionInput.SurfaceResized(2400, 1080)))
+        assertEquals(
+            listOf(Emit("streaming", inputEnabled = true), SendResize(2400, 1080)),
+            m.handle(SessionInput.HelloAck(true)),
+        )
+    }
+
+    @Test fun `a rotation there and back before helloAck sends nothing`() {
+        val m = m().toConnecting()
+        m.handle(SessionInput.SurfaceResized(2400, 1080))
+        m.handle(SessionInput.SurfaceResized(1080, 2400))
+        assertEquals(listOf<SessionAction>(Emit("streaming", inputEnabled = true)), m.handle(SessionInput.HelloAck(true)))
+    }
+
+    @Test fun `a resize after the end is ignored`() {
+        val m = m().toStreaming()
+        m.handle(SessionInput.UserStop)
+        assertEquals(emptyList<SessionAction>(), m.handle(SessionInput.SurfaceResized(2400, 1080)))
     }
 
     @Test fun `link loss ends with link-lost`() {

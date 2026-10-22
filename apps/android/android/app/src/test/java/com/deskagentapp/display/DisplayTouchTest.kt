@@ -139,6 +139,27 @@ class DisplayTouchTest {
         assertEquals(1, sent.size)
     }
 
+    @Test fun `a surface resize mid-drag ends the drag first`() {
+        controller.surfaceSizeChanged(1000, 500)
+        controller.onSample(sample(TouchAction.DOWN, 10_000, 100f to 100f))
+        controller.onSample(sample(TouchAction.MOVE, 10_050, 200f to 100f))
+        sent.clear()
+        controller.surfaceSizeChanged(1000, 500) // same size: the drag goes on
+        assertTrue(sent.isEmpty())
+        controller.surfaceSizeChanged(500, 1000) // rotation
+        assertEquals(listOf<SemanticEvent>(SemanticEvent.DragEnd(0.2f, 0.2f)), sent)
+    }
+
+    @Test fun `the first surface size or one after the surface was lost cancels nothing`() {
+        controller.onSample(sample(TouchAction.DOWN, 10_000, 100f to 100f))
+        controller.onSample(sample(TouchAction.MOVE, 10_050, 200f to 100f))
+        sent.clear()
+        controller.surfaceSizeChanged(1000, 500)
+        controller.surfaceLost()
+        controller.surfaceSizeChanged(500, 1000)
+        assertTrue(sent.isEmpty())
+    }
+
     @Test fun `cancel while pending drops the long press timer`() {
         controller.onSample(sample(TouchAction.DOWN, 10_000, 100f to 100f))
         controller.cancel()

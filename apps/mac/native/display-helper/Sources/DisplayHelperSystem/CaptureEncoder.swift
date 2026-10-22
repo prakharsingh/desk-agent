@@ -124,6 +124,40 @@ public final class CaptureEncoder: NSObject, SCStreamOutput, SCStreamDelegate {
         queue.async(execute: poll)
     }
 
+    /// Re-reads `displayId`'s `SCDisplay` (the snapshot `start` filters on) after a mode change, so a
+    /// rotated display is not captured through its old-geometry snapshot. Never blocks `queue`.
+    /// `.refreshed`; `.permissionDenied` when ScreenCaptureKit reports `userDeclined`; `.notRefreshed`
+    /// on any other failure, if the display is not listed or after `timeout` (the old snapshot stays).
+    /// Always exactly once, on `queue`. A result that lands after the timeout is dropped.
+    public enum RefreshResult { case refreshed, notRefreshed, permissionDenied }
+
+    public func refreshDisplay(displayId: UInt32, timeout: TimeInterval,
+                               completion: @escaping (RefreshResult) -> Void) {
+        var done = false   // only touched on `queue`
+        func finish(_ r: RefreshResult) {
+            guard !done else { return }
+            done = true
+            completion(r)
+        }
+        queue.asyncAfter(deadline: .now() + timeout) {
+            if !done { Self.log("SCShareableContent refresh timed out after \(timeout) s") }
+            finish(.notRefreshed)
+        }
+        SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: false) { [weak self] content, error in
+            guard let self else { return }
+            self.queue.async {
+                guard !done else { return }
+                if let error, Self.isUserDeclined(error) { return finish(.permissionDenied) }
+                if let d = content?.displays.first(where: { $0.displayID == displayId }) {
+                    self.shareable[displayId] = d
+                    return finish(.refreshed)
+                }
+                Self.log("SCShareableContent refresh: display \(displayId) not listed (\(error.map { "\($0)" } ?? "no error"))")
+                finish(.notRefreshed)
+            }
+        }
+    }
+
     // MARK: - Start / stop
 
     /// Requires a successful `waitUntilCapturable` for `displayId` first. `width`/`height` is the

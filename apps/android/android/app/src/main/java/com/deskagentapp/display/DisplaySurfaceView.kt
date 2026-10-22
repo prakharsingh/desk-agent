@@ -54,6 +54,8 @@ class DisplayTouchController(
     private val timeout = Runnable { onTimeout() }
     private var lastW = 1
     private var lastH = 1
+    /** The current surface size, null while there is no surface. */
+    private var surfaceSize: Pair<Int, Int>? = null
 
     var trackpadMode: Boolean
         get() = recognizer.trackpadMode
@@ -67,6 +69,21 @@ class DisplayTouchController(
 
     /** Ends any gesture in progress (a drag yields DragEnd) and drops the timer. Idempotent. */
     fun cancel() = onSample(TouchSample(TouchAction.CANCEL, emptyList(), lastW, lastH, clock()))
+
+    /**
+     * Every surfaceChanged, BEFORE the session hears about it: a new size on a held surface is a
+     * rotation, which remaps the view, so a gesture in progress ends here (a drag yields DragEnd at
+     * its last old-geometry position) instead of jumping across the Mac display.
+     */
+    fun surfaceSizeChanged(w: Int, h: Int) {
+        val previous = surfaceSize
+        surfaceSize = w to h
+        if (previous != null && previous != surfaceSize) cancel()
+    }
+
+    fun surfaceLost() {
+        surfaceSize = null
+    }
 
     private fun onTimeout() {
         forward(recognizer.onTimer(clock()))
@@ -161,6 +178,7 @@ class DisplaySurfaceView(context: Context) : SurfaceView(context), SurfaceHolder
 
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
         Log.i(TAG, "surfaceChanged ${width}x$height")
+        touch.surfaceSizeChanged(width, height) // a rotation ends a gesture before the resize
         DisplaySession.surfaceReady(holder.surface, width, height)
         DisplaySession.emitSize(width, height, resources.displayMetrics.xdpi)
     }
@@ -168,6 +186,7 @@ class DisplaySurfaceView(context: Context) : SurfaceView(context), SurfaceHolder
     override fun surfaceDestroyed(holder: SurfaceHolder) {
         Log.i(TAG, "surfaceDestroyed")
         touch.cancel()
+        touch.surfaceLost()
         DisplaySession.surfaceLost()
     }
 

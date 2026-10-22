@@ -445,6 +445,64 @@ class DisplaySessionTest {
         assertEquals(1280 to 590, decoders.last().configured)
     }
 
+    // ---- rotation (Task 4.5) ----
+
+    @Test fun `a surfaceChanged with a new size while streaming sends resize, not bye`() {
+        val l = streaming() // hello at 2340x1080
+        val surface = mockk<Surface>(relaxed = true)
+        s.surfaceReady(surface, 1080, 2340)
+        exec.drain()
+        val resize = l.sent.map { JSONObject(it) }.single { it.getString("t") == "resize" }
+        assertEquals(1080, resize.getInt("surfaceW")); assertEquals(2340, resize.getInt("surfaceH"))
+        assertEquals("portrait", resize.getString("orientation"))
+        assertFalse("bye" in l.sentTypes())
+        assertTrue(l.closes.isEmpty())
+        assertTrue(s.stateForTest() is SessionState.Streaming)
+        // A repeated surfaceChanged at the same size sends nothing more.
+        s.surfaceReady(surface, 1080, 2340)
+        exec.drain()
+        assertEquals(1, l.sentTypes().count { it == "resize" })
+    }
+
+    @Test fun `a surfaceChanged before the link opens only changes the hello size`() {
+        s.input(SessionInput.Start("s1", 8788, clock[0]))
+        val surface = mockk<Surface>(relaxed = true)
+        s.surfaceReady(surface, 2340, 1080)
+        s.surfaceReady(surface, 1080, 2340)
+        s.input(SessionInput.TokenAvailable("s1", "secret-token-s1"))
+        exec.drain()
+        val l = links.single()
+        val hello = JSONObject(l.hello!!)
+        assertEquals(1080, hello.getInt("surfaceW")); assertEquals(2340, hello.getInt("surfaceH"))
+        l.listener.onFrame(json("helloAck", "inputEnabled" to true))
+        exec.drain()
+        assertFalse("resize" in l.sentTypes())
+    }
+
+    @Test fun `during the rotation blink old-size frames keep decoding until the new config rebuilds`() {
+        val l = streaming()
+        configured(l) // 1920x886
+        l.listener.onFrame(video(1, key = true))
+        exec.drain()
+        s.surfaceReady(mockk(relaxed = true), 1080, 2340)
+        exec.drain()
+        // Old-size frames still arrive: decoded into the same decoder, no rebuild yet.
+        l.listener.onFrame(video(2, key = false))
+        exec.drain()
+        assertEquals(1, decoders.size)
+        assertEquals(listOf(1L, 2L), decoders.single().queued)
+        // The helper's new streamConfig + config frame rebuild it; the in-flight frames are acked.
+        l.listener.onFrame(json("streamConfig", "w" to 886, "h" to 1920))
+        l.listener.onFrame(config(0x22))
+        exec.drain()
+        assertEquals(2, decoders.size)
+        assertEquals(886 to 1920, decoders.last().configured)
+        assertEquals(listOf(2L), l.acks())
+        l.listener.onFrame(video(3, key = true))
+        exec.drain()
+        assertEquals(listOf(3L), decoders.last().queued)
+    }
+
     @Test fun `configure throwing ends the session with decoder-error`() {
         FakeDecoder.throwOnConfigure = true
         val l = streaming()

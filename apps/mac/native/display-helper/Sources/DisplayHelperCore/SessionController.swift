@@ -23,6 +23,11 @@ public protocol DisplayBackend: AnyObject {
     /// to 3 s OFF the session queue; `completion` is delivered later on the session queue (never
     /// inline on the real backend), so keepalives, `stop` and signals are handled meanwhile.
     func applyModes(_ modes: [ModeSpec], completion: @escaping (Result<Void, Error>) -> Void)
+    /// Re-reads the capture target (the `SCDisplay` snapshot the next `startCapture` filters on) after
+    /// the display's mode changed. Never blocks: `completion` arrives later on the session queue,
+    /// exactly once. `.failure(.permissionDenied)` when Screen Recording was revoked; any other
+    /// failure (timeout, display not listed) keeps the old snapshot and has already been logged.
+    func refreshCaptureTarget(completion: @escaping (Result<Void, BackendError>) -> Void)
     func currentWidthPoints() -> Int
     func displayBounds() -> CGRect
     func destroyDisplay()
@@ -60,19 +65,34 @@ public final class SessionController {
     public static let maxUnacked: UInt64 = 2                          // MAX_UNACKED
     /// Accepted surface dimensions (Contract A `display.start` bounds), for hello and resize.
     public static let surfaceRange = 320...8192
+    /// A `resize` is applied this long after the LAST one (checked in `tick()`), so a phone turning
+    /// through several orientations costs one renegotiation.                // RESIZE_COALESCE_MS
+    public static let resizeCoalesce: TimeInterval = 0.3
+    /// After one of our own mode activations lands, the reconfiguration notifications it caused
+    /// (the backend delivers them ~0.1 s later) only report bounds: capture already started on the
+    /// new mode, so restarting it again would be a second blink.
+    /// It also absorbs the restart for a user scale change made within 0.5 s of our own activation
+    /// (bounds still update; the stale capture target is refreshed at the next restart).
+    public static let ownReconfigurationQuiet: TimeInterval = 0.5
+    /// Re-reads of the capture target allowed per restart after the first, when the display keeps
+    /// reconfiguring while it is read; then capture starts with the latest snapshot.
+    public static let maxExtraTargetRefreshes = 2
 
     public private(set) var endedReason: EndReason?
     /// Authenticated `input` messages, only when PostEvent access was granted at hello. Never called
     /// once the session has started ending.
     public var onInput: ((InputEvent) -> Void)?
-    /// `setTrackpad` from the phone, after the captured cursor visibility was updated.
-    public var onTrackpadChanged: ((Bool) -> Void)?
     /// Invoked exactly once per session, from every end path, BEFORE the display is destroyed: the
     /// owner releases any held mouse button while the display (and its coordinates) still exist.
     public var onTeardown: (() -> Void)?
     /// The display's global bounds (points) changed: after the hello implicit resize, after every
     /// applied resize and from `displayReconfigured()`. Input mapping must follow it.
     public var onBoundsChanged: ((CGRect) -> Void)?
+    /// A `resize` is being applied (before the mode changes and before `onBoundsChanged`): the owner
+    /// releases any held mouse button so a drag cannot jump across the re-laid-out display.
+    public var onResizeApplied: (() -> Void)?
+    /// Debug diagnostics that are not Contract C `log` events (stderr in production).
+    public var debugLog: (String) -> Void = { Stderr.diag($0) }
 
     private let start: StartCommand
     private let backend: DisplayBackend
@@ -117,6 +137,14 @@ public final class SessionController {
     private var framesInWindow = 0
     private var bytesInWindow = 0
     private var phoneStats = PhoneStats(rendered: 0, dropped: 0, decodeMsAvg: 0)
+    /// The latest `resize` not yet applied, and when it arrived (coalescing window anchor).
+    private var pendingResize: (w: Int, h: Int)?
+    private var lastResizeAt: TimeInterval = 0
+    /// Until then, `displayReconfigured()` reports bounds without restarting capture.
+    private var reconfigurationQuietUntil: TimeInterval = -.infinity
+    /// The display's mode/geometry changed since the capture target was last read: the next capture
+    /// (re)start refreshes it first.
+    private var captureTargetStale = false
     private var loggedTypes: Set<String> = []
 
     public init(start: StartCommand, backend: DisplayBackend, sink: HelperEventSink,
@@ -352,11 +380,6 @@ public final class SessionController {
             log("warn", "invalid message from phone")
             return terminate(.protocolError)
         }
-        if case .resize(let w, let h, _) = message,
-           !(Self.surfaceRange.contains(w) && Self.surfaceRange.contains(h)) {
-            log("warn", "resize out of range: \(w)x\(h)")
-            return terminate(.protocolError)
-        }
         let t = now()
         watchdog.heard(at: t)   // any valid frame feeds the watchdog
 
@@ -392,16 +415,19 @@ public final class SessionController {
         case .setTrackpad(let on):
             showsCursor = on   // kept for every later capture (re)start
             backend.setShowsCursor(on)
-            onTrackpadChanged?(on)
         case .input(let event):
             // Never log per event (volume); once is enough to explain a dead touch screen.
             guard inputEnabled else {
                 return logOnce("input-disabled", level: "warn", "input dropped: PostEvent access is missing")
             }
             onInput?(event)
-        case .resize:
-            // No handler until Task 4.5.
-            logOnce("resize", level: "info", "resize ignored (not supported yet)")
+        case .resize(let w, let h, _):
+            guard Self.surfaceRange.contains(w), Self.surfaceRange.contains(h) else {
+                return debugLog("resize dropped: \(w)x\(h) is outside \(Self.surfaceRange)")
+            }
+            // Coalesced: only the latest is applied, `resizeCoalesce` after it (in `tick()`).
+            pendingResize = (w, h)
+            lastResizeAt = t
         case .unknown(let type):
             logOnce(type, level: "warn", "unknown message type ignored: \(type)")
         }
@@ -411,9 +437,12 @@ public final class SessionController {
 
     /// The one capture (re)start sequence: stop → [applyModes, asynchronously] → start at the stream
     /// size → reset the flow-control window → force an IDR. Failures end the session via the
-    /// BackendError mapping. While an activation is in flight the session keeps running (keepalives,
+    /// BackendError mapping, except a failed rotation activation (`revertTo` set): the old mode is
+    /// still active, so the session keeps it and restarts capture at the old size (see below).
+    /// While an activation is in flight the session keeps running (keepalives,
     /// watchdog, stop) without capture; a pause meanwhile defers the start to `resume`.
-    private func restartCapture(surfaceW: Int, surfaceH: Int, modes: [ModeSpec]?) {
+    private func restartCapture(surfaceW: Int, surfaceH: Int, modes: [ModeSpec]?,
+                                revertTo previous: (w: Int, h: Int)? = nil) {
         if capturing {
             backend.stopCapture()
             capturing = false
@@ -425,32 +454,91 @@ public final class SessionController {
             activating = true
             backend.applyModes(modes) { [weak self] result in
                 guard let self, self.endedReason == nil, generation == self.activationGeneration else { return }
-                self.activating = false
                 switch result {
                 case .success:
+                    self.reconfigurationQuietUntil = self.now() + Self.ownReconfigurationQuiet
                     self.onBoundsChanged?(self.backend.displayBounds())
-                    if !self.paused { self.startCapture() }
+                    // Still `activating`: the refreshed capture target is part of the activation.
+                    self.refreshTargetThenStart(generation: generation)
+                case .failure(let error) where previous != nil:
+                    // Rotation: the old mode is still active. Keep the session on it — old surface,
+                    // capture at the old stream size from a refreshed target, with an IDR.
+                    guard let previous else { return }
+                    self.activating = false
+                    self.log("warn", "resize to \(surfaceW)x\(surfaceH) failed (\(error)); keeping \(previous.w)x\(previous.h)")
+                    self.captureTargetStale = true
+                    self.onBoundsChanged?(self.backend.displayBounds())
+                    self.restartCapture(surfaceW: previous.w, surfaceH: previous.h, modes: nil)
                 case .failure(let error):
+                    self.activating = false
                     self.log("error", "capture start failed: \(error)")
                     self.terminate(Self.endReason(for: error))
                 }
             }
             return
         }
-        // The in-flight activation starts capture when it lands.
+        // The in-flight activation (or refresh) starts capture when it lands.
         guard !activating else { return }
+        if captureTargetStale {
+            activationGeneration += 1
+            activating = true
+            return refreshTargetThenStart(generation: activationGeneration)
+        }
         startCapture()
+    }
+
+    /// Async re-read of the capture target, then capture (unless paused: `resume` starts it). A late
+    /// result for a superseded activation or an ended session is dropped by `generation`.
+    /// A reconfiguration while it runs re-reads it (at most `maxExtraTargetRefreshes` more times).
+    /// Screen Recording revoked → the session ends with the permission reason, no capture start.
+    private func refreshTargetThenStart(generation: Int, extra: Int = 0) {
+        captureTargetStale = false
+        backend.refreshCaptureTarget { [weak self] result in
+            guard let self, self.endedReason == nil, generation == self.activationGeneration else { return }
+            if case .failure(.permissionDenied) = result {
+                self.activating = false
+                self.log("error", "Screen Recording access was revoked during the session")
+                return self.terminate(.permissionScreenRecording)
+            }
+            if self.captureTargetStale {
+                if extra < Self.maxExtraTargetRefreshes {
+                    return self.refreshTargetThenStart(generation: generation, extra: extra + 1)
+                }
+                self.log("info", "display still reconfiguring after \(extra + 1) capture-target reads; starting with the latest snapshot")
+            }
+            self.activating = false
+            if !self.paused { self.startCapture() }
+        }
     }
 
     /// The display was reconfigured (the user picked another scale in Displays, or moved it in the
     /// arrangement, which moves its origin). Call on the session queue. Always reports the new bounds;
     /// a running capture restarts at the same stream size with an IDR. Paused, mid-activation (that
-    /// completion starts capture) or before hello: bounds only.
+    /// completion starts capture), right after our own activation landed (the notification is its
+    /// echo; capture already started on the new mode) or before hello: bounds only.
     public func displayReconfigured() {
         guard endedReason == nil, displayCreated else { return }
         onBoundsChanged?(backend.displayBounds())
-        guard capturing else { return }
+        captureTargetStale = true
+        guard capturing, now() >= reconfigurationQuietUntil else { return }
         restartCapture(surfaceW: surface.w, surfaceH: surface.h, modes: nil)
+    }
+
+    /// Rotation renegotiation (Contract D `resize`): new modes at the user's current scale, then the
+    /// usual restart (stop → applyModes, async → bounds → start at the new stream size → window reset →
+    /// IDR; the encoder's next parameter sets go out as `streamConfig` + config frame). `seq` continues.
+    private func applyResize(w: Int, h: Int) {
+        guard (w, h) != surface else {
+            return debugLog("resize to the current size \(w)x\(h) ignored")
+        }
+        // Divisor source: the mode active now, relative to the surface it was made for.
+        let divisor = DisplayModes.nearestDivisor(currentWidthPoints: backend.currentWidthPoints(), surfaceW: surface.w)
+        log("info", "resize \(surface.w)x\(surface.h) → \(w)x\(h) (divisor \(divisor))")
+        onResizeApplied?()   // release a held button before the geometry changes
+        flow.reset()
+        restartCapture(surfaceW: w, surfaceH: h,
+                       modes: DisplayModes.modes(surfaceW: w, surfaceH: h, preferredDivisor: divisor),
+                       revertTo: surface)
     }
 
     private func startCapture() {
@@ -505,6 +593,12 @@ public final class SessionController {
         guard let conn = authed else { return }
         if watchdog.isExpired(at: t) {
             return terminate(.watchdog)
+        }
+        // Never while a mode activation is in flight: the resize waits for it (and stays coalesced).
+        if let resize = pendingResize, !activating, t - lastResizeAt >= Self.resizeCoalesce {
+            pendingResize = nil
+            applyResize(w: resize.w, h: resize.h)
+            guard endedReason == nil else { return }
         }
         if flow.isStalled(at: t) {
             log("warn", "ack stall: \(flow.lastSent - flow.acked) unacked for > \(Self.ackStall) s; resetting window with IDR")

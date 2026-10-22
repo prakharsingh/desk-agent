@@ -122,6 +122,12 @@ final class ServeMode {
         controller.onBoundsChanged = { [unowned self] bounds in
             if self.planner == nil { self.planner = Self.makePlanner(bounds: bounds) } else { self.planner?.updateBounds(bounds) }
         }
+        // Rotation: release a held button before the display is re-laid out (then `onBoundsChanged`).
+        controller.onResizeApplied = { [unowned self] in
+            guard var planner = self.planner else { return }
+            self.injector.post(planner.teardown())
+            self.planner = planner
+        }
         // Runs before the display is destroyed: release a held button so no drag is left stuck.
         controller.onTeardown = { [unowned self] in
             guard var planner = self.planner else { return }

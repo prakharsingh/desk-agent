@@ -12,6 +12,8 @@ sealed class SessionInput {
     data class Start(val sessionId: String, val port: Int, val nowMs: Long) : SessionInput()
     data class TokenAvailable(val sessionId: String, val token: String) : SessionInput()
     data class SurfaceReady(val w: Int, val h: Int) : SessionInput()
+    /** The ready surface changed size (rotation). Fed instead of [SurfaceReady] while a surface is held. */
+    data class SurfaceResized(val w: Int, val h: Int) : SessionInput()
     object SurfaceLost : SessionInput()
     data class HelloAck(val inputEnabled: Boolean) : SessionInput()
     data class LinkClosed(val reason: String) : SessionInput()
@@ -25,6 +27,8 @@ sealed class SessionInput {
 sealed class SessionAction {
     data class OpenLink(val port: Int, val token: String, val sessionId: String) : SessionAction()
     data class SendBye(val reason: String) : SessionAction()
+    /** Contract D `resize`: the helper renegotiates the stream; the session continues. */
+    data class SendResize(val w: Int, val h: Int) : SessionAction()
     object CloseLink : SessionAction()
     object ReleaseDecoder : SessionAction()
     object ClearToken : SessionAction()
@@ -35,7 +39,8 @@ sealed class SessionAction {
 /**
  * Pure lifecycle of one phone display session. No Android APIs, no threads: the glue feeds inputs
  * and executes the returned actions. Action order is always SendBye, CloseLink, ReleaseDecoder,
- * ClearToken, Emit.
+ * ClearToken, Emit. A rotation never ends the session: while Streaming, a new surface size is
+ * [SessionAction.SendResize] (before Streaming it only changes the size the hello will carry).
  */
 class DisplaySessionMachine(private val tokenWaitMs: Long = 5000) {
     var state: SessionState = SessionState.Idle
@@ -43,6 +48,9 @@ class DisplaySessionMachine(private val tokenWaitMs: Long = 5000) {
 
     private var surfaceReady = false
     private var pendingToken: String? = null
+    /** Current surface size, and the size the helper last heard (hello, then each resize). */
+    private var size: Pair<Int, Int>? = null
+    private var sentSize: Pair<Int, Int>? = null
 
     fun handle(input: SessionInput): List<SessionAction> {
         val s = state
@@ -50,7 +58,8 @@ class DisplaySessionMachine(private val tokenWaitMs: Long = 5000) {
         if (s is SessionState.Ended) {
             when (input) {
                 is SessionInput.Start -> return start(input)
-                is SessionInput.SurfaceReady -> surfaceReady = true
+                is SessionInput.SurfaceReady -> { surfaceReady = true; size = input.w to input.h }
+                is SessionInput.SurfaceResized -> size = input.w to input.h
                 SessionInput.SurfaceLost -> surfaceReady = false
                 else -> Unit
             }
@@ -66,7 +75,13 @@ class DisplaySessionMachine(private val tokenWaitMs: Long = 5000) {
             }
             is SessionInput.SurfaceReady -> {
                 surfaceReady = true
+                size = input.w to input.h
                 if (s is SessionState.AwaitingToken) tryOpen(s) else emptyList()
+            }
+            is SessionInput.SurfaceResized -> {
+                size = input.w to input.h
+                // Before Streaming the hello (sent or not yet) is reconciled at helloAck.
+                if (s is SessionState.Streaming) syncSize() else emptyList()
             }
             SessionInput.SurfaceLost -> {
                 surfaceReady = false
@@ -77,7 +92,8 @@ class DisplaySessionMachine(private val tokenWaitMs: Long = 5000) {
             is SessionInput.HelloAck -> {
                 if (s is SessionState.Connecting) {
                     state = SessionState.Streaming(s.sessionId, input.inputEnabled)
-                    listOf(SessionAction.Emit("streaming", inputEnabled = input.inputEnabled))
+                    // A rotation between the hello and its ack: tell the helper now.
+                    listOf(SessionAction.Emit("streaming", inputEnabled = input.inputEnabled)) + syncSize()
                 } else emptyList()
             }
             // The link itself is gone, so it is not closed again.
@@ -145,7 +161,16 @@ class DisplaySessionMachine(private val tokenWaitMs: Long = 5000) {
         val token = pendingToken
         if (token == null || !surfaceReady) return emptyList()
         state = SessionState.Connecting(s.sessionId)
+        sentSize = size   // the hello carries the current surface size
         return listOf(SessionAction.OpenLink(s.port, token, s.sessionId))
+    }
+
+    /** While Streaming: a resize when the surface differs from what the helper last heard. */
+    private fun syncSize(): List<SessionAction> {
+        val now = size ?: return emptyList()
+        if (now == sentSize) return emptyList()
+        sentSize = now
+        return listOf(SessionAction.SendResize(now.first, now.second))
     }
 
     private fun end(

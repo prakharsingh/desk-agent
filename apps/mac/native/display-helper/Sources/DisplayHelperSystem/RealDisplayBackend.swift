@@ -63,6 +63,28 @@ public final class RealDisplayBackend: DisplayBackend {
         display.apply(modes: modes, deliverOn: queue, completion: completion)
     }
 
+    /// How long a capture restart waits for a fresh `SCDisplay` before falling back to the old one.
+    static let captureTargetRefreshTimeout: TimeInterval = 1.0
+
+    /// Permission denied when ScreenCaptureKit says `userDeclined` or, after any other failure, when
+    /// the Screen Recording preflight is now false (access revoked mid-session).
+    public func refreshCaptureTarget(completion: @escaping (Result<Void, BackendError>) -> Void) {
+        guard let display else { return queue.async { completion(.success(())) } }
+        encoder.refreshDisplay(displayId: display.displayId, timeout: Self.captureTargetRefreshTimeout) { [weak self] result in
+            guard let self else { return completion(.success(())) }
+            switch result {
+            case .refreshed:
+                completion(.success(()))
+            case .permissionDenied:
+                completion(.failure(.permissionDenied))
+            case .notRefreshed:
+                if !self.screenCapture.preflight() { return completion(.failure(.permissionDenied)) }
+                self.onLog?("warn", "capture target not refreshed after a mode change; using the previous snapshot")
+                completion(.failure(.captureUnavailable))
+            }
+        }
+    }
+
     public func currentWidthPoints() -> Int { display?.currentWidthPoints() ?? 0 }
     public func displayBounds() -> CGRect { display?.bounds() ?? .zero }
 

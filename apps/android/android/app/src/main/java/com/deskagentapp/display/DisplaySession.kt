@@ -164,12 +164,18 @@ class DisplaySessionRunner(
         syncTrackpad()
     }
 
-    /** From the SurfaceView (main thread). Fed on every surfaceChanged. */
+    /**
+     * From the SurfaceView (main thread). Fed on every surfaceChanged: a new size on a surface we
+     * already hold (rotation; MainActivity keeps the activity via configChanges) is a resize. The
+     * decoder is left alone: it keeps decoding the old-size stream (SurfaceView scales it) until
+     * the helper's next streamConfig + config frame rebuild it in [onConfig].
+     */
     fun surfaceReady(surface: Surface, w: Int, h: Int) = executor.post {
+        val resized = this.surface != null && (w != surfaceW || h != surfaceH)
         this.surface = surface
         surfaceW = w
         surfaceH = h
-        feed(SessionInput.SurfaceReady(w, h))
+        feed(if (resized) SessionInput.SurfaceResized(w, h) else SessionInput.SurfaceReady(w, h))
     }
 
     /**
@@ -260,6 +266,10 @@ class DisplaySessionRunner(
         when (a) {
             is SessionAction.OpenLink -> openLink(a)
             is SessionAction.SendBye -> link?.send(ControlMessages.bye(a.reason))
+            is SessionAction.SendResize -> {
+                Log.i(TAG, "surface resized to ${a.w}x${a.h}: asking the helper to renegotiate")
+                link?.send(ControlMessages.resize(a.w, a.h))
+            }
             SessionAction.CloseLink -> closeLink()
             SessionAction.ReleaseDecoder -> releaseDecoder()
             // Idempotent: drops only the ending session's held token (a newer session's token,
