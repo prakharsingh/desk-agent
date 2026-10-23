@@ -375,6 +375,64 @@ describe('DisplayScreen trackpad mode and touch hint (Task 4.4)', () => {
   });
 });
 
+// The display SurfaceView sits behind the activity window and punches a hole in
+// it. The window only recomputes that hole on a root layout, which Fabric never
+// requests, so an overlay mounted in the same window over a live video is
+// composited away (F1: the device showed only the strip where the status text
+// had been). The prompt must live in its own window: an RN Modal.
+describe('DisplayScreen exit prompt window (F1)', () => {
+  type HostNode = { type: string; props: Record<string, unknown>; children: (HostNode | string)[] | null };
+  // The host ancestors (outermost first) of the node whose text is `text`.
+  function hostPath(text: string): HostNode[] | null {
+    const walk = (n: HostNode | string, path: HostNode[]): HostNode[] | null => {
+      if (typeof n === 'string') return n === text ? path : null;
+      for (const c of n.children ?? []) {
+        const hit = walk(c, [...path, n]);
+        if (hit) return hit;
+      }
+      return null;
+    };
+    const json = screen.toJSON() as HostNode | HostNode[] | null;
+    for (const root of Array.isArray(json) ? json : json ? [json] : []) {
+      const hit = walk(root, []);
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  it('renders the exit prompt, touch hint and controls inside a transparent full-screen Modal', async () => {
+    await toStreaming(setup(), false);
+    await openOverlay();
+    for (const text of ['Exit display?', TOUCH_OFF, 'Trackpad mode', 'Stay', 'Exit']) {
+      const path = hostPath(text);
+      expect(path).not.toBeNull();
+      const modal = path!.find((n) => n.type === 'Modal');
+      expect(modal).toBeDefined();
+      expect(modal!.props).toMatchObject({ visible: true, transparent: true, statusBarTranslucent: true, navigationBarTranslucent: true });
+    }
+    // The surface stays in the activity window, never inside the Modal.
+    const modalHasSurface = (n: HostNode | string, inModal: boolean): boolean =>
+      typeof n !== 'string' &&
+      ((inModal && n.type === 'DeskAgentDisplayView') || (n.children ?? []).some((c) => modalHasSurface(c, inModal || n.type === 'Modal')));
+    const json = screen.toJSON() as HostNode | HostNode[];
+    expect((Array.isArray(json) ? json : [json]).some((n) => modalHasSurface(n, false))).toBe(false);
+    expect(surfaces()).toHaveLength(1);
+  });
+
+  it('Back inside the Modal window (onRequestClose) is Stay', async () => {
+    const props = setup();
+    await toStreaming(props, true);
+    await openOverlay();
+    const modal = hostPath('Exit display?')!.find((n) => n.type === 'Modal')!;
+    await act(() => {
+      (modal.props.onRequestClose as () => void)();
+    });
+    expect(screen.queryByText('Exit display?')).toBeNull();
+    expect(mod().stop).not.toHaveBeenCalled();
+    expect(props.onExit).not.toHaveBeenCalled();
+  });
+});
+
 describe('DisplayScreen retry after a failed session (I1)', () => {
   it("a retry ignores the failed session's late ended and adopts the new session's ready", async () => {
     const app = appSessions();

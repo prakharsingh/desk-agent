@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { BackHandler, Pressable, StyleSheet, Text, View } from 'react-native';
+import { BackHandler, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { DisplaySessionPayload } from '@desk-agent/protocol';
 import { theme } from '../theme.js';
 import { Toggle } from '../ui/Toggle.js';
@@ -235,7 +235,19 @@ export function DisplayScreen({ lastSession, seenSessionIds, getDisplaySeq, json
           <Text style={styles.statusText}>{status}</Text>
         </View>
       )}
-      {showExit && (
+      {/* The prompt gets its own window (a Dialog). The SurfaceView behind the
+          activity window punches a hole in it that is only recomputed on a root
+          layout, which Fabric never requests, so views mounted over a live
+          video in this window are composited away (F1). Back in the Modal's
+          window reaches onRequestClose, not BackHandler: it means Stay. */}
+      <Modal
+        visible={showExit}
+        transparent
+        animationType="none"
+        statusBarTranslucent
+        navigationBarTranslucent
+        onRequestClose={() => setShowExit(false)}
+      >
         <View style={styles.overlay}>
           <View style={styles.dialog}>
             <Text style={styles.dialogTitle}>Exit display?</Text>
@@ -256,7 +268,7 @@ export function DisplayScreen({ lastSession, seenSessionIds, getDisplaySeq, json
             </View>
           </View>
         </View>
-      )}
+      </Modal>
     </View>
   );
 }
