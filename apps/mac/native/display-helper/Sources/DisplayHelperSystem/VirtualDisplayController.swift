@@ -97,7 +97,7 @@ public final class VirtualDisplayController {
         return (CGDisplayCopyAllDisplayModes(displayId, opts) as? [CGDisplayMode]) ?? []
     }
 
-    /// One activation attempt: keep a HiDPI mode of ours that is already active, otherwise switch
+    /// One activation attempt: keep the preferred HiDPI mode if it is already active, otherwise switch
     /// (permanently) to the first usable applied mode.
     private static func attemptActivation(displayId: UInt32, applied: [ModeSpec]) -> ActivationPoll.Attempt {
         // An offline display (macOS keeps it out of the desktop, e.g. a persisted Control Center
@@ -126,8 +126,8 @@ public final class VirtualDisplayController {
     }
 
     /// macOS may come up in the 1x mode at the HiDPI pixel size. Polls every 100 ms for up to 3 s
-    /// (`ActivationPoll`) on `activationQueue` — never on the session queue — until a HiDPI mode of
-    /// ours is active. The mode list can lag behind applySettings and a fresh display may reject
+    /// (`ActivationPoll`) on `activationQueue` — never on the session queue — until the preferred
+    /// (first usable) HiDPI mode is active. The mode list can lag behind applySettings and a fresh display may reject
     /// configuration briefly, so "none available" and failed switches are retried; expiry fails with
     /// `modeSwitchFailed` / `modeUnavailable`, or (after 1 s offline in a row, without waiting out the
     /// 3 s) `BackendError.displayOffline`. `destroy()` cancels the poll (`destroyed`).

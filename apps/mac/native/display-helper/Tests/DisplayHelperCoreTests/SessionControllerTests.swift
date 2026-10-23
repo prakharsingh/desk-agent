@@ -37,6 +37,9 @@ final class FakeBackend: DisplayBackend {
     func completeApply(_ result: Result<Void, Error> = .success(())) {
         pendingApplies.removeFirst()(result)
     }
+    /// When set, `applyModes` also simulates macOS picking a mode and the helper's activation
+    /// decision, and `widthPoints` follows the resulting active mode.
+    var macOS: SimulatedMacOSModes?
     var cursorCalls: [Bool] = []
     /// Ordered record of the calls that matter for sequencing assertions.
     var log: [String] = []
@@ -75,6 +78,10 @@ final class FakeBackend: DisplayBackend {
     func applyModes(_ modes: [ModeSpec], completion: @escaping (Result<Void, Error>) -> Void) {
         log.append("applyModes")
         applied.append(modes)
+        if let macOS {
+            macOS.apply(modes)
+            if let active = macOS.active { widthPoints = active.widthPoints }
+        }
         if deferApply { return pendingApplies.append(completion) }
         if let applyError { return completion(.failure(applyError)) }
         completion(.success(()))
@@ -96,6 +103,47 @@ final class FakeBackend: DisplayBackend {
     var bounds: CGRect?
     func displayBounds() -> CGRect { bounds ?? CGRect(x: 0, y: 0, width: widthPoints, height: 432) }
     func destroyDisplay() { destroyCalls += 1; log.append("destroyDisplay") }
+}
+
+/// macOS mode handling as observed on device run 4 (F2): after `applySettings`, macOS lists the HiDPI
+/// and 1x variant of every applied spec (small point sizes unusable for the desktop) and restores the
+/// mode it remembers for this display identity in the new orientation; the helper's
+/// `ModeActivation.decide` then keeps that mode or switches. The resulting mode is remembered.
+final class SimulatedMacOSModes {
+    /// Remembered active mode per orientation (key: landscape).
+    var remembered: [Bool: DisplayModeInfo]
+    /// `isUsableForDesktopGUI()`: 432x904 (2.5) and 360x752 (3.0) are not on this Mac; 540x1130 is.
+    var isUsable: (ModeSpec) -> Bool = { min($0.widthPoints, $0.heightPoints) >= 520 }
+    private(set) var active: DisplayModeInfo?
+    private(set) var decisions: [ModeDecision] = []
+
+    init(remembered: [Bool: DisplayModeInfo] = [:]) { self.remembered = remembered }
+
+    static func hiDPI(_ w: Int, _ h: Int) -> DisplayModeInfo {
+        DisplayModeInfo(widthPoints: w, heightPoints: h, pixelWidth: 2 * w, pixelHeight: 2 * h)
+    }
+
+    func apply(_ specs: [ModeSpec]) {
+        guard let first = specs.first else { return }
+        let landscape = first.widthPoints >= first.heightPoints
+        let available = specs.flatMap { spec -> [DisplayModeInfo] in
+            let u = isUsable(spec)
+            return [DisplayModeInfo(widthPoints: spec.widthPoints, heightPoints: spec.heightPoints,
+                                    pixelWidth: 2 * spec.widthPoints, pixelHeight: 2 * spec.heightPoints, usableForDesktop: u),
+                    DisplayModeInfo(widthPoints: spec.widthPoints, heightPoints: spec.heightPoints,
+                                    pixelWidth: spec.widthPoints, pixelHeight: spec.heightPoints, usableForDesktop: u)]
+        }
+        // Restore the remembered mode if listed; otherwise the largest usable HiDPI mode.
+        let restored = remembered[landscape].flatMap { r in available.contains(r) ? r : nil }
+            ?? available.filter { $0.isHiDPI && $0.usableForDesktop }.max { $0.widthPoints < $1.widthPoints }
+        let decision = ModeActivation.decide(current: restored, available: available, applied: specs)
+        decisions.append(decision)
+        switch decision {
+        case .keep(let m), .activate(let m): active = m
+        case .noneAvailable: active = restored
+        }
+        remembered[landscape] = active
+    }
 }
 
 final class FakeConnection: PhoneConnection {
@@ -1553,6 +1601,39 @@ final class Harness {
         h.ctrl.tick()
         #expect(h.backend.applied.last?.first == ModeSpec(widthPoints: 540, heightPoints: 1170))
         #expect(h.backend.applied.last == DisplayModes.modes(surfaceW: 1080, surfaceH: 2340, preferredDivisor: 2.0))
+    }
+
+    /// F2 (device run 4): macOS restores 2260x1080@2x (the 1.0 spec's HiDPI variant) in landscape for
+    /// this identity. The preferred 2.0 mode (1130x540) is usable, so it must be activated, and the
+    /// return to portrait must derive divisor 2.0 again, not 1.0.
+    @Test func rotationKeepsThePreferredHiDPIScaleWhenMacOSRestoresAnotherAppliedMode() {
+        let h = Harness(w: 1080, h: 2260)
+        h.backend.macOS = SimulatedMacOSModes(remembered: [
+            false: SimulatedMacOSModes.hiDPI(540, 1130),
+            true: SimulatedMacOSModes.hiDPI(2260, 1080),
+        ])
+        h.ready()
+        let (_, id) = h.connect(helloFrame(w: 1080, h: 2260, orientation: "portrait"))
+        // Portrait: 2.5 (432x904) and 3.0 (360x752) are unusable, so 2.0 (540x1130) is the choice.
+        #expect(h.backend.macOS?.active == SimulatedMacOSModes.hiDPI(540, 1130))
+
+        h.ctrl.receive(resizeFrame(w: 2260, h: 1080), on: id)
+        h.advance(0.35)
+        h.ctrl.tick()
+        #expect(h.backend.applied.last?.first == ModeSpec(widthPoints: 1130, heightPoints: 540))
+        #expect(h.backend.macOS?.active == SimulatedMacOSModes.hiDPI(1130, 540))
+
+        h.ctrl.receive(resizeFrame(w: 1080, h: 2260), on: id)
+        h.advance(0.35)
+        h.ctrl.tick()
+        #expect(h.backend.applied.last == DisplayModes.modes(surfaceW: 1080, surfaceH: 2260, preferredDivisor: 2.0))
+        #expect(h.backend.macOS?.active == SimulatedMacOSModes.hiDPI(540, 1130))
+
+        h.ctrl.receive(resizeFrame(w: 2260, h: 1080), on: id)
+        h.advance(0.35)
+        h.ctrl.tick()
+        #expect(h.backend.applied.last == DisplayModes.modes(surfaceW: 2260, surfaceH: 1080, preferredDivisor: 2.0))
+        #expect(h.backend.macOS?.active == SimulatedMacOSModes.hiDPI(1130, 540))
     }
 
     @Test func resizeRestartsCaptureWithAnIDR() {

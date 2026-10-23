@@ -17,8 +17,26 @@ import Testing
         #expect(ModeActivation.decide(current: lowRes1872, available: available, applied: applied) == .activate(hi1170))
     }
 
-    @Test func keepsAHiDPIModeOfOursThatMacOSRestored() {
-        #expect(ModeActivation.decide(current: hi1560, available: available, applied: applied) == .keep(hi1560))
+    @Test func keepsThePreferredHiDPIModeWhenAlreadyActive() {
+        #expect(ModeActivation.decide(current: hi1170, available: available, applied: applied) == .keep(hi1170))
+    }
+
+    @Test func switchesAwayFromAnotherAppliedHiDPIModeThatMacOSRestored() {
+        // F2: macOS restored the HiDPI variant of a later applied spec (1560, divisor 1.5) while the
+        // preferred usable one (1170, divisor 2.0) is listed: switch, do not keep.
+        #expect(ModeActivation.decide(current: hi1560, available: available, applied: applied) == .activate(hi1170))
+    }
+
+    @Test func keepsTheFirstAppliedModeWhenItIsUsableAndActive() {
+        // Preferred divisor first (as after a rotation at the user's 1.5 scale): 1560 leads and is kept.
+        let at15 = DisplayModes.modes(surfaceW: 2340, surfaceH: 1080, preferredDivisor: 1.5)
+        #expect(ModeActivation.decide(current: hi1560, available: available, applied: at15) == .keep(hi1560))
+        #expect(ModeActivation.decide(current: hi1170, available: available, applied: at15) == .activate(hi1560))
+    }
+
+    @Test func doesNotKeepAnUnusablePreferredSpecsVariant() {
+        // The current mode is 936x432@2x (2.5, unusable): the first USABLE spec (1170) is the target.
+        #expect(ModeActivation.decide(current: hi936, available: available, applied: applied) == .activate(hi1170))
     }
 
     @Test func activatesWhenNoCurrentMode() {

@@ -21,7 +21,7 @@ public struct DisplayModeInfo: Equatable {
 }
 
 public enum ModeDecision: Equatable {
-    /// A HiDPI mode of ours is already active (macOS may have restored an earlier user choice).
+    /// The preferred HiDPI mode is already active.
     case keep(DisplayModeInfo)
     /// Switch to this mode.
     case activate(DisplayModeInfo)
@@ -30,10 +30,12 @@ public enum ModeDecision: Equatable {
 }
 
 public enum ModeActivation {
-    /// Decide what to do after applying `applied` (preferred first). Keeps the current mode when it is
-    /// a HiDPI variant (2x pixels) of an applied mode, matching both point width and height; otherwise
-    /// activates the HiDPI variant of the first applied mode macOS considers usable (small point
-    /// sizes such as 936x432 are not); otherwise reports `noneAvailable`.
+    /// Decide what to do after applying `applied` (preferred first). The target is the HiDPI variant
+    /// (2x pixels, matching point width and height) of the first applied mode macOS considers usable
+    /// (small point sizes such as 936x432 are not). Keeps the current mode only when it is that
+    /// target: macOS may restore or auto-pick the HiDPI variant of another applied mode (device run 4,
+    /// F2: 2260x1080@2x in landscape), which must not be kept, or the next rotation derives that
+    /// mode's divisor. Reports `noneAvailable` when no applied mode has a usable HiDPI variant.
     public static func decide(
         current: DisplayModeInfo?, available: [DisplayModeInfo], applied: [ModeSpec]
     ) -> ModeDecision {
@@ -41,11 +43,9 @@ public enum ModeActivation {
             m.isHiDPI && m.pixelHeight == 2 * m.heightPoints
                 && m.widthPoints == spec.widthPoints && m.heightPoints == spec.heightPoints
         }
-        if let current, applied.contains(where: { isHiDPIVariant(current, of: $0) }) {
-            return .keep(current)
-        }
         for spec in applied {
             if let m = available.first(where: { $0.usableForDesktop && isHiDPIVariant($0, of: spec) }) {
+                if let current, isHiDPIVariant(current, of: spec) { return .keep(current) }
                 return .activate(m)
             }
         }
@@ -65,7 +65,7 @@ public struct ActivationPoll {
 
     /// What one attempt observed or did.
     public enum Attempt: Equatable {
-        /// `ModeDecision.keep`: a HiDPI mode of ours is already active.
+        /// `ModeDecision.keep`: the preferred HiDPI mode is already active.
         case kept
         /// The configuration switch to the wanted mode succeeded.
         case switchSucceeded
