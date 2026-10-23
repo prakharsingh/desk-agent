@@ -3,11 +3,15 @@
 # artifacts carry the bumped version. Signing is driven by the
 # DESK_AGENT_UPLOAD_* env vars resolved inside build.gradle; without them
 # assembleRelease produces an unsigned APK (acceptable only outside CI).
+# With DESK_AGENT_REQUIRE_SIGNED=1 (set by release.yml) the packed Mac app must
+# carry the committed self-signed identity's designated requirement
+# (scripts/mac-signing/assert-signed.mjs), or the build fails.
 set -euo pipefail
 
 VERSION="${1:?usage: build-release-artifacts.sh <X.Y.Z>}"
 
 pnpm --filter @desk-agent/mac run pack
+if [ "${DESK_AGENT_REQUIRE_SIGNED:-}" = "1" ]; then node scripts/mac-signing/assert-signed.mjs "apps/mac/release/mac-arm64/Desk Agent.app"; fi
 
 if [ -z "${DESK_AGENT_UPLOAD_STORE_FILE:-}" ]; then
   echo "warning: DESK_AGENT_UPLOAD_STORE_FILE not set -- APK will be signed with the debug keystore, not the release key" >&2
