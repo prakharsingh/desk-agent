@@ -2,7 +2,7 @@ import Foundation
 import Testing
 
 /// The built `desk-agent-display-helper` next to the test bundle (`swift test` builds every product).
-private func helperBinary() -> URL? {
+func helperBinary() -> URL? {
     let name = "desk-agent-display-helper"
     var dirs = (Bundle.allBundles + [Bundle.main]).map { $0.bundleURL.deletingLastPathComponent() }
     // Fallback: <package>/.build/debug (this file is <package>/Tests/<target>/<file>).

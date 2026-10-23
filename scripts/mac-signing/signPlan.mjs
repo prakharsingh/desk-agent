@@ -25,7 +25,7 @@ export function expectedCertSha1(env = process.env) {
 
 /** Identifier overrides for standalone Mach-O binaries (default: codesign's own). */
 export const IDENTIFIER_OVERRIDES = {
-  'Contents/MacOS/desk-agent-display-helper': 'com.deskagent.mac.display-helper',
+  'Contents/Helpers/desk-agent-display-helper': 'com.deskagent.mac.display-helper',
   'Contents/MacOS/adb': 'com.deskagent.mac.adb',
 };
 
@@ -36,7 +36,7 @@ export const IDENTIFIER_OVERRIDES = {
 export const REQUIRED_SIGNED_PATHS = [
   { rel: '', identifier: 'com.deskagent.mac' },
   { rel: 'Contents/Frameworks/*.app' },
-  { rel: 'Contents/MacOS/desk-agent-display-helper', identifier: 'com.deskagent.mac.display-helper' },
+  { rel: 'Contents/Helpers/desk-agent-display-helper', identifier: 'com.deskagent.mac.display-helper' },
 ];
 
 const depth = (rel) => rel.split('/').filter(Boolean).length;

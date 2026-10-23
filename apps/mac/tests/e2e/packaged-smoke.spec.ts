@@ -56,8 +56,10 @@ test('bundles an executable display helper outside the asar', async () => {
   const isolated = await launchIsolatedApp();
   try {
     const execPath = await isolated.electronApp.evaluate(() => process.execPath);
-    const helper = path.join(path.dirname(execPath), 'desk-agent-display-helper');
-    expect(path.basename(path.dirname(helper))).toBe('MacOS');
+    // Contents/Helpers, not Contents/MacOS: from there LaunchServices took the helper for a second
+    // "Desk Agent" and AppleScript Quit went to it (F-O4).
+    const helper = path.join(path.dirname(execPath), '..', 'Helpers', 'desk-agent-display-helper');
+    expect(fs.existsSync(path.join(path.dirname(execPath), 'desk-agent-display-helper'))).toBe(false);
     expect(fs.existsSync(helper)).toBe(true);
     fs.accessSync(helper, fs.constants.X_OK);
     const out = execFileSync(helper, ['--version'], { encoding: 'utf8' });

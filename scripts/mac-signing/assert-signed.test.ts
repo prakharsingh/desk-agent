@@ -19,9 +19,9 @@ const adhoc = { err: null, output: 'designated => cdhash H"abcd"\n' };
 function makeApp(name: string, helpers: string[]) {
   const app = path.join(root, name);
   mkdirSync(path.join(app, 'Contents/Frameworks'), { recursive: true });
-  mkdirSync(path.join(app, 'Contents/MacOS'), { recursive: true });
+  mkdirSync(path.join(app, 'Contents/Helpers'), { recursive: true });
   for (const h of helpers) mkdirSync(path.join(app, 'Contents/Frameworks', h), { recursive: true });
-  execFileSync('touch', [path.join(app, 'Contents/MacOS/desk-agent-display-helper')]);
+  execFileSync('touch', [path.join(app, 'Contents/Helpers/desk-agent-display-helper')]);
   return app;
 }
 
@@ -37,7 +37,7 @@ describe('assertSigned', () => {
     });
     expect(failures).toEqual([]);
     expect(seen.sort()).toEqual(
-      ['', 'Contents/Frameworks/A Helper.app', 'Contents/Frameworks/B Helper.app', 'Contents/MacOS/desk-agent-display-helper'].sort(),
+      ['', 'Contents/Frameworks/A Helper.app', 'Contents/Frameworks/B Helper.app', 'Contents/Helpers/desk-agent-display-helper'].sort(),
     );
   });
 
@@ -63,7 +63,7 @@ describe('assertSigned', () => {
       requirementOf: async () => good('com.deskagent.mac'),
     });
     expect(failures).toContain('.: missing');
-    expect(failures).toContain('Contents/MacOS/desk-agent-display-helper: missing');
+    expect(failures).toContain('Contents/Helpers/desk-agent-display-helper: missing');
   });
 
   it('fails when the requirement is pinned to a different certificate', async () => {

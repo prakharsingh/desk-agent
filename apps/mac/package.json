@@ -56,7 +56,7 @@
     "extraFiles": [
       {
         "from": "native-bin",
-        "to": "MacOS",
+        "to": "Helpers",
         "filter": [
           "desk-agent-display-helper"
         ]

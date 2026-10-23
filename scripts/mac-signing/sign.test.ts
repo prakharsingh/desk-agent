@@ -6,7 +6,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { defaultListEntries, resolveIdentity, signApp } from './sign.mjs';
 
 const entries = [
-  { rel: 'Contents/MacOS/desk-agent-display-helper', kind: 'macho' as const },
+  { rel: 'Contents/Helpers/desk-agent-display-helper', kind: 'macho' as const },
   { rel: 'Contents/Frameworks/Electron Framework.framework', kind: 'bundle' as const },
   { rel: 'Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libffmpeg.dylib', kind: 'macho' as const },
   { rel: 'Contents/Frameworks/Desk Agent Helper.app', kind: 'bundle' as const },

@@ -117,7 +117,7 @@ of these secrets and pack ad-hoc.
 
 ```bash
 codesign -d -r- "/path/to/Desk Agent.app"
-codesign -d -r- "/path/to/Desk Agent.app/Contents/MacOS/desk-agent-display-helper"
+codesign -d -r- "/path/to/Desk Agent.app/Contents/Helpers/desk-agent-display-helper"
 ```
 
 - `designated => cdhash H"…"` — ad-hoc; grants will not survive a rebuild.

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { orderForSigning, IDENTIFIER_OVERRIDES, REQUIRED_SIGNED_PATHS, EXPECTED_CERT_SHA1, expectedCertSha1 } from './signPlan.mjs';
 
 export const fixture = [
-  { rel: 'Contents/MacOS/desk-agent-display-helper', kind: 'macho' as const },
+  { rel: 'Contents/Helpers/desk-agent-display-helper', kind: 'macho' as const },
   { rel: 'Contents/Frameworks/Electron Framework.framework', kind: 'bundle' as const },
   { rel: 'Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libffmpeg.dylib', kind: 'macho' as const },
   { rel: 'Contents/Frameworks/Desk Agent Helper.app', kind: 'bundle' as const },
@@ -17,7 +17,7 @@ describe('orderForSigning', () => {
       'Contents/Frameworks/Desk Agent Helper.app/Contents/MacOS/Desk Agent Helper',
       'Contents/Frameworks/Desk Agent Helper.app',
       'Contents/Frameworks/Electron Framework.framework',
-      'Contents/MacOS/desk-agent-display-helper',
+      'Contents/Helpers/desk-agent-display-helper',
     ]);
   });
 
@@ -28,7 +28,7 @@ describe('orderForSigning', () => {
 
 describe('signing constants', () => {
   it('overrides the display-helper and adb identifiers', () => {
-    expect(IDENTIFIER_OVERRIDES['Contents/MacOS/desk-agent-display-helper']).toBe('com.deskagent.mac.display-helper');
+    expect(IDENTIFIER_OVERRIDES['Contents/Helpers/desk-agent-display-helper']).toBe('com.deskagent.mac.display-helper');
     expect(IDENTIFIER_OVERRIDES['Contents/MacOS/adb']).toBe('com.deskagent.mac.adb');
   });
 
@@ -36,7 +36,7 @@ describe('signing constants', () => {
     expect(REQUIRED_SIGNED_PATHS).toEqual([
       { rel: '', identifier: 'com.deskagent.mac' },
       { rel: 'Contents/Frameworks/*.app' },
-      { rel: 'Contents/MacOS/desk-agent-display-helper', identifier: 'com.deskagent.mac.display-helper' },
+      { rel: 'Contents/Helpers/desk-agent-display-helper', identifier: 'com.deskagent.mac.display-helper' },
     ]);
   });
 });

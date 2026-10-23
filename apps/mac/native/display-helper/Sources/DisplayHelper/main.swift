@@ -224,6 +224,11 @@ case .serve:
     // reconfiguration notifications are delivered later (Tasks 4.3, 5.2). Set up BEFORE the watchers:
     // the stdin thread may deliver `start` (and create the display) as soon as `install()` returns.
     // Session work stays on the serial session queue; the process exits from there after `ended`.
+    // The app object registers this process with LaunchServices (ScreenCaptureKit creates one anyway
+    // when capture starts, and without `run()` the reconfiguration callback never fires). So the
+    // binary must not ship in `Desk Agent.app/Contents/MacOS`: from there it registers as a second
+    // "Desk Agent" (com.deskagent.mac) and takes the user's AppleScript Quit (F-O4). It ships in
+    // `Contents/Helpers`, where it registers as an anonymous background process.
     let app = NSApplication.shared
     app.setActivationPolicy(.prohibited)
     let serve = ServeMode()

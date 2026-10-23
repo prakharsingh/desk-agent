@@ -10,6 +10,7 @@ import { ensureConfigExists, reconcileWidgetsOnDisk, defaultConfigPath } from '.
 import { readConfig } from './configStore.js';
 import { ConfigSchema } from '@desk-agent/config-schema';
 import { DisplayHelperHost } from './displayHelperHost.js';
+import { packagedDisplayHelperPath } from './displayHelperPath.js';
 import { DisplaySessionManager } from './displaySessionManager.js';
 import { DisplayIdentityStore } from './displayIdentityStore.js';
 import { debounce } from './debounce.js';
@@ -113,10 +114,10 @@ if (!gotLock) {
     mainWindow?.webContents.send('status:message', { kind: 'log', entry } satisfies ToApp);
   }
 
-  // Packaged: Contents/MacOS next to the executable (outside the asar); dev: apps/mac/native-bin.
+  // Packaged: Contents/Helpers, never Contents/MacOS (see displayHelperPath.ts); dev: apps/mac/native-bin.
   function displayHelperPath(): string {
     return app.isPackaged
-      ? path.join(path.dirname(process.execPath), 'desk-agent-display-helper')
+      ? packagedDisplayHelperPath(process.execPath)
       : path.join(__dirname, '../../native-bin/desk-agent-display-helper');
   }
 
