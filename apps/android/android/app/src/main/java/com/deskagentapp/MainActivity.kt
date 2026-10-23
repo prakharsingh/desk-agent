@@ -3,9 +3,6 @@ package com.deskagentapp
 import android.content.Intent
 import android.os.Bundle
 import android.view.WindowManager
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import com.deskagentapp.display.DisplayTokenHolder
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
@@ -46,13 +43,7 @@ class MainActivity : ReactActivity() {
     if (hasFocus) hideSystemBars()
   }
 
-  private fun hideSystemBars() {
-    WindowCompat.setDecorFitsSystemWindows(window, false)
-    val controller = WindowInsetsControllerCompat(window, window.decorView)
-    controller.hide(WindowInsetsCompat.Type.systemBars())
-    controller.systemBarsBehavior =
-      WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-  }
+  private fun hideSystemBars() = SystemBars.hide(window)
 
   /**
    * Returns the instance of the [ReactActivityDelegate]. We use [DefaultReactActivityDelegate]
