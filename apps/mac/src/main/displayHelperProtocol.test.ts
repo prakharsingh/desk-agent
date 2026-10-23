@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  displayIdentitySerial,
   encodeHelperCommand,
   parseHelperEventLine,
   stableDisplaySerial,
@@ -22,6 +23,32 @@ describe('displayHelperProtocol', () => {
     expect(stableDisplaySerial('')).toBe(0x811c9dc5);
     expect(stableDisplaySerial('a')).toBe(0xe40c292c);
     expect(stableDisplaySerial('foobar')).toBe(0xbf9cf968);
+  });
+
+  it('generation 0 is the serial every existing arrangement is saved under (78f2af2a -> 0xb8af4884)', () => {
+    expect(displayIdentitySerial('78f2af2a', 0)).toBe(0xb8af4884);
+    expect(displayIdentitySerial('abc', 0)).toBe(stableDisplaySerial('abc'));
+  });
+
+  it('every later generation is a different, deterministic, non-zero 32-bit serial', () => {
+    const seen = new Set<number>();
+    const spare = (s: number) => ((s ^ 0x53504152) >>> 0) || 1; // DisplayIdentity.spareSerial
+    for (let g = 0; g < 50; g++) {
+      const s = displayIdentitySerial('78f2af2a', g);
+      expect(s).toBe(displayIdentitySerial('78f2af2a', g));
+      expect(Number.isInteger(s) && s > 0 && s <= 0xffffffff).toBe(true);
+      expect(seen.has(s)).toBe(false);
+      seen.add(s);
+      seen.add(spare(s));
+    }
+    expect(displayIdentitySerial('78f2af2a', 1)).not.toBe(displayIdentitySerial('78f2af2b', 1));
+  });
+
+  it('parses the identity the helper reports with ready, and still accepts a ready without it (older helper)', () => {
+    expect(parseHelperEventLine('{"evt":"ready","displayId":7,"port":8788,"serialNum":3098494084}'))
+      .toEqual({ evt: 'ready', displayId: 7, port: 8788, serialNum: 3098494084 });
+    expect(parseHelperEventLine('{"evt":"ready","displayId":7,"port":8788,"serialNum":"x"}'))
+      .toEqual({ evt: 'ready', displayId: 7, port: 8788 });
   });
 
   it('maps an unknown ended reason to helper-crashed', () =>
@@ -69,5 +96,7 @@ describe('displayHelperProtocol', () => {
     const line = encodeHelperCommand(start);
     expect(line.endsWith('\n')).toBe(true);
     expect(JSON.parse(line)).toEqual(start);
+    const withFresh: HelperStartCommand = { ...start, freshSerial: 9 };
+    expect(JSON.parse(encodeHelperCommand(withFresh)).freshSerial).toBe(9);
   });
 });

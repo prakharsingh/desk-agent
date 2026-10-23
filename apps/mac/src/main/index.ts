@@ -11,6 +11,7 @@ import { readConfig } from './configStore.js';
 import { ConfigSchema } from '@desk-agent/config-schema';
 import { DisplayHelperHost } from './displayHelperHost.js';
 import { DisplaySessionManager } from './displaySessionManager.js';
+import { DisplayIdentityStore } from './displayIdentityStore.js';
 import { debounce } from './debounce.js';
 import { LogBuffer } from './logBuffer.js';
 import { describePermissionStatus } from './permissionProbe.js';
@@ -312,6 +313,8 @@ if (!gotLock) {
       onLog: recordDisplayLog,
       // Dev tooling only (test-client.mjs reads it); never in a packaged app.
       devTokenFile: !app.isPackaged && devTokenEnv ? devTokenEnv : null,
+      // Per-phone display-identity generation (Ruling P0-7), next to config.json.
+      identityStore: new DisplayIdentityStore(path.join(path.dirname(configPath), 'display-identity.json')),
     });
     // A helper left over from a crashed previous run would hold the virtual display and port 8788.
     new DisplayHelperHost({ helperPath, pidfilePath, onEvent: () => {}, onExit: () => {} }).killStale();

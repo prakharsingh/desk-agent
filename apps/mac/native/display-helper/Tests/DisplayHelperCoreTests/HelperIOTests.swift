@@ -8,6 +8,13 @@ import Testing
         guard case .start(let c) = try HelperCommand.decodeLine(line) else { Issue.record("not start"); return }
         #expect(c == StartCommand(sessionId: "s1", token: "tok", port: 8788, surfaceW: 2340, surfaceH: 1080,
                                   orientation: .landscape, serialNum: 7, vendorId: 13398, productId: 19780, dpi: 420))
+        #expect(c.freshSerial == nil)
+    }
+
+    @Test func startCommandCarriesAnOptionalFreshSerial() throws {
+        let line = #"{"cmd":"start","sessionId":"s","token":"t","port":1,"surfaceW":1,"surfaceH":2,"orientation":"portrait","serialNum":1,"vendorId":2,"productId":3,"freshSerial":4027056772}"#
+        guard case .start(let c) = try HelperCommand.decodeLine(line) else { Issue.record("not start"); return }
+        #expect(c.freshSerial == 4027056772)
     }
 
     @Test func startCommandDpiOptional() throws {
@@ -31,7 +38,8 @@ import Testing
     }
 
     @Test func otherEventLines() {
-        #expect(HelperEvent.ready(displayId: 5, port: 8788).jsonLine() == #"{"displayId":5,"evt":"ready","port":8788}"#)
+        #expect(HelperEvent.ready(displayId: 5, port: 8788, serialNum: 3098494084).jsonLine()
+                == #"{"displayId":5,"evt":"ready","port":8788,"serialNum":3098494084}"#)
         #expect(HelperEvent.connected.jsonLine() == #"{"evt":"connected"}"#)
         #expect(HelperEvent.paused.jsonLine() == #"{"evt":"paused"}"#)
         #expect(HelperEvent.resumed.jsonLine() == #"{"evt":"resumed"}"#)

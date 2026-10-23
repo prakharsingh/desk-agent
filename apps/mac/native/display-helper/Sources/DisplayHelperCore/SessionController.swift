@@ -80,6 +80,16 @@ public final class SessionController {
     /// Re-reads of the capture target allowed per restart after the first, when the display keeps
     /// reconfiguring while it is read; then capture starts with the latest snapshot.
     public static let maxExtraTargetRefreshes = 2
+    /// The whole start (`begin()` → `ready` or an end) stays within this, so it fits well inside the
+    /// phone's 12 s DISPLAY_REPLY_TIMEOUT_MS with helper spawn and `adb reverse` on top. Each identity's
+    /// activation is at most 3 s (`ActivationPoll`); the capturable wait gets what is left (at most
+    /// `capturableTimeout`, at least `minCapturableTimeout`).
+    public static let startBudget: TimeInterval = 8.0
+    public static let minCapturableTimeout: TimeInterval = 1.0
+    /// The fresh identity is tried only when the primary and spare gave up within this (typically
+    /// ~2.3 s: 1 s offline give-up each plus destroy/create), so its activation (≤ 3 s) still leaves
+    /// the capturable wait at least `startBudget - 6.5` s.
+    public static let freshIdentityCutoff: TimeInterval = 3.5
 
     public private(set) var endedReason: EndReason?
     /// Authenticated `input` messages, only when PostEvent access was granted at hello. Never called
@@ -113,6 +123,7 @@ public final class SessionController {
     }
 
     private var begun = false
+    private var beganAt: TimeInterval = 0
     private var displayCreated = false
     private var displayId: UInt32 = 0
     private var deadline: ConnectDeadline?          // non-nil from `ready` until authenticated
@@ -165,19 +176,42 @@ public final class SessionController {
     /// activation) → waitUntilCapturable → `.ready` (the connect deadline starts here).
     ///
     /// When macOS keeps the primary identity switched off (`displayOffline` while awake), the display
-    /// is destroyed and recreated once with the spare identity (`DisplayIdentity`); a spare that is
-    /// offline too ends `display-offline`.
+    /// is destroyed and recreated once with the spare identity (`DisplayIdentity`). When the spare is
+    /// offline too and main sent a `freshSerial` (Ruling P0-7: the phone's next identity generation,
+    /// which macOS has no saved state for), it is recreated once more with that serial, unless the
+    /// start already used `freshIdentityCutoff`. Whatever is still offline ends `display-offline`.
     public func begin() {
         guard !begun, endedReason == nil else { return }
         begun = true
+        beganAt = now()
         guard backend.preflightScreenRecording() else { return terminate(.permissionScreenRecording) }
         createAndActivate(.primary)
     }
 
-    private enum Identity: String { case primary, spare }
+    private enum Identity: String { case primary, spare, fresh }
 
     private func serial(for identity: Identity) -> UInt32 {
-        identity == .primary ? start.serialNum : DisplayIdentity.spareSerial(for: start.serialNum)
+        switch identity {
+        case .primary: return start.serialNum
+        case .spare: return DisplayIdentity.spareSerial(for: start.serialNum)
+        case .fresh: return start.freshSerial ?? start.serialNum
+        }
+    }
+
+    /// The identity to try after `identity` came up switched off while the Mac is awake, if any.
+    private func nextIdentity(after identity: Identity) -> Identity? {
+        switch identity {
+        case .primary: return .spare
+        case .spare:
+            guard start.freshSerial != nil else { return nil }
+            guard now() - beganAt <= Self.freshIdentityCutoff else {
+                log("warn", "the spare display identity is switched off too, but there is no time left in this start "
+                    + "for a fresh identity; the next start tries it")
+                return nil
+            }
+            return .fresh
+        case .fresh: return nil
+        }
     }
 
     private static func hex(_ serial: UInt32) -> String { String(format: "0x%08x", serial) }
@@ -202,17 +236,17 @@ public final class SessionController {
             case .success:
                 let ms = Int(((self.now() - startedAt) * 1000).rounded())
                 self.log("info", "using the \(identity.rawValue) display identity \(Self.hex(serialNum)) (modes active after \(ms) ms)")
-                self.waitUntilCapturable()
+                self.waitUntilCapturable(serialNum: serialNum)
             case .failure(let error):
                 let offline = error as? BackendError == .displayOffline
                 // Asleep: a second display would only leave a second ghost (F2); sleep explains it.
-                if offline, identity == .primary, !self.backend.mainDisplayAsleep() {
-                    let spare = self.serial(for: .spare)
+                if offline, !self.backend.mainDisplayAsleep(), let next = self.nextIdentity(after: identity) {
+                    let nextSerial = self.serial(for: next)
                     self.log("warn", "macOS keeps Desk Agent Phone switched off for identity \(Self.hex(serialNum)); "
-                        + "retrying once with the spare identity \(Self.hex(spare))")
+                        + "retrying once with the \(next.rawValue) display identity \(Self.hex(nextSerial))")
                     self.backend.destroyDisplay()
                     self.displayCreated = false
-                    return self.createAndActivate(.spare)
+                    return self.createAndActivate(next)
                 }
                 self.log("error", offline
                     ? "mode activation failed: the display stayed offline (macOS keeps Desk Agent Phone out of the desktop)"
@@ -222,13 +256,15 @@ public final class SessionController {
         }
     }
 
-    private func waitUntilCapturable() {
-        backend.waitUntilCapturable(displayId: displayId, timeout: Self.capturableTimeout) { [weak self] result in
+    private func waitUntilCapturable(serialNum: UInt32) {
+        let left = Self.startBudget - (now() - beganAt)
+        let timeout = min(Self.capturableTimeout, max(Self.minCapturableTimeout, left))
+        backend.waitUntilCapturable(displayId: displayId, timeout: timeout) { [weak self] result in
             guard let self, self.endedReason == nil else { return }
             switch result {
             case .success:
                 self.deadline = ConnectDeadline(createdAt: self.now(), timeout: Self.connectDeadline)
-                self.sink.emit(.ready(displayId: self.displayId, port: self.start.port))
+                self.sink.emit(.ready(displayId: self.displayId, port: self.start.port, serialNum: serialNum))
             case .failure(let error):
                 self.terminate(Self.endReason(for: error))
             }

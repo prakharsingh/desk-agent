@@ -6,7 +6,7 @@ import type { ToCore } from '@desk-agent/core';
 import { DISPLAY_ERROR_REASONS } from '@desk-agent/core';
 import { DISPLAY_VIDEO_PORT, type DisplayReason } from '@desk-agent/protocol';
 import { DisplaySessionManager, HELPER_ERROR_REASONS, type DisplaySessionManagerOptions, type HostLike } from './displaySessionManager.js';
-import type { HelperEvent, HelperStartCommand } from './displayHelperProtocol.js';
+import { displayIdentitySerial, stableDisplaySerial, type HelperEvent, type HelperStartCommand } from './displayHelperProtocol.js';
 
 interface FakeHost extends HostLike {
   started: HelperStartCommand[];
@@ -469,6 +469,109 @@ describe('DisplaySessionManager', () => {
       const other = setup({ devTokenFile: null });
       other.mgr.handleStartRequest(START);
       expect(fs.readdirSync(dir)).toEqual([]);
+    });
+  });
+  describe('display identity generations (Ruling P0-7)', () => {
+    const KEY = stableDisplaySerial(START.deviceSerial).toString(16).padStart(8, '0');
+    function fakeStore(initial: Record<string, number> = {}) {
+      const gens: Record<string, number> = { ...initial };
+      const writes: Array<[string, number]> = [];
+      return {
+        gens,
+        writes,
+        throwOnSet: false,
+        getGeneration(key: string) {
+          return gens[key] ?? 0;
+        },
+        setGeneration(key: string, g: number) {
+          if (this.throwOnSet) throw new Error('disk full');
+          writes.push([key, g]);
+          gens[key] = g;
+        },
+      };
+    }
+
+    it("starts generation 0 with today's serial and offers generation 1 as the fresh identity", () => {
+      const store = fakeStore();
+      const { mgr, hosts, logs } = setup({ identityStore: store });
+      mgr.handleStartRequest(START);
+      const cmd = hosts[0].started[0];
+      expect(cmd.serialNum).toBe(stableDisplaySerial(START.deviceSerial));
+      expect(cmd.freshSerial).toBe(displayIdentitySerial(START.deviceSerial, 1));
+      expect(logs.some((l) => l.level === 'info' && l.message.includes('display identity generation 0'))).toBe(true);
+    });
+
+    it('starts from the saved generation for this phone', () => {
+      const store = fakeStore({ [KEY]: 2 });
+      const { mgr, hosts } = setup({ identityStore: store });
+      mgr.handleStartRequest(START);
+      expect(hosts[0].started[0].serialNum).toBe(displayIdentitySerial(START.deviceSerial, 2));
+      expect(hosts[0].started[0].freshSerial).toBe(displayIdentitySerial(START.deviceSerial, 3));
+    });
+
+    it('remembers the next generation once the fresh identity comes online, and logs it', () => {
+      const store = fakeStore();
+      const { mgr, hosts, logs } = setup({ identityStore: store });
+      mgr.handleStartRequest(START);
+      hosts[0].emit({ evt: 'ready', displayId: 7, port: DISPLAY_VIDEO_PORT, serialNum: hosts[0].started[0].freshSerial });
+      expect(store.writes).toEqual([[KEY, 1]]);
+      expect(mgr.isActive()).toBe(true);
+      expect(logs.some((l) => l.level === 'info' && l.message.includes('generation 1') && l.message.includes('saved'))).toBe(true);
+      // The next tap uses generation 1 directly.
+      hosts[0].exit({ reason: 'phone-bye' });
+      mgr.handleStartRequest(START);
+      expect(hosts[1].started[0].serialNum).toBe(displayIdentitySerial(START.deviceSerial, 1));
+    });
+
+    it('saves nothing when a known identity comes online, but logs which one', () => {
+      const store = fakeStore();
+      const { mgr, hosts, logs } = setup({ identityStore: store });
+      mgr.handleStartRequest(START);
+      hosts[0].emit({ evt: 'ready', displayId: 7, port: DISPLAY_VIDEO_PORT, serialNum: hosts[0].started[0].serialNum });
+      expect(store.writes).toEqual([]);
+      const hex = stableDisplaySerial(START.deviceSerial).toString(16).padStart(8, '0');
+      expect(logs.some((l) => l.level === 'info' && l.message.includes(`0x${hex}`) && l.message.includes('generation 0'))).toBe(true);
+    });
+
+    it('saves nothing for a session that ends before ready (every identity offline)', () => {
+      const store = fakeStore();
+      const { mgr, hosts } = setup({ identityStore: store });
+      mgr.handleStartRequest(START);
+      hosts[0].exit({ reason: 'display-offline' });
+      expect(store.writes).toEqual([]);
+    });
+
+    it('saves nothing for a ready from a session main is already stopping', () => {
+      const store = fakeStore();
+      const { mgr, hosts } = setup({ identityStore: store });
+      mgr.handleStartRequest(START);
+      mgr.handleStopRequest({ sessionId: 'sess-1', reason: 'user-exit' });
+      hosts[0].emit({ evt: 'ready', displayId: 7, port: DISPLAY_VIDEO_PORT, serialNum: hosts[0].started[0].freshSerial });
+      expect(store.writes).toEqual([]);
+    });
+
+    it('keeps the session running when the generation cannot be saved', () => {
+      const store = fakeStore();
+      store.throwOnSet = true;
+      const { mgr, hosts, logs, sent } = setup({ identityStore: store });
+      mgr.handleStartRequest(START);
+      hosts[0].emit({ evt: 'ready', displayId: 7, port: DISPLAY_VIDEO_PORT, serialNum: hosts[0].started[0].freshSerial });
+      expect(mgr.isActive()).toBe(true);
+      expect(sessionMsgs(sent).at(-1)).toMatchObject({ active: true });
+      expect(logs.some((l) => l.level === 'warn' && l.message.includes('disk full'))).toBe(true);
+    });
+
+    it('a store that fails to read starts at generation 0', () => {
+      const { mgr, hosts } = setup({ identityStore: { getGeneration: () => { throw new Error('boom'); }, setGeneration: () => {} } });
+      mgr.handleStartRequest(START);
+      expect(hosts[0].started[0].serialNum).toBe(stableDisplaySerial(START.deviceSerial));
+    });
+
+    it('without a store every session is generation 0 and still offers the fresh identity', () => {
+      const { mgr, hosts } = setup();
+      mgr.handleStartRequest(START);
+      expect(hosts[0].started[0].serialNum).toBe(stableDisplaySerial(START.deviceSerial));
+      expect(hosts[0].started[0].freshSerial).toBe(displayIdentitySerial(START.deviceSerial, 1));
     });
   });
 });

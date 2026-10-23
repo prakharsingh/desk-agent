@@ -11,12 +11,18 @@ public struct StartCommand: Decodable, Equatable, Sendable {
     public var vendorId: UInt32
     public var productId: UInt32
     public var dpi: Double?
+    /// Optional (Ruling P0-7): a serial macOS has never seen (the phone's next display-identity
+    /// generation), tried once when `serialNum` and its spare both come up switched off. Absent from
+    /// an older main: no escalation.
+    public var freshSerial: UInt32?
 
     public init(sessionId: String, token: String, port: UInt16, surfaceW: Int, surfaceH: Int,
-                orientation: Orientation, serialNum: UInt32, vendorId: UInt32, productId: UInt32, dpi: Double?) {
+                orientation: Orientation, serialNum: UInt32, vendorId: UInt32, productId: UInt32, dpi: Double?,
+                freshSerial: UInt32? = nil) {
         self.sessionId = sessionId; self.token = token; self.port = port
         self.surfaceW = surfaceW; self.surfaceH = surfaceH; self.orientation = orientation
         self.serialNum = serialNum; self.vendorId = vendorId; self.productId = productId; self.dpi = dpi
+        self.freshSerial = freshSerial
     }
 }
 
@@ -85,7 +91,9 @@ public struct StatsEvent: Encodable, Equatable, Sendable {
 }
 
 public enum HelperEvent: Encodable, Equatable, Sendable {
-    case ready(displayId: UInt32, port: UInt16)
+    /// `serialNum`: the display identity that came up (primary, spare or fresh), so main can remember
+    /// a fresh one. An additive field: an older main ignores it.
+    case ready(displayId: UInt32, port: UInt16, serialNum: UInt32)
     case connected
     case paused
     case resumed
@@ -94,17 +102,18 @@ public enum HelperEvent: Encodable, Equatable, Sendable {
     case ended(EndReason)
 
     enum CodingKeys: String, CodingKey {
-        case evt, displayId, port, level, message, reason
+        case evt, displayId, port, serialNum, level, message, reason
         case fps, kbps, unacked, ackP50Ms, ackP95Ms, phoneRendered, phoneDropped
     }
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case .ready(let id, let port):
+        case .ready(let id, let port, let serialNum):
             try c.encode("ready", forKey: .evt)
             try c.encode(id, forKey: .displayId)
             try c.encode(port, forKey: .port)
+            try c.encode(serialNum, forKey: .serialNum)
         case .connected: try c.encode("connected", forKey: .evt)
         case .paused: try c.encode("paused", forKey: .evt)
         case .resumed: try c.encode("resumed", forKey: .evt)

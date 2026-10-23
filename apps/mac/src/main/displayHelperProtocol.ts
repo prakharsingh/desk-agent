@@ -15,10 +15,16 @@ export interface HelperStartCommand {
   vendorId: number;
   productId: number;
   dpi?: number;
+  /**
+   * Optional (Ruling P0-7): the phone's next display-identity generation, a serial macOS has no saved
+   * state for. The helper tries it once when `serialNum` and its spare both come up switched off.
+   */
+  freshSerial?: number;
 }
 
 export type HelperEvent =
-  | { evt: 'ready'; displayId: number; port: number }
+  /** `serialNum`: the identity that came up (absent from an older helper). */
+  | { evt: 'ready'; displayId: number; port: number; serialNum?: number }
   | { evt: 'connected' }
   | { evt: 'paused' }
   | { evt: 'resumed' }
@@ -49,7 +55,10 @@ export function parseHelperEventLine(line: string): HelperEvent | null {
   const r = o as Record<string, unknown>;
   switch (r.evt) {
     case 'ready':
-      return isNum(r.displayId) && isNum(r.port) ? { evt: 'ready', displayId: r.displayId, port: r.port } : null;
+      if (!isNum(r.displayId) || !isNum(r.port)) return null;
+      return isNum(r.serialNum)
+        ? { evt: 'ready', displayId: r.displayId, port: r.port, serialNum: r.serialNum }
+        : { evt: 'ready', displayId: r.displayId, port: r.port };
     case 'connected':
     case 'paused':
     case 'resumed':
@@ -87,4 +96,13 @@ export function stableDisplaySerial(deviceSerial: string): number {
   }
   h >>>= 0;
   return h === 0 ? 1 : h;
+}
+
+/**
+ * The display serial for a phone's display-identity `generation` (Ruling P0-7). Generation 0 is
+ * `stableDisplaySerial(deviceSerial)`, the identity every existing arrangement is saved under; each later
+ * generation is a fresh serial macOS has no saved state for, used once every earlier identity is switched off.
+ */
+export function displayIdentitySerial(deviceSerial: string, generation: number): number {
+  return generation === 0 ? stableDisplaySerial(deviceSerial) : stableDisplaySerial(`${deviceSerial}\u0000gen${generation}`);
 }

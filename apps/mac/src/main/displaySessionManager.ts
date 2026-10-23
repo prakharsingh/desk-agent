@@ -2,7 +2,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import type { ToCore } from '@desk-agent/core';
 import { DISPLAY_VIDEO_PORT, type DisplayOrientation, type DisplayReason } from '@desk-agent/protocol';
-import { stableDisplaySerial, type HelperEvent, type HelperStartCommand } from './displayHelperProtocol.js';
+import { displayIdentitySerial, stableDisplaySerial, type HelperEvent, type HelperStartCommand } from './displayHelperProtocol.js';
+import type { DisplayIdentityGenerations } from './displayIdentityStore.js';
 
 /** The slice of DisplayHelperHost the manager drives (one host per session). */
 export interface HostLike {
@@ -29,6 +30,11 @@ export interface DisplaySessionManagerOptions {
   randomSessionId?: () => string;
   /** Dev only (!app.isPackaged && DESK_AGENT_DISPLAY_DEV_TOKEN_FILE): the current token is written here, mode 0600. */
   devTokenFile?: string | null;
+  /**
+   * Per-phone display-identity generation (Ruling P0-7). Absent: every session is generation 0 (the fresh
+   * identity is still offered, it just is not remembered).
+   */
+  identityStore?: DisplayIdentityGenerations;
 }
 
 export interface DisplayStartRequest {
@@ -65,7 +71,11 @@ interface Session {
   tokenSent: boolean;
   /** Kept so a core restart can re-arm the phone for a session that is still pending. */
   token: string;
+  /** The phone's display identity: store key, the generation this session started from, its serials. */
+  identity: { phoneKey: string; generation: number; serialNum: number; freshSerial: number };
 }
+
+const hex32 = (n: number) => `0x${(n >>> 0).toString(16).padStart(8, '0')}`;
 
 /**
  * Owns the display-session lifecycle in Electron main: one pending/active helper session at a time. A new start
@@ -167,7 +177,8 @@ export class DisplaySessionManager {
       return;
     }
 
-    const session: Session = { sessionId, host: null, ready: false, stopReason: null, ended: false, tokenSent: false, token };
+    const identity = this.identityFor(req.deviceSerial);
+    const session: Session = { sessionId, host: null, ready: false, stopReason: null, ended: false, tokenSent: false, token, identity };
     this.current = session;
     const host = this.opts.createHost({
       onEvent: (e) => this.onEvent(session, e),
@@ -175,12 +186,13 @@ export class DisplaySessionManager {
       onSpawn: () => this.onSpawn(session, token),
     });
     session.host = host;
-    this.opts.onLog('info', `starting display session ${sessionId} (${req.w}x${req.h} ${req.orientation})`);
+    this.opts.onLog('info', `starting display session ${sessionId} (${req.w}x${req.h} ${req.orientation}) on display identity generation ` +
+      `${identity.generation} (${hex32(identity.serialNum)}; fresh ${hex32(identity.freshSerial)} if every known identity is switched off)`);
     try {
       host.start({
         cmd: 'start', sessionId, token, port: DISPLAY_VIDEO_PORT,
         surfaceW: req.w, surfaceH: req.h, orientation: req.orientation,
-        serialNum: stableDisplaySerial(req.deviceSerial),
+        serialNum: identity.serialNum, freshSerial: identity.freshSerial,
         vendorId: ids.vendorId, productId: ids.productId,
         ...(req.dpi !== undefined ? { dpi: req.dpi } : {}),
       });
@@ -213,6 +225,7 @@ export class DisplaySessionManager {
         }
         session.ready = true;
         this.sendActive(session);
+        this.noteIdentity(session, e.serialNum);
         this.changed();
         break;
       case 'log':
@@ -255,6 +268,44 @@ export class DisplaySessionManager {
     if (this.current === session) this.current = null;
     this.changed();
     if (startsNext) this.startNow(next);
+  }
+
+  /** Generation 0 (today's serial, so the existing arrangement stays valid) unless this phone escalated before. */
+  private identityFor(deviceSerial: string): Session['identity'] {
+    const phoneKey = stableDisplaySerial(deviceSerial).toString(16).padStart(8, '0');
+    let generation = 0;
+    try {
+      generation = this.opts.identityStore?.getGeneration(phoneKey) ?? 0;
+    } catch (err) {
+      this.opts.onLog('warn', `display identity generation unreadable, using 0: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return {
+      phoneKey, generation,
+      serialNum: displayIdentitySerial(deviceSerial, generation),
+      freshSerial: displayIdentitySerial(deviceSerial, generation + 1),
+    };
+  }
+
+  /**
+   * Logs which identity came up. The fresh identity coming online is the only moment the next generation is
+   * saved: it is online and capturable, so it is the phone's new last-good identity (Ruling P0-7).
+   */
+  private noteIdentity(session: Session, serialNum: number | undefined): void {
+    const { identity } = session;
+    if (serialNum === undefined) return; // an older helper does not say
+    if (serialNum !== identity.freshSerial) {
+      this.opts.onLog('info', `display session ${session.sessionId} uses display identity ${hex32(serialNum)} (generation ${identity.generation})`);
+      return;
+    }
+    const next = identity.generation + 1;
+    try {
+      this.opts.identityStore?.setGeneration(identity.phoneKey, next);
+      this.opts.onLog('info', `display session ${session.sessionId} uses the fresh display identity ${hex32(serialNum)}: ` +
+        `generation ${next} saved for this phone (macOS keeps every earlier identity switched off)`);
+    } catch (err) {
+      this.opts.onLog('warn', `display identity generation ${next} could not be saved (the next session escalates again): ` +
+        `${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   /** Never after shutdown: the tray may already be destroyed. */

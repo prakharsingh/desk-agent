@@ -126,7 +126,7 @@ final class FakeConnection: PhoneConnection {
 
 final class RecordingSink: HelperEventSink {
     var events: [HelperEvent] = []
-    /// The per-session "using the primary/spare display identity" info line, kept out of `events` so
+    /// The per-session "using the primary/spare/fresh display identity" info line, kept out of `events` so
     /// exact-sequence assertions elsewhere need not list it.
     var identityLogs: [String] = []
     func emit(_ event: HelperEvent) {
@@ -178,10 +178,10 @@ final class Harness {
         return SessionController(start: start, backend: backend, sink: sink, now: { clock.t })
     }()
 
-    init(w: Int = 2340, h: Int = 1080) {
+    init(w: Int = 2340, h: Int = 1080, freshSerial: UInt32? = nil) {
         start = StartCommand(sessionId: "s1", token: "tok", port: 8788, surfaceW: w, surfaceH: h,
                              orientation: w >= h ? .landscape : .portrait, serialNum: 42,
-                             vendorId: 0x3456, productId: 0x4D44, dpi: nil)
+                             vendorId: 0x3456, productId: 0x4D44, dpi: nil, freshSerial: freshSerial)
     }
 
     /// begin() + capturable → `.ready`.
@@ -237,7 +237,7 @@ final class Harness {
         #expect(h.backend.waitTimeout == 5.0)
         #expect(h.sink.events.isEmpty)
         h.backend.waitCompletion?(.success(()))
-        #expect(h.sink.events == [.ready(displayId: 7, port: 8788)])
+        #expect(h.sink.events == [.ready(displayId: 7, port: 8788, serialNum: 42)])
     }
 
     @Test func createDisplayUsesDescriptorSizingAndPreferredModesFirst() {
@@ -261,7 +261,7 @@ final class Harness {
         h.backend.completeApply()
         #expect(h.backend.waitTimeout == 5.0)
         h.backend.waitCompletion?(.success(()))
-        #expect(h.sink.events == [.ready(displayId: 7, port: 8788)])
+        #expect(h.sink.events == [.ready(displayId: 7, port: 8788, serialNum: 42)])
     }
 
     @Test func initialModeActivationFailureEndsUnsupportedAndDestroysTheDisplay() {
@@ -270,7 +270,7 @@ final class Harness {
         h.ctrl.begin()
         h.backend.completeApply(.failure(BackendError.unsupported))
         #expect(h.sink.ended == [.ended(.unsupported)])
-        #expect(!h.sink.events.contains(.ready(displayId: 7, port: 8788)))
+        #expect(!h.sink.events.contains(.ready(displayId: 7, port: 8788, serialNum: 42)))
         #expect(h.backend.destroyCalls == 1)
         #expect(h.backend.waitTimeout == nil)
     }
@@ -293,7 +293,7 @@ final class Harness {
         h.ctrl.begin()
         #expect(h.sink.events.last == .ended(.unsupported))
         #expect(h.sink.ended.count == 1)
-        #expect(!h.sink.events.contains(.ready(displayId: 7, port: 8788)))
+        #expect(!h.sink.events.contains(.ready(displayId: 7, port: 8788, serialNum: 42)))
         #expect(h.backend.destroyCalls == 0)
     }
 
@@ -327,7 +327,7 @@ final class Harness {
         h.backend.completeApply()
         #expect(h.backend.log.last == "waitUntilCapturable")
         h.backend.waitCompletion?(.success(()))
-        #expect(h.sink.events.contains(.ready(displayId: 7, port: 8788)))
+        #expect(h.sink.events.contains(.ready(displayId: 7, port: 8788, serialNum: DisplayIdentity.spareSerial(for: 42))))
         #expect(h.sink.ended.isEmpty)
         #expect(h.backend.destroyCalls == 1)
         let spare = String(format: "0x%08x", DisplayIdentity.spareSerial(for: 42))
@@ -410,6 +410,144 @@ final class Harness {
         #expect(h.backend.createCalls == 2)
     }
 
+    // MARK: begin() — fresh display identity when every known one is switched off (Ruling P0-7)
+
+    /// begin(), then the primary and the spare both report `displayOffline`, `dt` apart.
+    private func bothKnownOffline(_ h: Harness, primaryAfter: TimeInterval = 1.1, spareAfter: TimeInterval = 1.2) {
+        h.backend.deferApply = true
+        h.ctrl.begin()
+        h.advance(primaryAfter)
+        h.backend.completeApply(.failure(BackendError.displayOffline))   // primary
+        h.advance(spareAfter)
+        h.backend.completeApply(.failure(BackendError.displayOffline))   // spare
+    }
+
+    @Test func bothKnownIdentitiesOfflineEscalateToTheFreshIdentity() {
+        let h = Harness(freshSerial: 99)
+        bothKnownOffline(h)
+        #expect(h.sink.ended.isEmpty)
+        #expect(h.backend.createSerials == [42, DisplayIdentity.spareSerial(for: 42), 99])
+        #expect(h.backend.log == ["createDisplay", "applyModes", "destroyDisplay", "createDisplay", "applyModes",
+                                  "destroyDisplay", "createDisplay", "applyModes"])
+        #expect(h.sink.logs(level: "warn").contains { $0.contains("fresh display identity 0x00000063") })
+        h.backend.completeApply()
+        h.backend.waitCompletion?(.success(()))
+        #expect(h.sink.events.contains(.ready(displayId: 7, port: 8788, serialNum: 99)))
+        #expect(h.sink.ended.isEmpty)
+        #expect(h.backend.destroyCalls == 2)
+        #expect(h.sink.identityLogs.count == 1)
+        #expect(h.sink.identityLogs.first?.contains("using the fresh display identity 0x00000063") == true)
+    }
+
+    @Test func withoutAFreshSerialBothOfflineStillEndDisplayOffline() {
+        // An older main sends no freshSerial: the helper behaves exactly as before.
+        let h = Harness()
+        bothKnownOffline(h)
+        #expect(h.sink.ended == [.ended(.displayOffline)])
+        #expect(h.backend.createCalls == 2)
+    }
+
+    @Test func anOfflineFreshIdentityEndsDisplayOfflineWithoutAFourthTry() {
+        let h = Harness(freshSerial: 99)
+        bothKnownOffline(h)
+        h.backend.completeApply(.failure(BackendError.displayOffline))   // fresh
+        #expect(h.sink.ended == [.ended(.displayOffline)])
+        #expect(h.backend.createCalls == 3)
+        #expect(h.backend.destroyCalls == 3)
+        #expect(h.backend.pendingApplies.isEmpty)
+    }
+
+    @Test func aSpareOfflineWhileTheMacSleepsEndsMacAsleepWithoutTheFreshIdentity() {
+        let h = Harness(freshSerial: 99)
+        h.backend.deferApply = true
+        h.ctrl.begin()
+        h.backend.completeApply(.failure(BackendError.displayOffline))   // primary, awake
+        h.backend.mainAsleep = true
+        h.backend.completeApply(.failure(BackendError.displayOffline))   // spare, asleep
+        #expect(h.sink.ended == [.ended(.macAsleep)])
+        #expect(h.backend.createCalls == 2)
+    }
+
+    @Test func noFreshIdentityOnceTheEscalationCutoffHasPassed() {
+        // Keeps the whole start well inside the phone's 12 s reply timeout.
+        let h = Harness(freshSerial: 99)
+        bothKnownOffline(h, primaryAfter: 2.0, spareAfter: SessionController.freshIdentityCutoff - 2.0 + 0.01)
+        #expect(h.sink.ended == [.ended(.displayOffline)])
+        #expect(h.backend.createCalls == 2)
+        #expect(h.sink.logs(level: "warn").contains { $0.contains("no time left") })
+    }
+
+    @Test func theFreshIdentityIsTriedJustInsideTheCutoff() {
+        let h = Harness(freshSerial: 99)
+        bothKnownOffline(h, primaryAfter: 2.0, spareAfter: SessionController.freshIdentityCutoff - 2.0)
+        #expect(h.sink.ended.isEmpty)
+        #expect(h.backend.createSerials.last == 99)
+    }
+
+    @Test func otherSpareFailuresDoNotTryTheFreshIdentity() {
+        let h = Harness(freshSerial: 99)
+        h.backend.deferApply = true
+        h.ctrl.begin()
+        h.backend.completeApply(.failure(BackendError.displayOffline))   // primary
+        h.backend.completeApply(.failure(BackendError.unsupported))      // spare
+        #expect(h.sink.ended == [.ended(.unsupported)])
+        #expect(h.backend.createCalls == 2)
+    }
+
+    @Test func aFreshIdentityThatCannotBeCreatedEndsUnsupported() {
+        let h = Harness(freshSerial: 99)
+        h.backend.createErrorsByCall[3] = BackendError.unsupported
+        bothKnownOffline(h)
+        #expect(h.sink.ended == [.ended(.unsupported)])
+        #expect(h.backend.createCalls == 3)
+        #expect(h.backend.destroyCalls == 2)
+    }
+
+    @Test func aStopDuringTheFreshActivationIgnoresItsLateResult() {
+        let h = Harness(freshSerial: 99)
+        bothKnownOffline(h)
+        h.ctrl.stop(.stopRequested)
+        h.backend.completeApply()
+        #expect(h.sink.ended == [.ended(.stopRequested)])
+        #expect(h.backend.waitTimeout == nil)
+    }
+
+    @Test func readyNamesThePrimaryIdentityWhenItWorks() {
+        let h = Harness(freshSerial: 99)
+        h.ready()
+        #expect(h.sink.events == [.ready(displayId: 7, port: 8788, serialNum: 42)])
+        #expect(h.backend.createSerials == [42])
+    }
+
+    // MARK: begin() — the start stays inside one time budget
+
+    @Test func theCapturableWaitIsCutToWhatIsLeftOfTheStartBudget() {
+        let h = Harness(freshSerial: 99)
+        bothKnownOffline(h, primaryAfter: 1.5, spareAfter: 1.5)
+        h.advance(3.0)                                                   // fresh activation: 6 s since begin
+        h.backend.completeApply()
+        let left = SessionController.startBudget - 6.0
+        #expect(abs((h.backend.waitTimeout ?? 0) - left) < 1e-9)
+    }
+
+    @Test func theCapturableWaitNeverDropsBelowItsFloor() {
+        let h = Harness()
+        h.backend.deferApply = true
+        h.ctrl.begin()
+        h.advance(SessionController.startBudget)                         // a pathological activation
+        h.backend.completeApply()
+        #expect(h.backend.waitTimeout == SessionController.minCapturableTimeout)
+    }
+
+    @Test func aNormalStartKeepsTheFullCapturableWait() {
+        let h = Harness()
+        h.backend.deferApply = true
+        h.ctrl.begin()
+        h.advance(2.9)                                                   // slow but normal activation
+        h.backend.completeApply()
+        #expect(h.backend.waitTimeout == SessionController.capturableTimeout)
+    }
+
     @Test func initialActivationFailureWhileTheMacSleepsEndsMacAsleep() {
         let h = Harness()
         h.backend.deferApply = true
@@ -443,7 +581,7 @@ final class Harness {
         h.backend.mainAsleep = true
         h.ctrl.begin()
         h.backend.waitCompletion?(.success(()))
-        #expect(h.sink.events == [.ready(displayId: 7, port: 8788)])
+        #expect(h.sink.events == [.ready(displayId: 7, port: 8788, serialNum: 42)])
         #expect(h.backend.mainAsleepCalls == 0)
     }
 
@@ -581,7 +719,7 @@ final class Harness {
         #expect(h.backend.applied.count == 1)   // only the initial modes from begin()
         #expect(c.jsonTypes == ["helloAck"])
         #expect(c.json.first?["inputEnabled"] as? Bool == true)
-        #expect(h.sink.events == [.ready(displayId: 7, port: 8788), .connected])
+        #expect(h.sink.events == [.ready(displayId: 7, port: 8788, serialNum: 42), .connected])
         #expect(h.backend.log.suffix(2) == ["startCapture", "forceKeyframe"])
     }
 
@@ -839,7 +977,7 @@ final class Harness {
         let id = h.ctrl.accept(c)
         let hello = helloFrame()
         h.ctrl.receive(hello.prefix(7), on: id)
-        #expect(h.sink.events.last == .ready(displayId: 7, port: 8788))
+        #expect(h.sink.events.last == .ready(displayId: 7, port: 8788, serialNum: 42))
         h.ctrl.receive(hello.dropFirst(7), on: id)
         #expect(h.sink.events.last == .connected)
     }
