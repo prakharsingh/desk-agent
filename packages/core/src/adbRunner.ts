@@ -1,4 +1,4 @@
-import { spawn, execFile } from 'node:child_process';
+import { spawn, execFile, type ChildProcess } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { LogLevel } from '@desk-agent/plugin-sdk';
 import type { AdbRunner } from './tunnelSupervisor.js';
@@ -67,6 +67,63 @@ export interface RealAdbRunnerOptions {
   deliverTimeoutMs?: number;
   /** Deadline for the one-shot adb execs (default ADB_EXEC_TIMEOUT_MS; tests shrink it). */
   execTimeoutMs?: number;
+}
+
+// ---- track-devices child lifetime -----------------------------------------
+// `adb track-devices` is a long-lived child. It must never outlive the core:
+// every orphan keeps an adb-server connection open forever (F3: 86 leaked).
+// Two independent layers:
+//  1. In-process: every live tracker is registered here and killed
+//     SYNCHRONOUSLY (kill is sync, so it works inside a 'exit' handler) on
+//     exit, disconnect, SIGTERM/SIGINT/SIGHUP and (via 'exit') a crash.
+//  2. Out-of-process: the child is a /bin/sh wrapper that keeps our stdin
+//     pipe open and kills adb when that pipe hits EOF. EOF is delivered by the
+//     kernel when the core dies by ANY means, including SIGKILL, where no JS
+//     runs (adb itself ignores its stdin, so it cannot notice by itself).
+//     Script: fd3 = our stdin pipe; a background watcher blocks reading it and
+//     kills adb on EOF; the foreground waits for adb, then ends the whole group
+//     (so the watcher's cat cannot linger) while preserving adb's exit code.
+const TRACK_WRAPPER_SCRIPT =
+  'exec 3<&0; "$0" track-devices 3<&- & p=$!; (cat <&3 >/dev/null; kill $p 2>/dev/null) & ' +
+  'wait $p; rc=$?; trap \'exit $rc\' TERM; kill 0';
+
+const liveTrackers = new Set<ChildProcess>();
+
+/** Synchronously kill a tracker (the whole wrapper group: sh, adb, cat). */
+function killTracker(child: ChildProcess): void {
+  try {
+    if (typeof child.pid === 'number') process.kill(-child.pid, 'SIGTERM');
+    else child.kill();
+  } catch {
+    try { child.kill(); } catch { /* already gone */ }
+  }
+}
+
+/** Kill every tracker this process started. Safe to call repeatedly and from an 'exit' handler. */
+export function killAllTrackers(): void {
+  for (const child of [...liveTrackers]) killTracker(child);
+  liveTrackers.clear();
+}
+
+const GUARD_SIGNALS: Array<[NodeJS.Signals, number]> = [['SIGTERM', 15], ['SIGINT', 2], ['SIGHUP', 1]];
+let guardedProcess: NodeJS.Process | undefined;
+
+/** Idempotent per process object. Exported with an injectable process for tests. */
+export function installTrackerExitGuards(proc: NodeJS.Process = process): void {
+  if (guardedProcess === proc) return;
+  guardedProcess = proc;
+  // 'exit' also runs after an uncaught exception's default crash, and after process.exit().
+  proc.on('exit', killAllTrackers);
+  // IPC channel to a parent closed (node child_process.fork host).
+  proc.on('disconnect', killAllTrackers);
+  for (const [signal, num] of GUARD_SIGNALS) {
+    proc.on(signal, () => {
+      killAllTrackers();
+      // Adding a signal listener removes Node's default "terminate". Restore it
+      // unless someone else also listens (they own the shutdown then).
+      if (proc.listenerCount(signal) === 1) proc.exit(128 + num);
+    });
+  }
 }
 
 export function createRealAdbRunner(
@@ -170,8 +227,22 @@ export function createRealAdbRunner(
       };
 
       const start = () => {
-        const current = spawn(adbPath, ['track-devices']);
+        // detached: own process group, so killTracker can take down sh+adb+cat together.
+        const current = spawn('/bin/sh', ['-c', TRACK_WRAPPER_SCRIPT, adbPath], { detached: true, stdio: ['pipe', 'pipe', 'ignore'] });
         child = current;
+        if (typeof current.pid === 'number') {
+          liveTrackers.add(current);
+          current.on('exit', () => liveTrackers.delete(current));
+          installTrackerExitGuards();
+        }
+        // The open stdin pipe IS the parent-death signal; never end it, ignore EPIPE.
+        current.stdin?.on('error', () => {});
+        // The wrapper reports adb's own exit code (127 = adb not found). Only an
+        // exit we did not cause (stop/resync null `child` first) is worth a log.
+        current.on('exit', (code) => {
+          if (child !== current || stopped) return;
+          onLog('error', `adb track-devices exited unexpectedly (code ${code ?? 'signal'}${code === 127 ? '; is adb on PATH?' : ''})`);
+        });
         // Without this handler a missing adb binary (spawn ENOENT) is an
         // unhandled 'error' event — an uncaught exception that kills the whole
         // core, not just the tunnel.
@@ -210,7 +281,7 @@ export function createRealAdbRunner(
 
       const resync = (prefix: string) => {
         onLog('warn', `adb track-devices framing desync (bad length prefix ${JSON.stringify(prefix)}); restarting track-devices in ${trackRespawnDelayMs}ms`);
-        child?.kill();
+        if (child) killTracker(child);
         child = null;
         clearTimeout(respawnTimer);
         respawnTimer = setTimeout(() => {
@@ -223,7 +294,7 @@ export function createRealAdbRunner(
         stop: () => {
           stopped = true;
           clearTimeout(respawnTimer);
-          child?.kill();
+          if (child) killTracker(child);
           child = null;
         },
       };
