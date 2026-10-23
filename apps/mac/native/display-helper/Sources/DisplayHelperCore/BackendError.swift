@@ -8,7 +8,8 @@ public enum BackendError: Error, Equatable {
     case permissionDenied
     /// The stream / encoder failed after starting → `capture-failed`.
     case captureFailed(String)
-    /// The virtual display stayed offline for the whole mode-activation window → `display-offline`.
+    /// The virtual display stayed offline for 1 s in a row during mode activation → `display-offline`
+    /// (after the spare identity, `DisplayIdentity`, was offline too).
     case displayOffline
 
     /// The error `waitUntilCapturable` reports when its timeout expires.

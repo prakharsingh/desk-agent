@@ -17,6 +17,10 @@ final class FakeBackend: DisplayBackend {
 
     var createCalls = 0
     var createArgs: (maxPixels: Int, size: CGSize)?
+    /// `serialNum` of every `createDisplay` call, in order.
+    var createSerials: [UInt32] = []
+    /// Thrown by the Nth `createDisplay` call (1-based), on top of `createError`.
+    var createErrorsByCall: [Int: Error] = [:]
     var destroyCalls = 0
     var startCalls: [(w: Int, h: Int, cursor: Bool)] = []
     var stopCaptureCalls = 0
@@ -43,8 +47,10 @@ final class FakeBackend: DisplayBackend {
     func createDisplay(maxPixels: Int, sizeInMillimeters: CGSize, serialNum: UInt32,
                        vendorId: UInt32, productId: UInt32) throws -> UInt32 {
         createCalls += 1
+        createSerials.append(serialNum)
         log.append("createDisplay")
         if let createError { throw createError }
+        if let error = createErrorsByCall[createCalls] { throw error }
         createArgs = (maxPixels, sizeInMillimeters)
         return 7
     }
@@ -120,7 +126,15 @@ final class FakeConnection: PhoneConnection {
 
 final class RecordingSink: HelperEventSink {
     var events: [HelperEvent] = []
-    func emit(_ event: HelperEvent) { events.append(event) }
+    /// The per-session "using the primary/spare display identity" info line, kept out of `events` so
+    /// exact-sequence assertions elsewhere need not list it.
+    var identityLogs: [String] = []
+    func emit(_ event: HelperEvent) {
+        if case .log("info", let m) = event, m.hasPrefix("using the "), m.contains("display identity") {
+            return identityLogs.append(m)
+        }
+        events.append(event)
+    }
     var logs: [HelperEvent] { events.filter { if case .log = $0 { return true } else { return false } } }
     func logs(level: String) -> [String] {
         events.compactMap { if case .log(let l, let m) = $0, l == level { return m } else { return nil } }
@@ -285,14 +299,115 @@ final class Harness {
 
     // MARK: begin() — accurate start-failure reasons (F1, F2)
 
-    @Test func initialActivationOfflineEndsDisplayOffline() {
+    @Test func initialActivationOfflineOnBothIdentitiesEndsDisplayOffline() {
+        let h = Harness()
+        h.backend.deferApply = true
+        h.ctrl.begin()
+        h.backend.completeApply(.failure(BackendError.displayOffline))   // primary
+        #expect(h.sink.ended.isEmpty)
+        h.backend.completeApply(.failure(BackendError.displayOffline))   // spare
+        #expect(h.sink.ended == [.ended(.displayOffline)])
+        #expect(h.backend.createSerials == [42, DisplayIdentity.spareSerial(for: 42)])
+        #expect(h.backend.destroyCalls == 2)
+        #expect(h.backend.waitTimeout == nil)
+    }
+
+    // MARK: begin() — spare display identity when macOS keeps the primary switched off
+
+    @Test func anOfflinePrimaryIsDestroyedAndRecreatedOnceWithTheSpareIdentity() {
+        let h = Harness()
+        h.backend.deferApply = true
+        h.ctrl.begin()
+        #expect(h.backend.createSerials == [42])
+        h.backend.completeApply(.failure(BackendError.displayOffline))
+        #expect(h.backend.log == ["createDisplay", "applyModes", "destroyDisplay", "createDisplay", "applyModes"])
+        #expect(h.backend.createSerials == [42, DisplayIdentity.spareSerial(for: 42)])
+        #expect(h.backend.applied.count == 2 && h.backend.applied[0] == h.backend.applied[1])
+        #expect(h.sink.logs(level: "warn").contains { $0.contains("switched off") && $0.contains("spare") })
+        h.backend.completeApply()
+        #expect(h.backend.log.last == "waitUntilCapturable")
+        h.backend.waitCompletion?(.success(()))
+        #expect(h.sink.events.contains(.ready(displayId: 7, port: 8788)))
+        #expect(h.sink.ended.isEmpty)
+        #expect(h.backend.destroyCalls == 1)
+        let spare = String(format: "0x%08x", DisplayIdentity.spareSerial(for: 42))
+        #expect(h.sink.identityLogs.count == 1)
+        #expect(h.sink.identityLogs.contains { $0.contains("spare display identity") && $0.contains(spare) })
+    }
+
+    @Test func aWorkingPrimaryIsUsedAndLoggedWithoutTheSpare() {
+        let h = Harness()
+        h.ready()
+        #expect(h.backend.createSerials == [42])
+        #expect(h.backend.destroyCalls == 0)
+        #expect(h.sink.identityLogs.count == 1)
+        #expect(h.sink.identityLogs.contains { $0.contains("primary display identity") && $0.contains("0x0000002a") })
+    }
+
+    @Test func eachSessionTriesThePrimaryFirst() {
+        // The helper keeps no state across sessions: the user's original arrangement wins once fixed.
+        let first = Harness()
+        first.backend.deferApply = true
+        first.ctrl.begin()
+        first.backend.completeApply(.failure(BackendError.displayOffline))
+        first.backend.completeApply()
+        let second = Harness()
+        second.ready()
+        #expect(second.backend.createSerials == [42])
+    }
+
+    @Test func anOfflinePrimaryWhileTheMacSleepsEndsMacAsleepWithoutTheSpare() {
+        // Creating another display while asleep would leave a second ghost (F2).
+        let h = Harness()
+        h.backend.deferApply = true
+        h.backend.mainAsleep = true
+        h.ctrl.begin()
+        h.backend.completeApply(.failure(BackendError.displayOffline))
+        #expect(h.sink.ended == [.ended(.macAsleep)])
+        #expect(h.backend.createCalls == 1)
+    }
+
+    @Test func otherActivationFailuresDoNotTryTheSpare() {
+        let h = Harness()
+        h.backend.deferApply = true
+        h.ctrl.begin()
+        h.backend.completeApply(.failure(BackendError.unsupported))
+        #expect(h.sink.ended == [.ended(.unsupported)])
+        #expect(h.backend.createCalls == 1)
+    }
+
+    @Test func aSpareThatCannotBeCreatedEndsUnsupported() {
+        let h = Harness()
+        h.backend.deferApply = true
+        h.backend.createErrorsByCall[2] = BackendError.unsupported
+        h.ctrl.begin()
+        h.backend.completeApply(.failure(BackendError.displayOffline))
+        #expect(h.sink.ended == [.ended(.unsupported)])
+        #expect(h.backend.createCalls == 2)
+        #expect(h.backend.destroyCalls == 1)   // the primary; the spare never existed
+        #expect(h.backend.pendingApplies.isEmpty)
+    }
+
+    @Test func aStopDuringThePrimaryActivationNeverCreatesTheSpare() {
+        let h = Harness()
+        h.backend.deferApply = true
+        h.ctrl.begin()
+        h.ctrl.stop(.stopRequested)
+        h.backend.completeApply(.failure(BackendError.displayOffline))
+        #expect(h.backend.createCalls == 1)
+        #expect(h.sink.ended == [.ended(.stopRequested)])
+    }
+
+    @Test func aStopDuringTheSpareActivationIgnoresItsLateResult() {
         let h = Harness()
         h.backend.deferApply = true
         h.ctrl.begin()
         h.backend.completeApply(.failure(BackendError.displayOffline))
-        #expect(h.sink.ended == [.ended(.displayOffline)])
-        #expect(h.backend.destroyCalls == 1)
-        #expect(h.backend.waitTimeout == nil)
+        h.ctrl.stop(.stopRequested)
+        #expect(h.sink.ended == [.ended(.stopRequested)])
+        h.backend.completeApply(.failure(BackendError.displayOffline))
+        #expect(h.sink.ended == [.ended(.stopRequested)])
+        #expect(h.backend.createCalls == 2)
     }
 
     @Test func initialActivationFailureWhileTheMacSleepsEndsMacAsleep() {

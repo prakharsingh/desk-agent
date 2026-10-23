@@ -163,18 +163,36 @@ public final class SessionController {
 
     /// Call only after the video listener is bound. preflight → createDisplay → applyModes (async
     /// activation) → waitUntilCapturable → `.ready` (the connect deadline starts here).
+    ///
+    /// When macOS keeps the primary identity switched off (`displayOffline` while awake), the display
+    /// is destroyed and recreated once with the spare identity (`DisplayIdentity`); a spare that is
+    /// offline too ends `display-offline`.
     public func begin() {
         guard !begun, endedReason == nil else { return }
         begun = true
         guard backend.preflightScreenRecording() else { return terminate(.permissionScreenRecording) }
+        createAndActivate(.primary)
+    }
+
+    private enum Identity: String { case primary, spare }
+
+    private func serial(for identity: Identity) -> UInt32 {
+        identity == .primary ? start.serialNum : DisplayIdentity.spareSerial(for: start.serialNum)
+    }
+
+    private static func hex(_ serial: UInt32) -> String { String(format: "0x%08x", serial) }
+
+    private func createAndActivate(_ identity: Identity) {
         let w = start.surfaceW, h = start.surfaceH
+        let serialNum = serial(for: identity)
+        let startedAt = now()
         do {
             displayId = try backend.createDisplay(
                 maxPixels: DisplayModes.descriptorMaxPixels(surfaceW: w, surfaceH: h),
                 sizeInMillimeters: DisplayModes.sizeInMillimeters(surfaceW: w, surfaceH: h, dpi: start.dpi),
-                serialNum: start.serialNum, vendorId: start.vendorId, productId: start.productId)
+                serialNum: serialNum, vendorId: start.vendorId, productId: start.productId)
         } catch {
-            log("error", "createDisplay failed: \(error)")
+            log("error", "createDisplay failed (\(identity.rawValue) identity \(Self.hex(serialNum))): \(error)")
             return terminate(startFailureReason(.unsupported))
         }
         displayCreated = true
@@ -182,9 +200,20 @@ public final class SessionController {
             guard let self, self.endedReason == nil else { return }
             switch result {
             case .success:
+                let ms = Int(((self.now() - startedAt) * 1000).rounded())
+                self.log("info", "using the \(identity.rawValue) display identity \(Self.hex(serialNum)) (modes active after \(ms) ms)")
                 self.waitUntilCapturable()
             case .failure(let error):
                 let offline = error as? BackendError == .displayOffline
+                // Asleep: a second display would only leave a second ghost (F2); sleep explains it.
+                if offline, identity == .primary, !self.backend.mainDisplayAsleep() {
+                    let spare = self.serial(for: .spare)
+                    self.log("warn", "macOS keeps Desk Agent Phone switched off for identity \(Self.hex(serialNum)); "
+                        + "retrying once with the spare identity \(Self.hex(spare))")
+                    self.backend.destroyDisplay()
+                    self.displayCreated = false
+                    return self.createAndActivate(.spare)
+                }
                 self.log("error", offline
                     ? "mode activation failed: the display stayed offline (macOS keeps Desk Agent Phone out of the desktop)"
                     : "mode activation failed: \(error)")

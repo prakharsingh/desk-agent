@@ -129,8 +129,8 @@ public final class VirtualDisplayController {
     /// (`ActivationPoll`) on `activationQueue` — never on the session queue — until a HiDPI mode of
     /// ours is active. The mode list can lag behind applySettings and a fresh display may reject
     /// configuration briefly, so "none available" and failed switches are retried; expiry fails with
-    /// `modeSwitchFailed` / `modeUnavailable`, or `BackendError.displayOffline` when the display was
-    /// offline on every attempt. `destroy()` cancels the poll (`destroyed`).
+    /// `modeSwitchFailed` / `modeUnavailable`, or (after 1 s offline in a row, without waiting out the
+    /// 3 s) `BackendError.displayOffline`. `destroy()` cancels the poll (`destroyed`).
     private func activatePreferredMode(applied: [ModeSpec], deliverOn queue: DispatchQueue,
                                        completion: @escaping (Result<Void, Error>) -> Void) {
         let displayId = self.displayId

@@ -60,6 +60,8 @@ public enum ModeActivation {
 public struct ActivationPoll {
     public static let maxAttempts = 30
     public static let interval: TimeInterval = 0.1
+    /// This many offline attempts in a row (1 s) end the poll early with `displayOffline`.
+    public static let offlineGiveUpAttempts = 10
 
     /// What one attempt observed or did.
     public enum Attempt: Equatable {
@@ -80,7 +82,8 @@ public struct ActivationPoll {
         case modeUnavailable
         /// It appeared, but switching to it kept failing (the last CGError).
         case modeSwitchFailed(Int32)
-        /// The display was offline on every attempt: macOS keeps it out of the desktop.
+        /// The display was offline for `offlineGiveUpAttempts` attempts in a row: macOS keeps it out
+        /// of the desktop.
         case displayOffline
     }
 
@@ -93,6 +96,7 @@ public struct ActivationPoll {
     public private(set) var attempts = 0
     private var sawTarget = false
     private var sawOnline = false
+    private var offlineStreak = 0
     private var lastError: Int32 = 0
 
     public init() {}
@@ -111,6 +115,10 @@ public struct ActivationPoll {
         case .offline:
             break
         }
+        offlineStreak = attempt == .offline ? offlineStreak + 1 : 0
+        // Offline for a second straight (even after an online attempt: ControlCenter re-asserts a
+        // persisted independent output ~0.15 s after the display appears) → macOS keeps it switched off.
+        guard offlineStreak < Self.offlineGiveUpAttempts else { return .failed(.displayOffline) }
         guard attempts >= Self.maxAttempts else { return .retry }
         guard sawOnline else { return .failed(.displayOffline) }
         return .failed(sawTarget ? .modeSwitchFailed(lastError) : .modeUnavailable)

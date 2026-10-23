@@ -86,18 +86,39 @@ import Testing
     }
 
     /// F1: macOS kept the display out of the desktop (Control Center "independent output" persisted
-    /// for this vendor/product/serial) for the whole window.
-    @Test func offlineForTheWholeWindowFailsDisplayOffline() {
+    /// for this vendor/product/serial). Ten offline attempts in a row (1 s) give up early, so the
+    /// session can still try the spare identity inside the phone's 12 s reply timeout.
+    @Test func offlineForASecondFailsDisplayOfflineEarly() {
+        #expect(ActivationPoll.offlineGiveUpAttempts == 10)
+        #expect(abs(Double(ActivationPoll.offlineGiveUpAttempts) * ActivationPoll.interval - 1.0) < 1e-9)
         var p = ActivationPoll()
-        for _ in 1..<ActivationPoll.maxAttempts { #expect(p.record(.offline) == .retry) }
+        for _ in 1..<ActivationPoll.offlineGiveUpAttempts { #expect(p.record(.offline) == .retry) }
+        #expect(p.record(.offline) == .failed(.displayOffline))
+        #expect(p.attempts == ActivationPoll.offlineGiveUpAttempts)
+    }
+
+    /// ControlCenter re-asserts independent output ~0.15 s after the display appears, so it can be
+    /// online (modes not listed yet) for an attempt before it goes offline for good.
+    @Test func onlineOnceThenOfflineForASecondFailsDisplayOffline() {
+        var p = ActivationPoll()
+        #expect(p.record(.notListed) == .retry)
+        for _ in 1..<ActivationPoll.offlineGiveUpAttempts { #expect(p.record(.offline) == .retry) }
         #expect(p.record(.offline) == .failed(.displayOffline))
     }
 
-    @Test func onlineOnceButNeverListedStillFailsModeUnavailable() {
+    @Test func anOnlineAttemptResetsTheOfflineStreak() {
         var p = ActivationPoll()
+        for _ in 1..<ActivationPoll.offlineGiveUpAttempts { #expect(p.record(.offline) == .retry) }
         #expect(p.record(.notListed) == .retry)
-        for _ in 2..<ActivationPoll.maxAttempts { #expect(p.record(.offline) == .retry) }
-        #expect(p.record(.offline) == .failed(.modeUnavailable))
+        for _ in 1..<ActivationPoll.offlineGiveUpAttempts { #expect(p.record(.offline) == .retry) }
+        #expect(p.record(.offline) == .failed(.displayOffline))
+        #expect(p.attempts == 2 * ActivationPoll.offlineGiveUpAttempts)
+    }
+
+    @Test func flappingOnlineNeverListedStillFailsModeUnavailable() {
+        var p = ActivationPoll()
+        for i in 1..<ActivationPoll.maxAttempts { #expect(p.record(i % 2 == 0 ? .notListed : .offline) == .retry) }
+        #expect(p.record(.notListed) == .failed(.modeUnavailable))
     }
 
     @Test func offlineThenOnlineAndSwitchedFinishes() {
