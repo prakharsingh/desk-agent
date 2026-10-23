@@ -46,6 +46,38 @@ final class FakeBackend: DisplayBackend {
     var waitTimeout: TimeInterval?
     var waitCompletion: ((Result<Void, BackendError>) -> Void)?
 
+    /// `mirrorVerdict()`: `.mirrored(mirrorWhy)` while `mirrored`, or for a display created with a serial
+    /// in `mirroredSerials` from its `mirrorAppearsAtCheck`-th query on (1 = already mirrored at the first
+    /// query; later = WindowServer restored the saved mirror set a little after activation). The first
+    /// `unknownChecks` queries of every display answer `.unknown` (CG in our process has not listed it
+    /// yet, F-M1).
+    var mirrored = false
+    var mirroredSerials: Set<UInt32> = []
+    var mirrorAppearsAtCheck = 1
+    var unknownChecks = 0
+    var mirrorWhy = "CGDisplayIsInMirrorSet(0x00000007)=1"
+    var mirrorChecks = 0
+    private var mirrorChecksThisDisplay = 0
+    func mirrorVerdict() -> MirrorVerdict {
+        mirrorChecks += 1
+        mirrorChecksThisDisplay += 1
+        if mirrored { return .mirrored(mirrorWhy) }
+        if mirrorChecksThisDisplay <= unknownChecks { return .unknown }
+        guard let serial = createSerials.last, mirroredSerials.contains(serial) else { return .notMirrored }
+        return mirrorChecksThisDisplay >= mirrorAppearsAtCheck ? .mirrored(mirrorWhy) : .notMirrored
+    }
+    /// When true, `runLater` work is held in `pendingLater` (fired by `fireLater`) instead of running inline.
+    var deferLater = false
+    var pendingLater: [(delay: TimeInterval, work: () -> Void)] = []
+    func runLater(after delay: TimeInterval, _ work: @escaping () -> Void) {
+        if deferLater { return pendingLater.append((delay, work)) }
+        work()
+    }
+    func fireLater() {
+        guard !pendingLater.isEmpty else { Issue.record("no runLater work is pending"); return }
+        pendingLater.removeFirst().work()
+    }
+
     func preflightScreenRecording() -> Bool { screenRecording }
     func preflightPostEvent() -> Bool { postEvent }
     func mainDisplayAsleep() -> Bool { mainAsleepCalls += 1; return mainAsleep }
@@ -54,6 +86,7 @@ final class FakeBackend: DisplayBackend {
                        vendorId: UInt32, productId: UInt32) throws -> UInt32 {
         createCalls += 1
         createSerials.append(serialNum)
+        mirrorChecksThisDisplay = 0
         log.append("createDisplay")
         if let createError { throw createError }
         if let error = createErrorsByCall[createCalls] { throw error }
@@ -75,9 +108,35 @@ final class FakeBackend: DisplayBackend {
     func forceKeyframe() { forceKeyframeCalls += 1; log.append("forceKeyframe") }
     func unblocked() { unblockedCalls += 1 }
     func setShowsCursor(_ on: Bool) { cursorCalls.append(on) }
+    /// Per serial: the raw `CGDisplayIsOnline` value and mirror verdict each activation attempt sees
+    /// (the last entry repeats). When the created serial has a script, `applyModes` runs the real
+    /// `ActivationPoll.preconfigureGuard` + `ActivationPoll` over it (a guard pass counts as `.kept`) and
+    /// completes the way `VirtualDisplayController` does.
+    var activationScripts: [UInt32: [(online: Int32, mirror: MirrorVerdict)]] = [:]
+    /// Attempts the last scripted activation made.
+    var scriptedAttempts = 0
+    private func runActivationScript(_ script: [(online: Int32, mirror: MirrorVerdict)]) -> Result<Void, Error> {
+        var poll = ActivationPoll()
+        scriptedAttempts = 0
+        while true {
+            let step = script[min(scriptedAttempts, script.count - 1)]
+            scriptedAttempts += 1
+            let attempt = ActivationPoll.preconfigureGuard(online: step.online, mirror: { step.mirror }) ?? .kept
+            switch poll.record(attempt) {
+            case .finished: return .success(())
+            case .retry: continue
+            case .failed(.displayOffline): return .failure(BackendError.displayOffline)
+            case .failed(.displayMirrored(let why)): return .failure(BackendError.displayMirrored(why))
+            case .failed: return .failure(BackendError.unsupported)
+            }
+        }
+    }
     func applyModes(_ modes: [ModeSpec], completion: @escaping (Result<Void, Error>) -> Void) {
         log.append("applyModes")
         applied.append(modes)
+        if let serial = createSerials.last, let script = activationScripts[serial] {
+            return completion(runActivationScript(script))
+        }
         if let macOS {
             macOS.apply(modes)
             if let active = macOS.active { widthPoints = active.widthPoints }
@@ -569,6 +628,414 @@ final class Harness {
         h.ready()
         #expect(h.sink.events == [.ready(displayId: 7, port: 8788, serialNum: 42)])
         #expect(h.backend.createSerials == [42])
+    }
+
+    // MARK: begin() — an identity macOS restores as mirrored is dropped like a switched-off one
+
+    private var spare: UInt32 { DisplayIdentity.spareSerial(for: 42) }
+
+    @Test func aMirroredPrimaryIsDroppedForTheSpare() {
+        let h = Harness()
+        h.backend.mirroredSerials = [42]
+        h.ctrl.begin()
+        #expect(h.backend.createSerials == [42, spare])
+        #expect(h.backend.log == ["createDisplay", "applyModes", "destroyDisplay", "createDisplay", "applyModes",
+                                  "waitUntilCapturable"])
+        #expect(h.sink.logs(level: "warn").contains {
+            $0.contains("mirror") && $0.contains("0x0000002a") && $0.contains("spare display identity")
+        })
+        h.backend.waitCompletion?(.success(()))
+        #expect(h.sink.events.contains(.ready(displayId: 7, port: 8788, serialNum: spare, mirroredSkipped: true)))
+        #expect(h.sink.ended.isEmpty)
+        #expect(h.backend.destroyCalls == 1)
+        // Only the identity that is used gets the "using the …" line.
+        #expect(h.sink.identityLogs.count == 1)
+        #expect(h.sink.identityLogs.first?.contains("using the spare display identity") == true)
+    }
+
+    @Test func aMirroredSpareFallsThroughToTheFreshIdentity() {
+        let h = Harness(freshSerial: 99)
+        h.backend.mirroredSerials = [42, spare]
+        h.ctrl.begin()
+        #expect(h.backend.createSerials == [42, spare, 99])
+        #expect(h.backend.destroyCalls == 2)
+        #expect(h.sink.logs(level: "warn").contains { $0.contains("mirror") && $0.contains("fresh display identity 0x00000063") })
+        h.backend.waitCompletion?(.success(()))
+        #expect(h.sink.events.contains(.ready(displayId: 7, port: 8788, serialNum: 99, mirroredSkipped: true)))
+        #expect(h.sink.ended.isEmpty)
+    }
+
+    @Test func everyIdentityMirroredEndsDisplayOfflineWithFreshTried() {
+        let h = Harness(freshSerial: 99)
+        h.backend.mirroredSerials = [42, spare, 99]
+        h.ctrl.begin()
+        // Main burns the generation after the fresh one (g+2), exactly as for a switched-off fresh identity.
+        #expect(h.sink.ended == [.ended(.displayOffline, freshTried: true)])
+        #expect(h.backend.createSerials == [42, spare, 99])
+        #expect(h.backend.destroyCalls == 3)
+        #expect(h.backend.waitTimeout == nil)
+        #expect(!h.sink.events.contains { if case .ready = $0 { return true } else { return false } })
+        #expect(h.sink.logs(level: "error").contains { $0.contains("mirror") && $0.contains("0x00000063") })
+    }
+
+    @Test func bothKnownIdentitiesMirroredWithoutAFreshSerialEndDisplayOffline() {
+        let h = Harness()
+        h.backend.mirroredSerials = [42, spare]
+        h.ctrl.begin()
+        #expect(h.sink.ended == [.ended(.displayOffline, freshTried: false)])
+        #expect(h.backend.createCalls == 2)
+    }
+
+    @Test func offlineAndMirroredIdentitiesShareOneFallbackChain() {
+        let h = Harness(freshSerial: 99)
+        h.backend.deferApply = true
+        h.backend.mirroredSerials = [spare]
+        h.ctrl.begin()
+        h.backend.completeApply(.failure(BackendError.displayOffline))   // primary switched off
+        h.backend.completeApply()                                          // spare comes up mirrored
+        #expect(h.backend.createSerials == [42, spare, 99])
+        h.backend.completeApply()                                          // fresh: extended
+        h.backend.waitCompletion?(.success(()))
+        #expect(h.sink.events.contains(.ready(displayId: 7, port: 8788, serialNum: 99, mirroredSkipped: true)))
+    }
+
+    @Test func aMirroredPrimaryWhileTheMacSleepsEndsMacAsleepWithoutTheSpare() {
+        let h = Harness()
+        h.backend.mirroredSerials = [42]
+        h.backend.mainAsleep = true
+        h.ctrl.begin()
+        #expect(h.sink.ended == [.ended(.macAsleep)])
+        #expect(h.backend.createCalls == 1)
+    }
+
+    @Test func aMirrorRestoredShortlyAfterActivationIsStillCaught() {
+        // WindowServer applies the saved set in `request_resources`, possibly after activation lands.
+        let h = Harness()
+        h.backend.deferLater = true
+        h.backend.mirroredSerials = [42]
+        h.backend.mirrorAppearsAtCheck = 4
+        h.ctrl.begin()
+        #expect(h.backend.mirrorChecks == 1)
+        #expect(h.backend.waitTimeout == nil)
+        #expect(h.backend.pendingLater.map(\.delay) == [MirrorSettlePoll.interval])
+        for _ in 0..<3 {
+            h.advance(MirrorSettlePoll.interval)
+            h.backend.fireLater()
+        }
+        #expect(h.backend.createSerials == [42, spare])
+        #expect(h.backend.destroyCalls == 1)
+        while !h.backend.pendingLater.isEmpty { h.backend.fireLater() }   // the spare settles unmirrored
+        h.backend.waitCompletion?(.success(()))
+        #expect(h.sink.events.contains(.ready(displayId: 7, port: 8788, serialNum: spare, mirroredSkipped: true)))
+    }
+
+    @Test func anUnmirroredIdentityIsCheckedForTheWholeSettleWindowThenUsed() {
+        let h = Harness()
+        h.backend.deferLater = true
+        h.ctrl.begin()
+        var fired = 0
+        while !h.backend.pendingLater.isEmpty {
+            #expect(h.backend.waitTimeout == nil)
+            h.backend.fireLater()
+            fired += 1
+        }
+        #expect(fired == MirrorSettlePoll.checks - 1)
+        #expect(h.backend.mirrorChecks == MirrorSettlePoll.checks)
+        #expect(h.backend.log.last == "waitUntilCapturable")
+        #expect(h.backend.createSerials == [42])
+    }
+
+    @Test func aStopDuringTheMirrorSettleIgnoresTheLateCheck() {
+        let h = Harness()
+        h.backend.deferLater = true
+        h.backend.mirroredSerials = [42]
+        h.backend.mirrorAppearsAtCheck = 2
+        h.ctrl.begin()
+        h.ctrl.stop(.stopRequested)
+        h.backend.fireLater()
+        #expect(h.sink.ended == [.ended(.stopRequested)])
+        #expect(h.backend.createCalls == 1)
+        #expect(h.backend.destroyCalls == 1)
+        #expect(h.backend.waitTimeout == nil)
+    }
+
+    // MARK: fix round 1 — ready reports a mirror-skipped identity (I1), activation-time mirror (I2), pre-ready re-check
+
+    @Test func readyReportsThatAMirroredIdentityWasSkipped() {
+        let h = Harness()
+        h.backend.mirroredSerials = [42]
+        h.ready()
+        #expect(h.sink.events.contains(.ready(displayId: 7, port: 8788, serialNum: spare, mirroredSkipped: true)))
+    }
+
+    @Test func readyAfterAnOfflinePrimaryDoesNotClaimAMirror() {
+        let h = Harness()
+        h.backend.deferApply = true
+        h.ctrl.begin()
+        h.backend.completeApply(.failure(BackendError.displayOffline))
+        h.backend.completeApply()
+        h.backend.waitCompletion?(.success(()))
+        #expect(h.sink.events.contains(.ready(displayId: 7, port: 8788, serialNum: spare, mirroredSkipped: false)))
+    }
+
+    @Test func readyOnTheFreshIdentityAfterAMirroredSpareReportsTheSkip() {
+        let h = Harness(freshSerial: 99)
+        h.backend.deferApply = true
+        h.backend.mirroredSerials = [spare]
+        h.ctrl.begin()
+        h.backend.completeApply(.failure(BackendError.displayOffline))   // primary offline
+        h.backend.completeApply()                                          // spare mirrored
+        h.backend.completeApply()                                          // fresh
+        h.backend.waitCompletion?(.success(()))
+        #expect(h.sink.events.contains(.ready(displayId: 7, port: 8788, serialNum: 99, mirroredSkipped: true)))
+    }
+
+    @Test func anActivationThatReportsAMirrorDropsTheIdentity() {
+        let h = Harness()
+        h.backend.deferApply = true
+        h.ctrl.begin()
+        h.backend.completeApply(.failure(BackendError.displayMirrored("CGDisplayIsInMirrorSet(0x000000c3)=1")))
+        #expect(h.backend.createSerials == [42, spare])
+        #expect(h.sink.logs(level: "warn").contains { $0.contains("mirror") && $0.contains("0x0000002a") })
+        #expect(h.sink.ended.isEmpty)
+        h.backend.completeApply()
+        h.backend.waitCompletion?(.success(()))
+        #expect(h.sink.events.contains(.ready(displayId: 7, port: 8788, serialNum: spare, mirroredSkipped: true)))
+    }
+
+    @Test func anotherActivationFailureOnAMirroredDisplayDropsItInsteadOfEndingUnsupported() {
+        // A mirror secondary may never get its HiDPI mode (modeUnavailable / modeSwitchFailed).
+        let h = Harness()
+        h.backend.deferApply = true
+        h.backend.mirroredSerials = [42]
+        h.ctrl.begin()
+        h.backend.completeApply(.failure(BackendError.unsupported))
+        #expect(h.backend.createSerials == [42, spare])
+        #expect(h.sink.ended.isEmpty)
+    }
+
+    @Test func everyIdentityReportingAMirrorAtActivationEndsDisplayOffline() {
+        let h = Harness(freshSerial: 99)
+        h.backend.applyError = BackendError.displayMirrored("CGDisplayIsInMirrorSet(0x00000007)=1")
+        h.ctrl.begin()
+        #expect(h.sink.ended == [.ended(.displayOffline, freshTried: true)])
+        #expect(h.backend.createSerials == [42, spare, 99])
+    }
+
+    @Test func aMirrorThatLandsAfterTheSettleWindowIsCaughtBeforeReady() {
+        let h = Harness()
+        h.backend.mirroredSerials = [42]
+        h.backend.mirrorAppearsAtCheck = MirrorSettlePoll.checks + 1
+        h.ctrl.begin()
+        #expect(h.backend.createSerials == [42])
+        h.backend.waitCompletion?(.success(()))                          // the pre-ready check sees it
+        #expect(h.backend.createSerials == [42, spare])
+        #expect(!h.sink.events.contains { if case .ready = $0 { return true } else { return false } })
+        h.backend.waitCompletion?(.success(()))
+        #expect(h.sink.events.contains(.ready(displayId: 7, port: 8788, serialNum: spare, mirroredSkipped: true)))
+    }
+
+    @Test func aLateMirrorPastTheCutoffIsStreamedAndLogged() {
+        // No time left in this start for another identity: keep the session (as for a mid-session mirror).
+        let h = Harness()
+        h.backend.mirroredSerials = [42]
+        h.backend.mirrorAppearsAtCheck = MirrorSettlePoll.checks + 1
+        h.ctrl.begin()
+        h.advance(SessionController.freshIdentityCutoff + 0.1)
+        h.backend.waitCompletion?(.success(()))
+        #expect(h.backend.createSerials == [42])
+        #expect(h.sink.events.contains(.ready(displayId: 7, port: 8788, serialNum: 42, mirroredSkipped: false)))
+        #expect(h.sink.logs(level: "warn").contains { $0.contains("mirror") && $0.contains("0x0000002a") })
+    }
+
+    @Test func aMirroredDisplayRefusingTheHelloResizeKeepsTheSession() {
+        // Mid-session the display is never mode-switched while mirrored; the stream keeps the current mode.
+        let h = Harness()
+        h.ready()
+        h.backend.applyError = BackendError.displayMirrored("CGDisplayIsInMirrorSet(0x00000007)=1")
+        let (c, _) = h.connect(helloFrame(w: 2400, h: 1080))
+        #expect(h.ctrl.endedReason == nil)
+        #expect(c.jsonTypes.contains("helloAck"))
+        #expect(h.backend.startCalls.count == 1)
+    }
+
+    // MARK: F-M1 — a display CG in our process does not list yet is not mirrored; every judgement logs its query
+
+    @Test func aSettleCheckThatCannotTellYetDoesNotDropTheIdentity() {
+        let h = Harness()
+        h.backend.unknownChecks = 2
+        h.ctrl.begin()
+        #expect(h.backend.createSerials == [42])
+        #expect(h.backend.mirrorChecks == MirrorSettlePoll.checks)
+        h.backend.waitCompletion?(.success(()))
+        #expect(h.sink.events.contains(.ready(displayId: 7, port: 8788, serialNum: 42, mirroredSkipped: false)))
+        #expect(!h.sink.logs(level: "warn").contains { $0.contains("mirror") })
+    }
+
+    @Test func theFreshIdentityAfterAMirroredSpareSurvivesChecksCGCannotAnswerYet() {
+        // Device run 7: primary offline, spare genuinely mirrored, then the fresh one (extended per
+        // WindowServer) while CG in our process had not listed it yet.
+        let h = Harness(freshSerial: 99)
+        h.backend.deferApply = true
+        h.backend.mirroredSerials = [spare]
+        h.backend.unknownChecks = 2
+        h.ctrl.begin()
+        h.backend.completeApply(.failure(BackendError.displayOffline))   // primary offline
+        h.backend.completeApply()                                          // spare: unknown, unknown, mirrored
+        #expect(h.backend.createSerials == [42, spare, 99])
+        h.backend.completeApply()                                          // fresh: unknown, unknown, clear
+        h.backend.waitCompletion?(.success(()))
+        #expect(h.sink.ended.isEmpty)
+        #expect(h.sink.events.contains(.ready(displayId: 7, port: 8788, serialNum: 99, mirroredSkipped: true)))
+    }
+
+    @Test func aMirrorAtActivationLogsTheQueryThatFired() {
+        let h = Harness()
+        h.backend.deferApply = true
+        h.ctrl.begin()
+        h.backend.completeApply(.failure(BackendError.displayMirrored("CGDisplayIsInMirrorSet(0x000000c3)=1")))
+        #expect(h.sink.logs(level: "warn").contains {
+            $0.contains("0x0000002a") && $0.contains("before configuring") && $0.contains("CGDisplayIsInMirrorSet(0x000000c3)=1")
+        })
+    }
+
+    @Test func aMirrorAtASettleCheckLogsTheQueryThatFired() {
+        let h = Harness()
+        h.backend.mirroredSerials = [42]
+        h.backend.mirrorWhy = "CGDisplayMirrorsDisplay(0x00000001)=0x00000007"
+        h.ctrl.begin()
+        #expect(h.sink.logs(level: "warn").contains {
+            $0.contains("0x0000002a") && $0.contains("settle check 1")
+                && $0.contains("CGDisplayMirrorsDisplay(0x00000001)=0x00000007")
+        })
+    }
+
+    @Test func aMirrorFoundAfterAFailedActivationLogsTheQueryThatFired() {
+        let h = Harness()
+        h.backend.deferApply = true
+        h.backend.mirroredSerials = [42]
+        h.ctrl.begin()
+        h.backend.completeApply(.failure(BackendError.unsupported))
+        #expect(h.sink.logs(level: "warn").contains {
+            $0.contains("0x0000002a") && $0.contains("after a failed activation") && $0.contains(h.backend.mirrorWhy)
+        })
+    }
+
+    @Test func theLastIdentityJudgedMirroredStillLogsTheQueryThatFired() {
+        let h = Harness(freshSerial: 99)
+        h.backend.mirroredSerials = [42, spare, 99]
+        h.ctrl.begin()
+        #expect(h.sink.ended == [.ended(.displayOffline, freshTried: true)])
+        let judged = h.sink.logs(level: "warn").filter { $0.contains(h.backend.mirrorWhy) }
+        #expect(judged.count == 3)
+        #expect(judged.last?.contains("0x00000063") == true)
+    }
+
+    @Test func aMirrorAtThePreReadyCheckLogsTheQueryThatFired() {
+        let h = Harness()
+        h.backend.mirroredSerials = [42]
+        h.backend.mirrorAppearsAtCheck = MirrorSettlePoll.checks + 1
+        h.ctrl.begin()
+        h.backend.waitCompletion?(.success(()))
+        #expect(h.sink.logs(level: "warn").contains {
+            $0.contains("0x0000002a") && $0.contains("before ready") && $0.contains(h.backend.mirrorWhy)
+        })
+    }
+
+    @Test func aMirrorPastTheCutoffLogsTheQueryThatFired() {
+        let h = Harness()
+        h.backend.mirroredSerials = [42]
+        h.backend.mirrorAppearsAtCheck = MirrorSettlePoll.checks + 1
+        h.ctrl.begin()
+        h.advance(SessionController.freshIdentityCutoff + 0.1)
+        h.backend.waitCompletion?(.success(()))
+        #expect(h.sink.logs(level: "warn").contains { $0.contains("before ready") && $0.contains(h.backend.mirrorWhy) })
+    }
+
+    @Test func aPreReadyCheckThatCannotTellYetDoesNotDropTheIdentity() {
+        let h = Harness()
+        h.backend.unknownChecks = MirrorSettlePoll.checks + 1
+        h.ctrl.begin()
+        h.backend.waitCompletion?(.success(()))
+        #expect(h.backend.createSerials == [42])
+        #expect(h.sink.events.contains(.ready(displayId: 7, port: 8788, serialNum: 42, mirroredSkipped: false)))
+    }
+
+    // MARK: F-M1 follow-up (review M1/M2/M3) — through the real activation guard; unknown is logged
+
+    @Test func theRun7SequenceThroughTheActivationGuardReachesReadyOnTheFreshIdentity() {
+        let h = Harness(freshSerial: 99)
+        let off: (online: Int32, mirror: MirrorVerdict) = (0, .notMirrored)
+        h.backend.activationScripts = [
+            42: [off],                                                     // switched off (10 attempts)
+            spare: [(1, .mirrored("CGDisplayIsInMirrorSet(0x000000c3)=1"))],  // restored saved set
+            99: [(-1, .unknown), (-1, .unknown), (1, .notMirrored)],      // CG lags, then extended
+        ]
+        h.ctrl.begin()
+        #expect(h.backend.createSerials == [42, spare, 99])
+        #expect(h.backend.scriptedAttempts == 3)
+        h.backend.waitCompletion?(.success(()))
+        #expect(h.sink.ended.isEmpty)
+        #expect(h.sink.events.contains(.ready(displayId: 7, port: 8788, serialNum: 99, mirroredSkipped: true)))
+        #expect(h.sink.logs(level: "warn").filter { $0.contains("mirror check") }.count == 1)
+    }
+
+    @Test func aSwitchedOffIdentityCreatedDuringTheCGLagStillEndsOfflineAndTheChainGoesOn() {
+        let h = Harness()
+        h.backend.activationScripts = [42: Array(repeating: (-1, .unknown), count: 12) + [(0, .notMirrored)]]
+        h.ctrl.begin()
+        #expect(h.backend.scriptedAttempts == 12 + ActivationPoll.offlineGiveUpAttempts)
+        #expect(h.backend.createSerials == [42, spare])
+        #expect(h.sink.logs(level: "warn").contains { $0.contains("switched off") && $0.contains("0x0000002a") })
+        h.backend.waitCompletion?(.success(()))
+        #expect(h.sink.events.contains(.ready(displayId: 7, port: 8788, serialNum: spare, mirroredSkipped: false)))
+    }
+
+    @Test func anIdentityUnknownForTheWholeActivationIsDroppedLikeASwitchedOffOne() {
+        let h = Harness(freshSerial: 99)
+        h.backend.activationScripts = [42: [(-1, .unknown)], spare: [(-1, .unknown)], 99: [(-1, .unknown)]]
+        h.ctrl.begin()
+        #expect(h.backend.scriptedAttempts == ActivationPoll.maxAttempts)
+        #expect(h.backend.createSerials == [42, spare, 99])
+        #expect(h.sink.ended == [.ended(.displayOffline, freshTried: true)])
+    }
+
+    @Test func unknownSettleChecksAreLoggedOncePerDisplay() {
+        let h = Harness()
+        h.backend.unknownChecks = 3
+        h.ctrl.begin()
+        let lines = h.sink.logs(level: "info").filter { $0.contains("cannot tell yet") }
+        #expect(lines.count == 1)
+        #expect(lines.first?.contains("settle check 1") == true)
+        #expect(lines.first?.contains("0x0000002a") == true)
+    }
+
+    @Test func eachDisplayGetsItsOwnUnknownLine() {
+        let h = Harness()
+        h.backend.mirroredSerials = [42]
+        h.backend.unknownChecks = 1
+        h.ctrl.begin()                                                     // 42: unknown, mirrored → spare: unknown, clear
+        #expect(h.backend.createSerials == [42, spare])
+        #expect(h.sink.logs(level: "info").filter { $0.contains("cannot tell yet") }.count == 2)
+    }
+
+    @Test func anUnknownPreReadyCheckIsLoggedAsCountedClean() {
+        let h = Harness()
+        h.backend.unknownChecks = MirrorSettlePoll.checks + 1
+        h.ctrl.begin()
+        h.backend.waitCompletion?(.success(()))
+        #expect(h.sink.logs(level: "info").contains {
+            $0.contains("before ready") && $0.contains("cannot tell yet") && $0.contains("counted as clean")
+        })
+        #expect(h.sink.events.contains(.ready(displayId: 7, port: 8788, serialNum: 42, mirroredSkipped: false)))
+    }
+
+    @Test func theMirrorSettleFitsTheStartBudgetAfterTheLatestFreshIdentity() {
+        // Fresh is tried at most `freshIdentityCutoff` after begin; its activation (≤ 3 s) and settle
+        // still leave the capturable wait its floor.
+        let activation = Double(ActivationPoll.maxAttempts) * ActivationPoll.interval
+        #expect(SessionController.freshIdentityCutoff + activation + MirrorSettlePoll.window
+                + SessionController.minCapturableTimeout <= SessionController.startBudget)
     }
 
     // MARK: begin() — the start stays inside one time budget
@@ -1348,6 +1815,43 @@ final class Harness {
         #expect(h.ctrl.endedReason == nil)
         h.backend.completeApply(.failure(BackendError.displayOffline))
         #expect(h.backend.createCalls == 2)
+    }
+
+    // MARK: "Entire Screen" picked mid-session: respected, never ends the session or burns the identity
+
+    @Test func aMirrorPickedMidSessionKeepsStreaming() {
+        let h = Harness()
+        _ = h.authed()
+        let starts = h.backend.startCalls.count
+        h.backend.mirrored = true
+        h.ctrl.displayReconfigured()
+        #expect(h.ctrl.endedReason == nil)
+        #expect(h.sink.ended.isEmpty)
+        #expect(h.backend.destroyCalls == 0)
+        #expect(h.backend.startCalls.count == starts + 1)   // capture restarted on the mirrored desktop
+        h.ctrl.displayReconfigured()
+        #expect(h.ctrl.endedReason == nil)
+        #expect(h.sink.logs(level: "info").filter { $0.contains("mirror") }.count == 1)
+        #expect(h.sink.logs(level: "info").contains { $0.contains("mirror") && $0.contains(h.backend.mirrorWhy) })
+        #expect(!h.sink.logs(level: "warn").contains { $0.contains("mirror") })
+    }
+
+    @Test func aMirrorPickedAfterReadyBeforeHelloKeepsTheSession() {
+        let h = Harness().ready()
+        h.backend.mirrored = true
+        h.ctrl.displayReconfigured()
+        #expect(h.ctrl.endedReason == nil)
+        let (c, _) = h.connect(helloFrame())
+        #expect(c.jsonTypes.contains("helloAck"))
+    }
+
+    @Test func aCaptureFailureOnAMirroredOnlineDisplayIsNotDisplayOffline() {
+        // Only a switched-off display burns the identity; a mirror never does.
+        let h = Harness()
+        _ = h.authed()
+        h.backend.mirrored = true
+        h.ctrl.captureError(BackendError.captureFailed("stream stopped"))
+        #expect(h.ctrl.endedReason == .captureFailed)
     }
 
     @Test func nonBackendErrorMapsToCaptureFailed() {

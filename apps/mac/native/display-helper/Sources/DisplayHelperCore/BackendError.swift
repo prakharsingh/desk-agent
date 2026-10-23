@@ -11,6 +11,11 @@ public enum BackendError: Error, Equatable {
     /// The virtual display stayed offline for 1 s in a row during mode activation → `display-offline`
     /// (after the spare identity, `DisplayIdentity`, was offline too).
     case displayOffline
+    /// Mode activation found the display in a macOS mirror set (a saved "Entire Screen" choice) before any
+    /// configuration call, and configured nothing. At start the identity is dropped like an offline one;
+    /// after `ready` the display keeps its current mode. Never ends a session by itself. Carries the
+    /// queries that fired (`MirrorVerdict.mirrored`).
+    case displayMirrored(String)
 
     /// The error `waitUntilCapturable` reports when its timeout expires.
     public static func capturableTimeout(everOnline: Bool) -> BackendError {

@@ -93,7 +93,10 @@ public struct StatsEvent: Encodable, Equatable, Sendable {
 public enum HelperEvent: Encodable, Equatable, Sendable {
     /// `serialNum`: the display identity that came up (primary, spare or fresh), so main can remember
     /// a fresh one. An additive field: an older main ignores it.
-    case ready(displayId: UInt32, port: UInt16, serialNum: UInt32)
+    /// `mirroredSkipped`: this start dropped an identity because macOS restored a saved mirror set for it
+    /// (F-mirror). Main then moves the phone to the next generation, so the next start does not re-mirror the
+    /// user's other display just to drop it again. Encoded only when true (additive: an older main ignores it).
+    case ready(displayId: UInt32, port: UInt16, serialNum: UInt32, mirroredSkipped: Bool = false)
     case connected
     case paused
     case resumed
@@ -104,18 +107,19 @@ public enum HelperEvent: Encodable, Equatable, Sendable {
     case ended(EndReason, freshTried: Bool = false)
 
     enum CodingKeys: String, CodingKey {
-        case evt, displayId, port, serialNum, level, message, reason, freshTried
+        case evt, displayId, port, serialNum, mirroredSkipped, level, message, reason, freshTried
         case fps, kbps, unacked, ackP50Ms, ackP95Ms, phoneRendered, phoneDropped
     }
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case .ready(let id, let port, let serialNum):
+        case .ready(let id, let port, let serialNum, let mirroredSkipped):
             try c.encode("ready", forKey: .evt)
             try c.encode(id, forKey: .displayId)
             try c.encode(port, forKey: .port)
             try c.encode(serialNum, forKey: .serialNum)
+            if mirroredSkipped { try c.encode(true, forKey: .mirroredSkipped) }
         case .connected: try c.encode("connected", forKey: .evt)
         case .paused: try c.encode("paused", forKey: .evt)
         case .resumed: try c.encode("resumed", forKey: .evt)

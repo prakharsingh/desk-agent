@@ -230,7 +230,7 @@ export class DisplaySessionManager {
         session.ready = true;
         session.liveSerial = e.serialNum;
         this.sendActive(session);
-        this.noteIdentity(session, e.serialNum);
+        this.noteIdentity(session, e.serialNum, e.mirroredSkipped === true);
         this.changed();
         break;
       case 'log':
@@ -299,8 +299,10 @@ export class DisplaySessionManager {
    * capturable, so it is the phone's new last-good identity (Ruling P0-7). The other moment a generation is saved
    * is a `display-offline` end (useUpIdentity): the generation after the used-up identity, forward-only, uncapped.
    */
-  private noteIdentity(session: Session, serialNum: number | undefined): void {
+  private noteIdentity(session: Session, serialNum: number | undefined, mirroredSkipped: boolean): void {
     const { identity } = session;
+    // The fresh identity below saves g+1 already; otherwise a mirror-skipped identity of generation g uses it up.
+    if (mirroredSkipped && serialNum !== identity.freshSerial) this.skipMirroredGeneration(session);
     if (serialNum === undefined) return; // an older helper does not say
     if (serialNum !== identity.freshSerial) {
       this.opts.onLog('info', `display session ${session.sessionId} uses display identity ${hex32(serialNum)} (generation ${identity.generation})`);
@@ -314,6 +316,28 @@ export class DisplaySessionManager {
     } catch (err) {
       this.opts.onLog('warn', `display identity generation ${next} could not be saved (the next session escalates again): ` +
         `${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /**
+   * The helper dropped an identity of this session's generation because macOS restored a saved mirror set for it
+   * (F-mirror), then came up on another one. macOS would restore that set (mirroring the user's other display) on
+   * every later start, so the generation is used up now: save the next one, forward-only and idempotent, as for
+   * `display-offline`. Not called when the fresh identity came up (noteIdentity saves g+1 for that already).
+   */
+  private skipMirroredGeneration(session: Session): void {
+    const { identity } = session;
+    const next = identity.generation + 1;
+    try {
+      const store = this.opts.identityStore;
+      if (!store) return;
+      if (store.getGeneration(identity.phoneKey) >= next) return;
+      store.setGeneration(identity.phoneKey, next);
+      this.opts.onLog('info', `display session ${session.sessionId} skipped a mirrored display identity of generation ` +
+        `${identity.generation} (a saved macOS mirror set): generation ${next} saved for this phone`);
+    } catch (err) {
+      this.opts.onLog('warn', `display identity generation ${next} could not be saved after a mirrored identity was skipped ` +
+        `(the next start meets the mirror again): ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 

@@ -64,14 +64,17 @@ public final class VirtualDisplayController {
 
     /// Applies HiDPI modes (60 Hz), then activates a usable one asynchronously. Mode sizes are in
     /// points. Never blocks the caller: `completion` runs later on `queue` (the session queue).
+    /// `onFirstUnknown` runs on `queue` once, at the first attempt whose online or mirror check
+    /// CoreGraphics could not answer yet (F-M1), with the raw answers.
     public func apply(modes: [ModeSpec], deliverOn queue: DispatchQueue,
+                      onFirstUnknown: ((String) -> Void)? = nil,
                       completion: @escaping (Result<Void, Error>) -> Void) {
         do {
             try applySettings(modes: modes)
         } catch {
             return queue.async { completion(.failure(error)) }
         }
-        activatePreferredMode(applied: modes, deliverOn: queue, completion: completion)
+        activatePreferredMode(applied: modes, deliverOn: queue, onFirstUnknown: onFirstUnknown, completion: completion)
     }
 
     /// `applySettings` only (fast, synchronous). Throws `destroyed` / `settingsRejected`.
@@ -99,10 +102,25 @@ public final class VirtualDisplayController {
 
     /// One activation attempt: keep the preferred HiDPI mode if it is already active, otherwise switch
     /// (permanently) to the first usable applied mode.
-    private static func attemptActivation(displayId: UInt32, applied: [ModeSpec]) -> ActivationPoll.Attempt {
+    /// `unknown` is set when CoreGraphics could not answer the online or mirror check yet (F-M1).
+    private static func attemptActivation(displayId: UInt32, applied: [ModeSpec],
+                                          unknown: inout String?) -> ActivationPoll.Attempt {
         // An offline display (macOS keeps it out of the desktop, e.g. a persisted Control Center
-        // "independent output" for this serial) is never configured: report it instead.
-        guard CGDisplayIsOnline(displayId) != 0 else { return .offline }
+        // "independent output" for this serial) is never configured: report it instead. A display macOS
+        // put in a saved mirror set is never configured either: a mode switch completed `.permanently`
+        // would rewrite the user's saved mirror set (F-mirror, fix round 1). One our process does not
+        // list yet is retried, not judged mirrored (F-M1).
+        let online = CGDisplayIsOnline(displayId)
+        var mirror: MirrorVerdict?
+        let early = ActivationPoll.preconfigureGuard(online: online, mirror: {
+            let v = mirrorVerdict(displayId)
+            mirror = v
+            return v
+        })
+        if online != 0, online != 1 || mirror == .unknown {
+            unknown = "CGDisplayIsOnline = \(online), mirror check \(mirror.map { "\($0)" } ?? "not run")"
+        }
+        if let early { return early }
         let modes = allModes(displayId)
         let current = CGDisplayCopyDisplayMode(displayId).map(info)
         switch ModeActivation.decide(current: current, available: modes.map(info), applied: applied) {
@@ -132,14 +150,22 @@ public final class VirtualDisplayController {
     /// `modeSwitchFailed` / `modeUnavailable`, or (after 1 s offline in a row, without waiting out the
     /// 3 s) `BackendError.displayOffline`. `destroy()` cancels the poll (`destroyed`).
     private func activatePreferredMode(applied: [ModeSpec], deliverOn queue: DispatchQueue,
+                                       onFirstUnknown: ((String) -> Void)?,
                                        completion: @escaping (Result<Void, Error>) -> Void) {
         let displayId = self.displayId
         let cancelled = self.cancelled
         let pollQueue = activationQueue
         var poll = ActivationPoll()
+        var reportedUnknown = false
         func attempt() {
             if cancelled.isSet { return queue.async { completion(.failure(VirtualDisplayError.destroyed)) } }
-            switch poll.record(Self.attemptActivation(displayId: displayId, applied: applied)) {
+            var unknown: String?
+            let next = poll.record(Self.attemptActivation(displayId: displayId, applied: applied, unknown: &unknown))
+            if let unknown, !reportedUnknown, let onFirstUnknown {
+                reportedUnknown = true
+                queue.async { onFirstUnknown(unknown) }
+            }
+            switch next {
             case .finished:
                 queue.async { completion(.success(())) }
             case .retry:
@@ -150,9 +176,30 @@ public final class VirtualDisplayController {
                 queue.async { completion(.failure(VirtualDisplayError.modeSwitchFailed(err))) }
             case .failed(.displayOffline):
                 queue.async { completion(.failure(BackendError.displayOffline)) }
+            case .failed(.displayMirrored(let why)):
+                queue.async { completion(.failure(BackendError.displayMirrored(why))) }
             }
         }
         pollQueue.async { attempt() }
+    }
+
+    /// Whether `displayId` is in a macOS mirror set (`MirrorCheck.verdict`). Read-only CoreGraphics
+    /// queries; never configures anything. The raw `CGDisplayIsInMirrorSet` value goes in: for a display
+    /// this process does not list yet it is -1, not a mirror (F-M1).
+    static func mirrorVerdict(_ displayId: UInt32) -> MirrorVerdict {
+        var count: UInt32 = 0
+        var ids: [CGDirectDisplayID] = []
+        if CGGetOnlineDisplayList(0, nil, &count) == .success, count > 0 {
+            ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+            if CGGetOnlineDisplayList(count, &ids, &count) == .success {
+                ids = Array(ids.prefix(Int(count)))
+            } else {
+                ids = []
+            }
+        }
+        return MirrorCheck.verdict(ours: displayId, oursInMirrorSet: CGDisplayIsInMirrorSet(displayId),
+                                      oursMirrors: CGDisplayMirrorsDisplay(displayId),
+                                      online: ids.map { (id: $0, mirrors: CGDisplayMirrorsDisplay($0)) })
     }
 
     /// Active mode (point and pixel size), nil if the display is gone.

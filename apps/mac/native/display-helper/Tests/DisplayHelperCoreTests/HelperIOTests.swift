@@ -40,6 +40,13 @@ import Testing
         #expect(HelperEvent.ended(.displayOffline, freshTried: false).jsonLine() == #"{"evt":"ended","reason":"display-offline"}"#)
     }
 
+    @Test func readyCarriesMirroredSkippedOnlyWhenTrue() {
+        #expect(HelperEvent.ready(displayId: 5, port: 8788, serialNum: 9, mirroredSkipped: true).jsonLine()
+                == #"{"displayId":5,"evt":"ready","mirroredSkipped":true,"port":8788,"serialNum":9}"#)
+        #expect(HelperEvent.ready(displayId: 5, port: 8788, serialNum: 9, mirroredSkipped: false).jsonLine()
+                == #"{"displayId":5,"evt":"ready","port":8788,"serialNum":9}"#)
+    }
+
     @Test func otherEventLines() {
         #expect(HelperEvent.ready(displayId: 5, port: 8788, serialNum: 3098494084).jsonLine()
                 == #"{"displayId":5,"evt":"ready","port":8788,"serialNum":3098494084}"#)

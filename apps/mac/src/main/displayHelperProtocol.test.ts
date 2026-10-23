@@ -51,6 +51,17 @@ describe('displayHelperProtocol', () => {
       .toEqual({ evt: 'ready', displayId: 7, port: 8788 });
   });
 
+  it('keeps ready.mirroredSkipped only when it is literally true', () => {
+    expect(parseHelperEventLine('{"evt":"ready","displayId":7,"port":8788,"serialNum":9,"mirroredSkipped":true}'))
+      .toEqual({ evt: 'ready', displayId: 7, port: 8788, serialNum: 9, mirroredSkipped: true });
+    expect(parseHelperEventLine('{"evt":"ready","displayId":7,"port":8788,"serialNum":9,"mirroredSkipped":false}'))
+      .toEqual({ evt: 'ready', displayId: 7, port: 8788, serialNum: 9 });
+    expect(parseHelperEventLine('{"evt":"ready","displayId":7,"port":8788,"serialNum":9,"mirroredSkipped":"true"}'))
+      .toEqual({ evt: 'ready', displayId: 7, port: 8788, serialNum: 9 });
+    expect(parseHelperEventLine('{"evt":"ready","displayId":7,"port":8788,"mirroredSkipped":true}'))
+      .toEqual({ evt: 'ready', displayId: 7, port: 8788, mirroredSkipped: true });
+  });
+
   it('keeps ended.freshTried only when it is true', () => {
     expect(parseHelperEventLine('{"evt":"ended","freshTried":true,"reason":"display-offline"}'))
       .toEqual({ evt: 'ended', reason: 'display-offline', freshTried: true });

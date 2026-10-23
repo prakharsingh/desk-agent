@@ -82,6 +82,100 @@ import Testing
         #expect(abs(Double(ActivationPoll.maxAttempts) * ActivationPoll.interval - 3.0) < 1e-9)
     }
 
+    @Test func aMirroredDisplayFailsAtOnceWithoutAnyConfiguration() {
+        // Checked before any configure call: a mirrored set is never mode-switched (fix round 1, I2).
+        var p = ActivationPoll()
+        #expect(p.record(.mirrored("CGDisplayIsInMirrorSet(0x000000c3)=1")) == .failed(.displayMirrored("CGDisplayIsInMirrorSet(0x000000c3)=1")))
+        var q = ActivationPoll()
+        #expect(q.record(.notListed) == .retry)
+        #expect(q.record(.mirrored("x")) == .failed(.displayMirrored("x")))
+    }
+
+    // MARK: the pre-configure guard (F-M1)
+
+    @Test func theGuardReportsAnOfflineDisplayFirst() {
+        #expect(ActivationPoll.preconfigureGuard(online: 0, mirror: { .mirrored("x") }) == .offline)
+    }
+
+    @Test func theGuardStopsAGenuinelyMirroredDisplayWithTheQueryThatFired() {
+        #expect(ActivationPoll.preconfigureGuard(online: 1, mirror: { .mirrored("CGDisplayIsInMirrorSet(0x000000c3)=1") })
+                == .mirrored("CGDisplayIsInMirrorSet(0x000000c3)=1"))
+    }
+
+    @Test func theGuardRetriesAnOnlineDisplayWhoseMirrorStateIsUnknown() {
+        // Online for real (1) but the mirror answers are error values: retried like a lagging mode list.
+        let attempt = ActivationPoll.preconfigureGuard(online: 1, mirror: { .unknown })
+        #expect(attempt == .notListed)
+        var p = ActivationPoll()
+        #expect(p.record(attempt!) == .retry)
+    }
+
+    @Test func theGuardReportsUnknownWhileCGAnswersTheOnlineQueryWithAnError() {
+        // F-M1 / review M1: CGDisplayIsOnline = -1 for a display this process does not list yet.
+        #expect(ActivationPoll.preconfigureGuard(online: -1, mirror: { .unknown }) == .unknown)
+        #expect(ActivationPoll.preconfigureGuard(online: -1, mirror: { .notMirrored }) == .unknown)
+    }
+
+    @Test func aListedDisplayNamingOursIsEvidenceEvenWhileOnlineIsUnknown() {
+        #expect(ActivationPoll.preconfigureGuard(online: -1, mirror: { .mirrored("CGDisplayMirrorsDisplay(0x00000001)=0x000000c7") })
+                == .mirrored("CGDisplayMirrorsDisplay(0x00000001)=0x000000c7"))
+    }
+
+    @Test func theGuardLetsAnUnmirroredDisplayThrough() {
+        #expect(ActivationPoll.preconfigureGuard(online: 1, mirror: { .notMirrored }) == nil)
+    }
+
+    @Test func theGuardSkipsTheMirrorQueriesForAnOfflineDisplay() {
+        var asked = false
+        _ = ActivationPoll.preconfigureGuard(online: 0, mirror: { asked = true; return .notMirrored })
+        #expect(!asked)
+    }
+
+    // MARK: unknown attempts (review M1): never online, never break an offline streak
+
+    @Test func unknownForTheWholePollEndsDisplayOffline() {
+        // Never seen online: like a display that never left "switched off", so the identity chain goes on.
+        var p = ActivationPoll()
+        for _ in 1..<ActivationPoll.maxAttempts { #expect(p.record(.unknown) == .retry) }
+        #expect(p.record(.unknown) == .failed(.displayOffline))
+    }
+
+    @Test func unknownThenOfflineEndsDisplayOfflineAfterTheUsualStreak() {
+        // A switched-off identity created during the CG lag: the 1 s offline streak starts when CG catches up.
+        var p = ActivationPoll()
+        for _ in 0..<12 { #expect(p.record(.unknown) == .retry) }
+        for _ in 1..<ActivationPoll.offlineGiveUpAttempts { #expect(p.record(.offline) == .retry) }
+        #expect(p.record(.offline) == .failed(.displayOffline))
+    }
+
+    @Test func anUnknownAttemptDoesNotResetTheOfflineStreak() {
+        var p = ActivationPoll()
+        for _ in 0..<5 { _ = p.record(.offline) }
+        #expect(p.record(.unknown) == .retry)
+        for _ in 0..<4 { #expect(p.record(.offline) == .retry) }
+        #expect(p.record(.offline) == .failed(.displayOffline))
+    }
+
+    @Test func unknownThenKeptFinishes() {
+        var p = ActivationPoll()
+        #expect(p.record(.unknown) == .retry)
+        #expect(p.record(.unknown) == .retry)
+        #expect(p.record(.kept) == .finished)
+    }
+
+    @Test func unknownAttemptsAreCounted() {
+        var p = ActivationPoll()
+        _ = p.record(.unknown); _ = p.record(.notListed); _ = p.record(.unknown)
+        #expect(p.unknownAttempts == 2)
+    }
+
+    @Test func anUnknownRunAfterAnOnlineAttemptStillEndsLikeAnUnlistedMode() {
+        var p = ActivationPoll()
+        #expect(p.record(.notListed) == .retry)
+        for _ in 2..<ActivationPoll.maxAttempts { _ = p.record(.unknown) }
+        #expect(p.record(.unknown) == .failed(.modeUnavailable))
+    }
+
     @Test func keptOrSwitchedFinishesAtOnce() {
         var a = ActivationPoll()
         #expect(a.record(.kept) == .finished)

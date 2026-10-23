@@ -533,6 +533,52 @@ describe('DisplaySessionManager', () => {
       expect(logs.some((l) => l.level === 'info' && l.message.includes(`0x${hex}`) && l.message.includes('generation 0'))).toBe(true);
     });
 
+    it('a start that skipped a mirrored identity uses up its generation even though the spare came up (F-mirror I1)', () => {
+      const store = fakeStore({ [KEY]: 1 });
+      const { mgr, hosts, logs } = setup({ identityStore: store });
+      mgr.handleStartRequest(START);
+      const spare = (hosts[0].started[0].serialNum ^ 0x53504152) >>> 0;
+      hosts[0].emit({ evt: 'ready', displayId: 7, port: DISPLAY_VIDEO_PORT, serialNum: spare, mirroredSkipped: true });
+      expect(mgr.isActive()).toBe(true);
+      expect(store.writes).toEqual([[KEY, 2]]);
+      expect(logs.some((l) => l.level === 'info' && l.message.includes('mirror') && l.message.includes('generation 2'))).toBe(true);
+      // A later display-offline on the spare (generation 1) does not move it again.
+      hosts[0].exit({ reason: 'display-offline' });
+      expect(store.writes).toEqual([[KEY, 2]]);
+      mgr.handleStartRequest(START);
+      expect(hosts[1].started[0].serialNum).toBe(displayIdentitySerial(START.deviceSerial, 2));
+    });
+
+    it('a mirrored skip that ends on the fresh identity saves only the next generation, once', () => {
+      const store = fakeStore();
+      const { mgr, hosts } = setup({ identityStore: store });
+      mgr.handleStartRequest(START);
+      hosts[0].emit({ evt: 'ready', displayId: 7, port: DISPLAY_VIDEO_PORT, serialNum: hosts[0].started[0].freshSerial, mirroredSkipped: true });
+      // The fresh identity is generation 1 and works: never skip past it.
+      expect(store.writes).toEqual([[KEY, 1]]);
+    });
+
+    it('a mirrored skip never moves a generation that is already past it', () => {
+      const store = fakeStore();
+      const { mgr, hosts } = setup({ identityStore: store });
+      mgr.handleStartRequest(START);
+      store.gens[KEY] = 4;
+      hosts[0].emit({ evt: 'ready', displayId: 7, port: DISPLAY_VIDEO_PORT, serialNum: hosts[0].started[0].serialNum, mirroredSkipped: true });
+      expect(store.writes).toEqual([]);
+      expect(store.gens[KEY]).toBe(4);
+    });
+
+    it('a mirrored skip whose generation cannot be saved keeps the session and warns', () => {
+      const store = fakeStore();
+      store.throwOnSet = true;
+      const { mgr, hosts, logs } = setup({ identityStore: store });
+      mgr.handleStartRequest(START);
+      const spare = (hosts[0].started[0].serialNum ^ 0x53504152) >>> 0;
+      hosts[0].emit({ evt: 'ready', displayId: 7, port: DISPLAY_VIDEO_PORT, serialNum: spare, mirroredSkipped: true });
+      expect(mgr.isActive()).toBe(true);
+      expect(logs.some((l) => l.level === 'warn' && l.message.includes('generation 1'))).toBe(true);
+    });
+
     it('a start that ends display-offline before ready uses up its generation: the next start is fresh', () => {
       const store = fakeStore();
       const { mgr, hosts, logs } = setup({ identityStore: store });

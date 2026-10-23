@@ -75,6 +75,15 @@ public struct ActivationPoll {
         case switchFailed(Int32)
         /// The display is not online (`CGDisplayIsOnline` false), so nothing was decided or configured.
         case offline
+        /// CoreGraphics in this process cannot tell yet whether the display is online (F-M1: it does not
+        /// list the new display and `CGDisplayIsOnline` answers -1). Nothing was configured. Neither
+        /// online nor offline: it never counts as seen online and never breaks an offline streak, so a
+        /// whole poll of these ends `displayOffline` (the identity chain goes on) and a switched-off
+        /// identity created during the lag still ends `displayOffline` once CG catches up.
+        case unknown
+        /// The display is in a macOS mirror set (`MirrorCheck`), so nothing was decided or configured:
+        /// a mode switch would rewrite the user's saved mirror set. Carries the queries that fired.
+        case mirrored(String)
     }
 
     public enum Failure: Error, Equatable {
@@ -85,6 +94,9 @@ public struct ActivationPoll {
         /// The display was offline for `offlineGiveUpAttempts` attempts in a row: macOS keeps it out
         /// of the desktop.
         case displayOffline
+        /// The display is mirrored: activation stops at once without configuring anything. Carries the
+        /// queries that fired.
+        case displayMirrored(String)
     }
 
     public enum Next: Equatable {
@@ -94,6 +106,8 @@ public struct ActivationPoll {
     }
 
     public private(set) var attempts = 0
+    /// `.unknown` attempts so far (logged once per display by the caller).
+    public private(set) var unknownAttempts = 0
     private var sawTarget = false
     private var sawOnline = false
     private var offlineStreak = 0
@@ -101,11 +115,26 @@ public struct ActivationPoll {
 
     public init() {}
 
+    /// The checks before any configuration call of one attempt, from the raw `CGDisplayIsOnline` value:
+    /// 0 → `offline` (`mirror` is then not queried). Otherwise the mirror check: a mirror (a listed
+    /// display naming ours counts even while ours is unlisted) → `mirrored`. An online answer other than
+    /// 1 (F-M1: -1 while our process does not list the display) → `unknown`. Online but a mirror verdict
+    /// CG cannot give yet → `notListed`, retried as while the mode list lags. `nil` = go on and decide.
+    public static func preconfigureGuard(online: Int32, mirror: () -> MirrorVerdict) -> Attempt? {
+        guard online != 0 else { return .offline }
+        let verdict = mirror()
+        if case .mirrored(let why) = verdict { return .mirrored(why) }
+        guard online == 1 else { return .unknown }
+        return verdict == .unknown ? .notListed : nil
+    }
+
     public mutating func record(_ attempt: Attempt) -> Next {
         attempts += 1
         switch attempt {
         case .kept, .switchSucceeded:
             return .finished
+        case .mirrored(let why):
+            return .failed(.displayMirrored(why))
         case .switchFailed(let err):
             sawOnline = true
             sawTarget = true
@@ -114,8 +143,14 @@ public struct ActivationPoll {
             sawOnline = true
         case .offline:
             break
+        case .unknown:
+            unknownAttempts += 1
         }
-        offlineStreak = attempt == .offline ? offlineStreak + 1 : 0
+        if attempt == .offline {
+            offlineStreak += 1
+        } else if attempt != .unknown {
+            offlineStreak = 0
+        }
         // Offline for a second straight (even after an online attempt: ControlCenter re-asserts a
         // persisted independent output ~0.15 s after the display appears) → macOS keeps it switched off.
         guard offlineStreak < Self.offlineGiveUpAttempts else { return .failed(.displayOffline) }

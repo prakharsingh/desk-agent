@@ -12,6 +12,12 @@ public protocol DisplayBackend: AnyObject {
     /// Whether our virtual display is still part of the desktop (`CGDisplayIsOnline`). Consulted after
     /// `ready`, on a capture failure or a reconfiguration, to tell "switched off" from a capture fault.
     func displayIsOnline() -> Bool
+    /// Whether our virtual display is in a macOS mirror set (`MirrorCheck.verdict`), with the queries that
+    /// fired; `.unknown` while CoreGraphics in this process cannot tell yet (F-M1), never a mirror.
+    /// Read-only: nothing in the helper ever changes a mirror set or the user's saved display arrangement.
+    func mirrorVerdict() -> MirrorVerdict
+    /// Runs `work` on the session queue after `delay` (never inline on the real backend).
+    func runLater(after delay: TimeInterval, _ work: @escaping () -> Void)
     /// Creates the virtual display (no modes yet; `applyModes` follows). Returns its display id.
     func createDisplay(maxPixels: Int, sizeInMillimeters: CGSize, serialNum: UInt32,
                        vendorId: UInt32, productId: UInt32) throws -> UInt32
@@ -90,8 +96,10 @@ public final class SessionController {
     public static let startBudget: TimeInterval = 8.0
     public static let minCapturableTimeout: TimeInterval = 1.0
     /// The fresh identity is tried only when the primary and spare gave up within this (typically
-    /// ~2.3 s: 1 s offline give-up each plus destroy/create), so its activation (≤ 3 s) still leaves
-    /// the capturable wait at least `startBudget - 6.5` s.
+    /// ~2.3 s: 1 s offline give-up each plus destroy/create), so its activation (≤ 3 s) and mirror check
+    /// (`MirrorSettlePoll.window`, 0.25 s) still leave the capturable wait at least
+    /// `startBudget - 6.75` s (≥ `minCapturableTimeout`). An identity dropped as mirrored takes its
+    /// activation plus at most the settle window, and counts toward this cutoff like an offline one.
     public static let freshIdentityCutoff: TimeInterval = 3.5
 
     public private(set) var endedReason: EndReason?
@@ -131,6 +139,8 @@ public final class SessionController {
     private var readySent = false
     private var displayCreated = false
     private var displayId: UInt32 = 0
+    /// An `.unknown` settle verdict was logged for the current display (once per display).
+    private var loggedUnknownMirror = false
     private var deadline: ConnectDeadline?          // non-nil from `ready` until authenticated
     private var nextId: ConnectionID = 1
     private var pending: [ConnectionID: Conn] = [:]
@@ -168,6 +178,8 @@ public final class SessionController {
     /// This start created the fresh identity (reported on `ended`, Ruling P0-7). Set once it exists,
     /// so a fresh identity that could not even be created does not count.
     private var freshTried = false
+    /// This start dropped an identity as mirrored (reported on `ready`, so main moves past the generation).
+    private var mirroredSkipped = false
 
     public init(start: StartCommand, backend: DisplayBackend, sink: HelperEventSink,
                 now: @escaping () -> TimeInterval) {
@@ -181,13 +193,14 @@ public final class SessionController {
     // MARK: - Lifecycle
 
     /// Call only after the video listener is bound. preflight → createDisplay → applyModes (async
-    /// activation) → waitUntilCapturable → `.ready` (the connect deadline starts here).
+    /// activation) → mirror check (`MirrorSettlePoll`) → waitUntilCapturable → `.ready` (the connect
+    /// deadline starts here).
     ///
-    /// When macOS keeps the primary identity switched off (`displayOffline` while awake), the display
-    /// is destroyed and recreated once with the spare identity (`DisplayIdentity`). When the spare is
-    /// offline too and main sent a `freshSerial` (Ruling P0-7: the phone's next identity generation,
+    /// When macOS keeps the primary identity switched off (`displayOffline` while awake) or restores a
+    /// saved mirror set for it (Screen Mirroring › Entire Screen), the display is destroyed and recreated
+    /// once with the spare identity (`DisplayIdentity`). When the spare is unusable too and main sent a `freshSerial` (Ruling P0-7: the phone's next identity generation,
     /// which macOS has no saved state for), it is recreated once more with that serial, unless the
-    /// start already used `freshIdentityCutoff`. Whatever is still offline ends `display-offline`.
+    /// start already used `freshIdentityCutoff`. Whatever is still offline or mirrored ends `display-offline`.
     public func begin() {
         guard !begun, endedReason == nil else { return }
         begun = true
@@ -206,14 +219,14 @@ public final class SessionController {
         }
     }
 
-    /// The identity to try after `identity` came up switched off while the Mac is awake, if any.
-    private func nextIdentity(after identity: Identity) -> Identity? {
+    /// The identity to try after `identity` came up switched off or mirrored while the Mac is awake, if any.
+    private func nextIdentity(after identity: Identity, _ cause: Unusable) -> Identity? {
         switch identity {
         case .primary: return .spare
         case .spare:
             guard start.freshSerial != nil else { return nil }
             guard now() - beganAt <= Self.freshIdentityCutoff else {
-                log("warn", "the spare display identity is switched off too, but there is no time left in this start "
+                log("warn", "the spare display identity is \(cause.adjective) too, but there is no time left in this start "
                     + "for a fresh identity; the next start tries it")
                 return nil
             }
@@ -238,43 +251,148 @@ public final class SessionController {
             return terminate(startFailureReason(.unsupported))
         }
         displayCreated = true
+        loggedUnknownMirror = false
         if identity == .fresh { freshTried = true }
         backend.applyModes(DisplayModes.modes(surfaceW: w, surfaceH: h)) { [weak self] result in
             guard let self, self.endedReason == nil else { return }
             switch result {
             case .success:
                 let ms = Int(((self.now() - startedAt) * 1000).rounded())
-                self.log("info", "using the \(identity.rawValue) display identity \(Self.hex(serialNum)) (modes active after \(ms) ms)")
-                self.waitUntilCapturable(serialNum: serialNum)
+                self.settleMirror(identity, serialNum: serialNum, activationMs: ms, poll: MirrorSettlePoll())
             case .failure(let error):
-                let offline = error as? BackendError == .displayOffline
-                // Asleep: a second display would only leave a second ghost (F2); sleep explains it.
-                if offline, !self.backend.mainDisplayAsleep(), let next = self.nextIdentity(after: identity) {
-                    let nextSerial = self.serial(for: next)
-                    self.log("warn", "macOS keeps Desk Agent Phone switched off for identity \(Self.hex(serialNum)); "
-                        + "retrying once with the \(next.rawValue) display identity \(Self.hex(nextSerial))")
-                    self.backend.destroyDisplay()
-                    self.displayCreated = false
-                    return self.createAndActivate(next)
+                if error as? BackendError == .displayOffline {
+                    return self.dropIdentity(identity, serialNum: serialNum, because: .switchedOff)
                 }
-                self.log("error", offline
-                    ? "mode activation failed: the display stayed offline (macOS keeps Desk Agent Phone out of the desktop)"
-                    : "mode activation failed: \(error)")
-                self.terminate(self.startFailureReason(offline ? .displayOffline : .unsupported))
+                // Activation found a mirror before configuring anything, or failed on a display that is
+                // mirrored (a mirror secondary may never get its HiDPI mode): dropped like offline.
+                if case .displayMirrored(let why)? = error as? BackendError {
+                    return self.judgedMirrored(identity, serialNum: serialNum, by: "activation, before configuring", why)
+                }
+                if case .mirrored(let why) = self.backend.mirrorVerdict() {
+                    return self.judgedMirrored(identity, serialNum: serialNum, by: "after a failed activation (\(error))", why)
+                }
+                self.log("error", "mode activation failed: \(error)")
+                self.terminate(self.startFailureReason(.unsupported))
             }
         }
     }
 
-    private func waitUntilCapturable(serialNum: UInt32) {
+    /// Why an identity that was created cannot be used for this start. Both are handled the same way:
+    /// destroy it, try the next identity (`nextIdentity`), end `display-offline` when none is left (main
+    /// then uses up the identity).
+    private enum Unusable {
+        /// Offline for 1 s during activation: macOS keeps it out of the desktop (independent output).
+        case switchedOff
+        /// macOS restored a saved mirror set for it ("Entire Screen"), so it mirrors instead of
+        /// extending the desktop. The helper never un-mirrors: that would rewrite the user's saved
+        /// display settings.
+        case mirrored
+
+        var adjective: String { self == .switchedOff ? "switched off" : "mirrored" }
+    }
+
+    /// After activation succeeded: check `MirrorSettlePoll.checks` times, `interval` apart (the saved
+    /// set may land a little after activation), before waiting for capturability. A late check for a
+    /// session that has ended meanwhile does nothing.
+    /// A check CoreGraphics cannot answer yet (`.unknown`, F-M1) is no evidence of a mirror and counts as
+    /// a clean one; the pre-ready check runs later still.
+    private func settleMirror(_ identity: Identity, serialNum: UInt32, activationMs: Int, poll: MirrorSettlePoll) {
+        var poll = poll
+        let verdict = backend.mirrorVerdict()
+        if verdict == .unknown, !loggedUnknownMirror {
+            loggedUnknownMirror = true
+            logUnknownMirror(serialNum: serialNum, by: "settle check \(poll.attempts + 1)", "counted as clean (logged once per display)")
+        }
+        switch poll.record(mirrored: verdict.isMirrored) {
+        case .mirrored:
+            guard case .mirrored(let why) = verdict else { return }
+            judgedMirrored(identity, serialNum: serialNum, by: "settle check \(poll.attempts)", why)
+        case .retry:
+            backend.runLater(after: MirrorSettlePoll.interval) { [weak self] in
+                guard let self, self.endedReason == nil, self.displayCreated else { return }
+                self.settleMirror(identity, serialNum: serialNum, activationMs: activationMs, poll: poll)
+            }
+        case .clear:
+            log("info", "using the \(identity.rawValue) display identity \(Self.hex(serialNum)) (modes active after \(activationMs) ms)")
+            waitUntilCapturable(identity, serialNum: serialNum)
+        }
+    }
+
+    /// Every mirror judgement logs, at `warn`, which check made it and exactly which read-only queries
+    /// fired (F-M1), then drops the identity.
+    private func judgedMirrored(_ identity: Identity, serialNum: UInt32, by check: String, _ why: String) {
+        logMirrorJudgement(serialNum: serialNum, by: check, why)
+        dropIdentity(identity, serialNum: serialNum, because: .mirrored)
+    }
+
+    /// `.unknown` (F-M1): CoreGraphics in this process does not list the display yet, so the check has
+    /// no answer; it is never a mirror.
+    private func logUnknownMirror(serialNum: UInt32, by check: String, _ outcome: String) {
+        log("info", "mirror check (\(check)) cannot tell yet for identity \(Self.hex(serialNum)) (display "
+            + "\(Self.hex(displayId))): CoreGraphics in this process does not list it yet; \(outcome)")
+    }
+
+    private func logMirrorJudgement(serialNum: UInt32, by check: String, _ why: String) {
+        log("warn", "mirror check (\(check)) judged identity \(Self.hex(serialNum)) (display \(Self.hex(displayId))) "
+            + "mirrored: \(why)")
+    }
+
+    private func dropIdentity(_ identity: Identity, serialNum: UInt32, because cause: Unusable) {
+        // Asleep: a second display would only leave a second ghost (F2); sleep explains it.
+        if !backend.mainDisplayAsleep(), let next = nextIdentity(after: identity, cause) {
+            let nextSerial = serial(for: next)
+            switch cause {
+            case .switchedOff:
+                log("warn", "macOS keeps Desk Agent Phone switched off for identity \(Self.hex(serialNum)); "
+                    + "retrying once with the \(next.rawValue) display identity \(Self.hex(nextSerial))")
+            case .mirrored:
+                log("warn", "macOS restored a saved mirror set (Screen Mirroring › Entire Screen) for identity "
+                    + "\(Self.hex(serialNum)), so Desk Agent Phone would mirror instead of extending the desktop; "
+                    + "dropping it and retrying once with the \(next.rawValue) display identity \(Self.hex(nextSerial))")
+                mirroredSkipped = true
+            }
+            backend.destroyDisplay()
+            displayCreated = false
+            return createAndActivate(next)
+        }
+        switch cause {
+        case .switchedOff:
+            log("error", "mode activation failed: the display stayed offline (macOS keeps Desk Agent Phone out of the desktop)")
+        case .mirrored:
+            log("error", "Desk Agent Phone came up mirrored (a saved macOS mirror set) for identity \(Self.hex(serialNum)) "
+                + "and no other display identity is left to try")
+        }
+        terminate(startFailureReason(.displayOffline))
+    }
+
+    /// The last mirror check is made right before `ready`, for a saved set that landed after the settle
+    /// window. While the start is still within `freshIdentityCutoff` the identity is dropped as usual;
+    /// later there is no time left for another identity, so it streams mirrored (as a mid-session mirror
+    /// would) with a warning.
+    private func waitUntilCapturable(_ identity: Identity, serialNum: UInt32) {
         let left = Self.startBudget - (now() - beganAt)
         let timeout = min(Self.capturableTimeout, max(Self.minCapturableTimeout, left))
         backend.waitUntilCapturable(displayId: displayId, timeout: timeout) { [weak self] result in
             guard let self, self.endedReason == nil else { return }
             switch result {
             case .success:
+                let verdict = self.backend.mirrorVerdict()
+                if verdict == .unknown {
+                    self.logUnknownMirror(serialNum: serialNum, by: "before ready", "counted as clean")
+                }
+                if case .mirrored(let why) = verdict {
+                    if self.now() - self.beganAt <= Self.freshIdentityCutoff {
+                        return self.judgedMirrored(identity, serialNum: serialNum, by: "before ready", why)
+                    }
+                    self.logMirrorJudgement(serialNum: serialNum, by: "before ready", why)
+                    self.log("warn", "Desk Agent Phone became mirrored (a saved macOS mirror set) for identity "
+                        + "\(Self.hex(serialNum)) after the mirror check; no time is left in this start for another "
+                        + "identity, so it streams mirrored")
+                }
                 self.deadline = ConnectDeadline(createdAt: self.now(), timeout: Self.connectDeadline)
                 self.readySent = true
-                self.sink.emit(.ready(displayId: self.displayId, port: self.start.port, serialNum: serialNum))
+                self.sink.emit(.ready(displayId: self.displayId, port: self.start.port, serialNum: serialNum,
+                                      mirroredSkipped: self.mirroredSkipped))
             case .failure(let error):
                 self.terminate(Self.endReason(for: error))
             }
@@ -324,6 +442,8 @@ public final class SessionController {
         switch error as? BackendError {
         case .unsupported: return .unsupported
         case .displayOffline: return .displayOffline
+        // Handled where it can occur (start: dropped like offline; after ready: the mode is kept).
+        case .displayMirrored: return .unsupported
         case .captureUnavailable: return .captureUnavailable
         case .permissionDenied: return .permissionScreenRecording
         case .captureFailed, nil: return .captureFailed
@@ -556,6 +676,7 @@ public final class SessionController {
             backend.stopCapture()
             capturing = false
         }
+        let before = surface
         surface = (surfaceW, surfaceH)
         if let modes {
             activationGeneration += 1
@@ -578,6 +699,15 @@ public final class SessionController {
                     self.captureTargetStale = true
                     self.onBoundsChanged?(self.backend.displayBounds())
                     self.restartCapture(surfaceW: previous.w, surfaceH: previous.h, modes: nil)
+                case .failure(BackendError.displayMirrored):
+                    // A mirrored display is never mode-switched (that would rewrite the user's saved
+                    // mirror set): keep its current mode and stream it, as for any mid-session mirror.
+                    self.activating = false
+                    self.logOnce("mirrored-mode-kept", level: "info",
+                                 "Desk Agent Phone is mirrored; keeping its current mode instead of switching to \(surfaceW)x\(surfaceH)")
+                    self.captureTargetStale = true
+                    self.onBoundsChanged?(self.backend.displayBounds())
+                    self.restartCapture(surfaceW: before.w, surfaceH: before.h, modes: nil)
                 case .failure(let error):
                     self.activating = false
                     self.log("error", "capture start failed: \(error)")
@@ -625,9 +755,18 @@ public final class SessionController {
     /// a running capture restarts at the same stream size with an IDR. Paused, mid-activation (that
     /// completion starts capture), right after our own activation landed (the notification is its
     /// echo; capture already started on the new mode) or before hello: bounds only.
+    ///
+    /// A mirror set after `ready` (the user picked Screen Mirroring › Entire Screen) is a deliberate,
+    /// reversible choice: it is logged once at info and the stream continues (it stays online, so it
+    /// never ends the session nor uses up the identity). If macOS restores it at the next start, that
+    /// start drops the identity (`settleMirror`).
     public func displayReconfigured() {
         guard endedReason == nil, displayCreated else { return }
         if endIfSwitchedOff() { return }
+        if readySent, case .mirrored(let why) = backend.mirrorVerdict() {
+            logOnce("mirrored-mid-session", level: "info",
+                    "Desk Agent Phone is now in a macOS mirror set (Screen Mirroring › Entire Screen); keeping the stream (\(why))")
+        }
         onBoundsChanged?(backend.displayBounds())
         captureTargetStale = true
         guard capturing, now() >= reconfigurationQuietUntil else { return }

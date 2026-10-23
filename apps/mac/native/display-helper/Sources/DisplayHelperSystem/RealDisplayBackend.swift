@@ -37,6 +37,16 @@ public final class RealDisplayBackend: DisplayBackend {
 
     public func displayIsOnline() -> Bool { display.map { CGDisplayIsOnline($0.displayId) != 0 } ?? false }
 
+    /// Read-only queries only (no configuration call): ours in a mirror set, or any online display
+    /// mirroring ours; `.unknown` while this process does not list our display yet (F-M1).
+    public func mirrorVerdict() -> MirrorVerdict {
+        display.map { VirtualDisplayController.mirrorVerdict($0.displayId) } ?? .notMirrored
+    }
+
+    public func runLater(after delay: TimeInterval, _ work: @escaping () -> Void) {
+        queue.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
     public func createDisplay(maxPixels: Int, sizeInMillimeters: CGSize, serialNum: UInt32,
                               vendorId: UInt32, productId: UInt32) throws -> UInt32 {
         let vd = try VirtualDisplayController(maxPixels: maxPixels, sizeInMillimeters: sizeInMillimeters,
@@ -64,7 +74,12 @@ public final class RealDisplayBackend: DisplayBackend {
     /// Settings now; activation polled off the session queue; `completion` on the session queue.
     public func applyModes(_ modes: [ModeSpec], completion: @escaping (Result<Void, Error>) -> Void) {
         guard let display else { return queue.async { completion(.failure(BackendError.unsupported)) } }
-        display.apply(modes: modes, deliverOn: queue, completion: completion)
+        let displayId = display.displayId
+        display.apply(modes: modes, deliverOn: queue, onFirstUnknown: { [weak self] answers in
+            self?.onLog?("info", "mode activation cannot tell yet whether display \(String(format: "0x%08x", displayId)) is "
+                + "online and unmirrored (\(answers)): CoreGraphics in this process does not list it yet; retrying "
+                + "without configuring (logged once per display)")
+        }, completion: completion)
     }
 
     /// How long a capture restart waits for a fresh `SCDisplay` before falling back to the old one.

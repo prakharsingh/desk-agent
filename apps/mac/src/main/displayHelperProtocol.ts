@@ -23,8 +23,11 @@ export interface HelperStartCommand {
 }
 
 export type HelperEvent =
-  /** `serialNum`: the identity that came up (absent from an older helper). */
-  | { evt: 'ready'; displayId: number; port: number; serialNum?: number }
+  /**
+   * `serialNum`: the identity that came up (absent from an older helper). `mirroredSkipped` (additive, only when
+   * true): this start dropped an identity because macOS restored a saved mirror set for it (F-mirror).
+   */
+  | { evt: 'ready'; displayId: number; port: number; serialNum?: number; mirroredSkipped?: true }
   | { evt: 'connected' }
   | { evt: 'paused' }
   | { evt: 'resumed' }
@@ -57,9 +60,11 @@ export function parseHelperEventLine(line: string): HelperEvent | null {
   switch (r.evt) {
     case 'ready':
       if (!isNum(r.displayId) || !isNum(r.port)) return null;
-      return isNum(r.serialNum)
-        ? { evt: 'ready', displayId: r.displayId, port: r.port, serialNum: r.serialNum }
-        : { evt: 'ready', displayId: r.displayId, port: r.port };
+      return {
+        evt: 'ready', displayId: r.displayId, port: r.port,
+        ...(isNum(r.serialNum) ? { serialNum: r.serialNum } : {}),
+        ...(r.mirroredSkipped === true ? { mirroredSkipped: true as const } : {}),
+      };
     case 'connected':
     case 'paused':
     case 'resumed':
