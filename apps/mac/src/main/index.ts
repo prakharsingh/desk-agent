@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, nativeTheme, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, nativeTheme, shell, systemPreferences } from 'electron';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,6 +13,7 @@ import { DisplayHelperHost } from './displayHelperHost.js';
 import { DisplaySessionManager } from './displaySessionManager.js';
 import { debounce } from './debounce.js';
 import { LogBuffer } from './logBuffer.js';
+import { describePermissionStatus } from './permissionProbe.js';
 import { SnapshotCache } from './snapshotCache.js';
 import { WakeSync } from './wakeSync.js';
 import { augmentedPath, checkBinaries, resolveAdb } from './binaries.js';
@@ -263,6 +264,22 @@ if (!gotLock) {
   app.whenReady().then(() => {
     // Follow System Settings > Appearance (no in-app override).
     nativeTheme.themeSource = 'system';
+    // One line per launch for the TCC persistence test; both calls are read-only and never prompt.
+    // A diagnostic must not be able to keep the app from starting.
+    try {
+      logBuffer.push({
+        ts: Date.now(),
+        level: 'info',
+        source: 'permissions',
+        message: describePermissionStatus(
+          systemPreferences.getMediaAccessStatus('screen'),
+          systemPreferences.isTrustedAccessibilityClient(false),
+          app.getVersion(),
+        ),
+      });
+    } catch (err) {
+      recordStderr(`permission probe failed: ${String(err)}`);
+    }
     ensureConfigExists(configPath);
     // Switch newly added widget tiles on once for existing installs, before
     // core or the Widgets pane read the file. Best effort: a failure here must

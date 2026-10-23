@@ -124,3 +124,51 @@ codesign -d -r- "/path/to/Desk Agent.app/Contents/MacOS/desk-agent-display-helpe
 - `designated => identifier "com.deskagent.mac" and certificate leaf|root = H"…"`
   — stable; the hash must equal the identity's SHA-1 (lower-case).
 - The helper must show `identifier "com.deskagent.mac.display-helper"`.
+
+## TCC persistence test (Task 0.4 Step 6, spec §6.6)
+
+**Deviation from the plan (ruling P0-3):** the test does **not** install into
+`/Applications`, which would overwrite the owner's live Desk Agent. It runs from
+a non-repo copy of the worktree release build, launched with `open`
+(LaunchServices), never as a terminal child — a terminal launch attributes TCC
+to the terminal and passes falsely. This is weaker evidence than the
+`/Applications` path.
+
+### Part 1 — designated requirement is stable across versions (established)
+
+macOS 27.0.1 (26A434), 2026-10-23. Both packed with
+`DESK_AGENT_MAC_SIGN_IDENTITY=B8B3F4B81BF50F599521EC37EB83ABBB76E86EB2 pnpm --filter @desk-agent/mac exec electron-builder --mac -c.extraMetadata.version=<v>`:
+
+| | v0.0.1 | v0.0.2 |
+|---|---|---|
+| app CDHash | `82a89889f4316883c3a5620e441ea101f297f894` | `3548eb8377f8aa2d83643cce58466653645fb8e9` |
+| app DR blob sha256 | `9609636b…8477` | `9609636b…8477` |
+| helper DR blob sha256 | `56494785…faec` | `56494785…faec` |
+
+The builds differ (different CDHash) while `codesign -d -r-` is byte-identical
+for the app and the display helper (`cmp` on both the text and the binary
+requirement blob):
+
+```
+designated => identifier "com.deskagent.mac" and certificate leaf = H"b8b3f4b81bf50f599521ec37eb83abbb76e86eb2"
+designated => identifier "com.deskagent.mac.display-helper" and certificate leaf = H"b8b3f4b81bf50f599521ec37eb83abbb76e86eb2"
+```
+
+### Part 2 — a grant survives the v1 → v2 replacement (pending, owner)
+
+Needs a human grant. Each launch logs one Logs-pane line from source
+`permissions`, e.g. `v0.0.2 screen-recording=granted accessibility=true`.
+Read it right after launch: the Logs pane keeps only the newest 500 lines, so a
+chatty session can evict it.
+
+1. Quit Desk Agent. Open the v1 copy with `open "<dir>/v1/Desk Agent.app"`
+   (choose "Open Anyway" in Privacy & Security if Gatekeeper asks).
+2. System Settings › Privacy & Security › Screen & System Audio Recording → add
+   that Desk Agent; Accessibility → add it. Quit, relaunch with `open`; the Logs
+   pane must show `v0.0.1 screen-recording=granted accessibility=true`.
+3. Quit. Replace the v1 bundle in place with the v2 bundle (same path), open it
+   with `open`. **PASS** iff the Logs pane shows
+   `v0.0.2 screen-recording=granted accessibility=true` with no re-grant.
+
+Result: _not yet run_. A FAIL does not block: Task 5.5's stale-grant flow
+handles it.
