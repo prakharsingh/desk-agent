@@ -39,6 +39,7 @@
     "appId": "com.deskagent.mac",
     "productName": "Desk Agent",
     "asar": true,
+    "afterPack": "../../scripts/mac-signing/afterPack.mjs",
     "directories": {
       "output": "release"
     },
@@ -71,10 +72,7 @@
         }
       ],
       "artifactName": "DeskAgent-${version}-mac-arm64.${ext}",
-      "identity": "-",
-      "binaries": [
-        "Contents/MacOS/desk-agent-display-helper"
-      ],
+      "identity": null,
       "category": "public.app-category.utilities",
       "icon": "build/icon.icns"
     }
