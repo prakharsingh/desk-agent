@@ -51,6 +51,13 @@ describe('displayHelperProtocol', () => {
       .toEqual({ evt: 'ready', displayId: 7, port: 8788 });
   });
 
+  it('keeps ended.freshTried only when it is true', () => {
+    expect(parseHelperEventLine('{"evt":"ended","freshTried":true,"reason":"display-offline"}'))
+      .toEqual({ evt: 'ended', reason: 'display-offline', freshTried: true });
+    expect(parseHelperEventLine('{"evt":"ended","freshTried":false,"reason":"display-offline"}')).toEqual({ evt: 'ended', reason: 'display-offline' });
+    expect(parseHelperEventLine('{"evt":"ended","freshTried":"yes","reason":"display-offline"}')).toEqual({ evt: 'ended', reason: 'display-offline' });
+  });
+
   it('maps an unknown ended reason to helper-crashed', () =>
     expect(parseHelperEventLine('{"evt":"ended","reason":"martian"}')).toEqual({ evt: 'ended', reason: 'helper-crashed' }));
 

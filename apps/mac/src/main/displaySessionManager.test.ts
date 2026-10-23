@@ -533,12 +533,104 @@ describe('DisplaySessionManager', () => {
       expect(logs.some((l) => l.level === 'info' && l.message.includes(`0x${hex}`) && l.message.includes('generation 0'))).toBe(true);
     });
 
-    it('saves nothing for a session that ends before ready (every identity offline)', () => {
+    it('a start that ends display-offline before ready uses up its generation: the next start is fresh', () => {
+      const store = fakeStore();
+      const { mgr, hosts, logs } = setup({ identityStore: store });
+      mgr.handleStartRequest(START);
+      hosts[0].exit({ reason: 'display-offline' });
+      expect(store.writes).toEqual([[KEY, 1]]);
+      expect(logs.some((l) => l.message.includes('used up') && l.message.includes('generation 1'))).toBe(true);
+      mgr.handleStartRequest(START);
+      expect(hosts[1].started[0].serialNum).toBe(displayIdentitySerial(START.deviceSerial, 1));
+      expect(hosts[1].started[0].freshSerial).toBe(displayIdentitySerial(START.deviceSerial, 2));
+    });
+
+    it('a start whose fresh identity came up offline too uses up both generations (M1)', () => {
+      const store = fakeStore({ [KEY]: 1 });
+      const { mgr, hosts } = setup({ identityStore: store });
+      mgr.handleStartRequest(START);
+      hosts[0].emit({ evt: 'ended', reason: 'display-offline', freshTried: true });
+      hosts[0].exit({ reason: 'display-offline' });
+      expect(store.writes).toEqual([[KEY, 3]]);
+      mgr.handleStartRequest(START);
+      expect(hosts[1].started[0].serialNum).toBe(displayIdentitySerial(START.deviceSerial, 3));
+    });
+
+    it('a live session on a known identity that ends display-offline uses up that generation', () => {
+      const store = fakeStore({ [KEY]: 1 });
+      const { mgr, hosts } = setup({ identityStore: store });
+      mgr.handleStartRequest(START);
+      // The gen-1 spare came up (any identity other than the fresh one belongs to the session's generation).
+      const spare = (hosts[0].started[0].serialNum ^ 0x53504152) >>> 0;
+      hosts[0].emit({ evt: 'ready', displayId: 7, port: DISPLAY_VIDEO_PORT, serialNum: spare });
+      hosts[0].exit({ reason: 'display-offline' });
+      expect(store.writes).toEqual([[KEY, 2]]);
+      mgr.handleStartRequest(START);
+      expect(hosts[1].started[0].serialNum).toBe(displayIdentitySerial(START.deviceSerial, 2));
+    });
+
+    it('a live session on the fresh identity that ends display-offline skips past it too', () => {
       const store = fakeStore();
       const { mgr, hosts } = setup({ identityStore: store });
       mgr.handleStartRequest(START);
+      hosts[0].emit({ evt: 'ready', displayId: 7, port: DISPLAY_VIDEO_PORT, serialNum: hosts[0].started[0].freshSerial });
+      hosts[0].exit({ reason: 'display-offline' });
+      // 1 saved when the fresh identity came up; 2 once it was switched off.
+      expect(store.writes).toEqual([[KEY, 1], [KEY, 2]]);
+      mgr.handleStartRequest(START);
+      expect(hosts[1].started[0].serialNum).toBe(displayIdentitySerial(START.deviceSerial, 2));
+    });
+
+    it('using up an identity is idempotent: it never moves a generation that is already past it', () => {
+      const store = fakeStore();
+      const { mgr, hosts } = setup({ identityStore: store });
+      mgr.handleStartRequest(START);
+      hosts[0].emit({ evt: 'ready', displayId: 7, port: DISPLAY_VIDEO_PORT, serialNum: hosts[0].started[0].serialNum });
+      // Something else (another main, an earlier escalation) already moved this phone past generation 0.
+      store.gens[KEY] = 1;
       hosts[0].exit({ reason: 'display-offline' });
       expect(store.writes).toEqual([]);
+      expect(store.gens[KEY]).toBe(1);
+    });
+
+    it('has no generation cap', () => {
+      const store = fakeStore({ [KEY]: 999 });
+      const { mgr, hosts } = setup({ identityStore: store });
+      mgr.handleStartRequest(START);
+      hosts[0].exit({ reason: 'display-offline' });
+      expect(store.writes).toEqual([[KEY, 1000]]);
+    });
+
+    it('uses up the identity even when a queued start replaces the session (the queued start gets the fresh one)', () => {
+      const store = fakeStore();
+      const { mgr, hosts } = setup({ identityStore: store });
+      mgr.handleStartRequest(START);
+      mgr.handleStartRequest(START); // supersedes; waits for the first helper to exit
+      hosts[0].exit({ reason: 'display-offline' });
+      expect(store.writes).toEqual([[KEY, 1]]);
+      expect(hosts[1].started[0].serialNum).toBe(displayIdentitySerial(START.deviceSerial, 1));
+    });
+
+    it.each<DisplayReason>(['mac-asleep', 'capture-failed', 'phone-bye', 'watchdog', 'helper-crashed', 'stop-requested'])(
+      'never uses up the identity when the session ends %s',
+      (reason) => {
+        const store = fakeStore();
+        const { mgr, hosts } = setup({ identityStore: store });
+        mgr.handleStartRequest(START);
+        hosts[0].emit({ evt: 'ready', displayId: 7, port: DISPLAY_VIDEO_PORT, serialNum: hosts[0].started[0].serialNum });
+        hosts[0].exit({ reason });
+        expect(store.writes).toEqual([]);
+      },
+    );
+
+    it('a store that cannot save the used-up generation still ends the session and warns', () => {
+      const store = fakeStore();
+      store.throwOnSet = true;
+      const { mgr, hosts, logs, sent } = setup({ identityStore: store });
+      mgr.handleStartRequest(START);
+      hosts[0].exit({ reason: 'display-offline' });
+      expect(sessionMsgs(sent).at(-1)).toMatchObject({ active: false, reason: 'display-offline' });
+      expect(logs.some((l) => l.level === 'warn' && l.message.includes('disk full'))).toBe(true);
     });
 
     it('saves nothing for a ready from a session main is already stopping', () => {

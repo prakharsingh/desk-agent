@@ -20,7 +20,9 @@ export type DisplayFlowState =
   | { phase: 'requesting'; size: DisplaySize; requestedAt: number }
   | { phase: 'starting'; sessionId: string }
   | { phase: 'streaming'; sessionId: string; inputEnabled: boolean }
-  | { phase: 'failed'; reason: string }
+  // `midSession`: the failure ended a session the Mac had already made ready (starting/streaming),
+  // as opposed to a start that never got a display.
+  | { phase: 'failed'; reason: string; midSession?: true }
   | { phase: 'exited'; reason: string };
 
 export type DisplayFlowEvent =
@@ -31,6 +33,8 @@ export type DisplayFlowEvent =
   | { type: 'nativeState'; state: 'connecting' | 'streaming' | 'paused' | 'ended' | 'error'; reason?: string; inputEnabled?: boolean }
   | { type: 'tick'; now: number }
   | { type: 'userExit' }
+  // "Try again" on a retryable failure card (see canRetryDisplay).
+  | { type: 'retry' }
   | { type: 'jsonLinkChanged'; connected: boolean };
 
 export type DisplayEffect =
@@ -87,7 +91,7 @@ export function reduceDisplayFlow(state: DisplayFlowState, event: DisplayFlowEve
         if (p.state === 'ended') {
           return { state: { phase: 'exited', reason: p.reason ?? 'ended' }, effects: [{ kind: 'nativeStop' }, { kind: 'goHome' }] };
         }
-        return { state: { phase: 'failed', reason: p.reason ?? 'unknown' }, effects: [{ kind: 'nativeStop' }] };
+        return { state: { phase: 'failed', reason: p.reason ?? 'unknown', midSession: true }, effects: [{ kind: 'nativeStop' }] };
       }
       return same;
     }
@@ -101,7 +105,7 @@ export function reduceDisplayFlow(state: DisplayFlowState, event: DisplayFlowEve
           return { state: { phase: 'exited', reason: event.reason ?? 'ended' }, effects: [{ kind: 'goHome' }] };
         case 'error':
           return {
-            state: { phase: 'failed', reason: event.reason ?? 'unknown' },
+            state: { phase: 'failed', reason: event.reason ?? 'unknown', midSession: true },
             effects: [sendStop(state.sessionId, event.reason)],
           };
         default:
@@ -144,6 +148,13 @@ export function reduceDisplayFlow(state: DisplayFlowState, event: DisplayFlowEve
       }
     }
 
+    case 'retry':
+      // Back to measuring: the card unmounted the surface, so the remounted one reports its size
+      // (it may have rotated) and that sends a new display.start. The failed session was already
+      // stopped when the flow failed, and its late replies are stale for the new start.
+      if (state.phase !== 'failed' || !canRetryDisplay(state.reason)) return same;
+      return { state: { phase: 'measuring' }, effects: [] };
+
     case 'jsonLinkChanged':
       return same;
   }
@@ -173,6 +184,21 @@ export function isStaleDisplayReply(seen: ReadonlyMap<string, number>, sessionId
   return first !== undefined && first <= startSeq;
 }
 
+// Failures a plain new start can fix. display-offline: macOS took the display off the desktop
+// (a Control Center "Window or App" choice it remembers for that display identity, with no way
+// back in its UI); the Mac uses up that identity, so a new start comes up as a fresh display.
+const RETRYABLE_REASONS: ReadonlySet<string> = new Set(['display-offline']);
+
+export function canRetryDisplay(reason: string): boolean {
+  return RETRYABLE_REASONS.has(reason);
+}
+
+// Failed Try agains in a row (display-offline right after each) before the card stops promising a
+// fresh display: by then something other than one remembered identity keeps it off.
+export const DISPLAY_OFFLINE_RETRY_LIMIT = 2;
+
+const DISPLAY_OFFLINE_STUCK_COPY = 'macOS keeps switching Desk Agent Phone off. Quit and reopen Desk Agent on the Mac, then tap Try again.';
+
 const REASON_COPY: Record<string, string> = {
   unsupported: 'Not supported on this Mac',
   'permission-screen-recording': 'Allow Screen Recording for Desk Agent on your Mac',
@@ -185,12 +211,21 @@ const REASON_COPY: Record<string, string> = {
   'surface-unavailable': "The phone screen couldn't be prepared — try again",
   'capture-unavailable': "The Mac can't capture the display — check Screen Recording for Desk Agent",
   'connect-failed': "Couldn't connect to the Mac's display — try again",
-  // macOS keeps the display out of the desktop (a persisted Control Center choice for this phone's
-  // serial). It only shows in Control Center while a session is connecting.
-  'display-offline': 'Desk Agent Phone is switched off on the Mac — turn it on in Control Center › Display while it connects',
+  // macOS kept the display out of the desktop at start (a persisted Control Center choice for that
+  // display identity). The display is gone by the time this shows, so there is nothing to change in
+  // Control Center or Screen Mirroring: the Mac uses a fresh identity on the next start.
+  'display-offline': 'macOS has Desk Agent Phone switched off on the Mac — tap Try again and Desk Agent will use a fresh display',
   'mac-asleep': "The Mac's screen is asleep — wake and unlock it, then try again",
 };
 
-export function displayReasonCopy(reason: string): string {
+// Mid-session wording where it differs: the display was live, then macOS took it away.
+const MID_SESSION_COPY: Record<string, string> = {
+  'display-offline': "macOS took Desk Agent Phone off the Mac's desktop — tap Try again and Desk Agent will use a fresh display",
+};
+
+/** `failedRetries`: Try agains in a row this visit that ended in this failure again (see DISPLAY_OFFLINE_RETRY_LIMIT). */
+export function displayReasonCopy(reason: string, midSession = false, failedRetries = 0): string {
+  if (reason === 'display-offline' && failedRetries > DISPLAY_OFFLINE_RETRY_LIMIT) return DISPLAY_OFFLINE_STUCK_COPY;
+  if (midSession && Object.prototype.hasOwnProperty.call(MID_SESSION_COPY, reason)) return MID_SESSION_COPY[reason]!;
   return Object.prototype.hasOwnProperty.call(REASON_COPY, reason) ? REASON_COPY[reason]! : 'Display ended';
 }

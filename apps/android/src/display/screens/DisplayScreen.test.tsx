@@ -218,6 +218,82 @@ describe('DisplayScreen', () => {
     expect(surfaces()).toHaveLength(0);
   });
 
+  it('a mid-session display-offline offers Try again, which starts a new display session', async () => {
+    const props = setup();
+    await toStarting(props);
+    await act(() => void DeviceEventEmitter.emit('DisplayState', { state: 'error', reason: 'display-offline' }));
+    expect(screen.getByText(/macOS took Desk Agent Phone off the Mac's desktop/)).toBeTruthy();
+    expect(screen.queryByText(/Control Center/)).toBeNull();
+    expect(screen.getByText('Back')).toBeTruthy();
+    expect(surfaces()).toHaveLength(0);
+    const startsBefore = frames(props.sendFrame as jest.Mock).filter((f) => f.type === 'display.start').length;
+    await fireEvent.press(screen.getByText('Try again'));
+    expect(props.onExit).not.toHaveBeenCalled();
+    // Measuring again: the surface is back, and its size sends a fresh display.start.
+    expect(surfaces().length).toBeGreaterThan(0);
+    await emitSize();
+    expect(frames(props.sendFrame as jest.Mock).filter((f) => f.type === 'display.start')).toHaveLength(startsBefore + 1);
+  });
+
+  it('after three failed Try agains in a row the copy stops promising a fresh display but keeps Try again (M2)', async () => {
+    const props = setup();
+    const r = await render(<DisplayScreen {...props} />);
+    let seq = 0;
+    const failOffline = async () => {
+      await emitSize();
+      seq++;
+      await r.rerender(<DisplayScreen {...props} lastSession={session(seq, { state: 'error', sessionId: `s${seq}`, reason: 'display-offline' })} />);
+    };
+    await failOffline(); // the first start
+    for (let i = 1; i <= 3; i++) {
+      expect(screen.getByText(/fresh display/)).toBeTruthy();
+      await fireEvent.press(screen.getByText('Try again'));
+      await failOffline();
+    }
+    expect(screen.queryByText(/fresh display/)).toBeNull();
+    expect(screen.getByText(/macOS keeps switching Desk Agent Phone off/)).toBeTruthy();
+    expect(screen.getByText('Try again')).toBeTruthy();
+    expect(screen.getByText('Back')).toBeTruthy();
+  });
+
+  it('a session that streams resets the failed Try again count', async () => {
+    const props = setup();
+    const r = await render(<DisplayScreen {...props} />);
+    let seq = 0;
+    for (let i = 0; i < 3; i++) {
+      await emitSize();
+      seq++;
+      await r.rerender(<DisplayScreen {...props} lastSession={session(seq, { state: 'error', sessionId: `s${seq}`, reason: 'display-offline' })} />);
+      await fireEvent.press(screen.getByText('Try again'));
+    }
+    await emitSize();
+    seq++;
+    await r.rerender(<DisplayScreen {...props} lastSession={session(seq, { state: 'ready', sessionId: 'live', videoPort: 8788 })} />);
+    await act(() => void DeviceEventEmitter.emit('DisplayState', { state: 'streaming', inputEnabled: true }));
+    await act(() => void DeviceEventEmitter.emit('DisplayState', { state: 'error', reason: 'display-offline' }));
+    expect(screen.getByText(/fresh display/)).toBeTruthy();
+  });
+
+  it('a start-time display-offline offers Try again and Back, without Control Center advice', async () => {
+    const props = setup();
+    const r = await render(<DisplayScreen {...props} />);
+    await emitSize();
+    await r.rerender(<DisplayScreen {...props} lastSession={session(1, { state: 'error', sessionId: 's1', reason: 'display-offline' })} />);
+    expect(screen.getByText(/switched off on the Mac/)).toBeTruthy();
+    expect(screen.queryByText(/Control Center/)).toBeNull();
+    expect(screen.getByText('Try again')).toBeTruthy();
+    await fireEvent.press(screen.getByText('Back'));
+    expect(props.onExit).toHaveBeenCalledTimes(1);
+  });
+
+  it('a non-retryable failure shows Back only', async () => {
+    const props = setup({ jsonConnected: false });
+    await render(<DisplayScreen {...props} />);
+    await emitSize();
+    expect(screen.getByText('Mac not connected')).toBeTruthy();
+    expect(screen.queryByText('Try again')).toBeNull();
+  });
+
   it('hardware back while failed leaves without an overlay', async () => {
     const props = setup({ jsonConnected: false });
     await render(<DisplayScreen {...props} />);

@@ -165,6 +165,9 @@ public final class SessionController {
     /// (re)start refreshes it first.
     private var captureTargetStale = false
     private var loggedTypes: Set<String> = []
+    /// This start created the fresh identity (reported on `ended`, Ruling P0-7). Set once it exists,
+    /// so a fresh identity that could not even be created does not count.
+    private var freshTried = false
 
     public init(start: StartCommand, backend: DisplayBackend, sink: HelperEventSink,
                 now: @escaping () -> TimeInterval) {
@@ -235,6 +238,7 @@ public final class SessionController {
             return terminate(startFailureReason(.unsupported))
         }
         displayCreated = true
+        if identity == .fresh { freshTried = true }
         backend.applyModes(DisplayModes.modes(surfaceW: w, surfaceH: h)) { [weak self] result in
             guard let self, self.endedReason == nil else { return }
             switch result {
@@ -299,10 +303,17 @@ public final class SessionController {
         terminate(reason)
     }
 
-    /// After `ready`, a display macOS took out of the desktop ends the session `display-offline`.
-    /// Returns whether it did. Before `ready`, ActivationPoll owns the offline state (it escalates).
+    /// After `ready`, a display macOS took out of the desktop ends the session `display-offline`, or
+    /// `mac-asleep` while the Mac's main display sleeps (as at start: sleep/lock explains it, and main
+    /// uses up the identity on `display-offline`). Returns whether it ended. Before `ready`,
+    /// ActivationPoll owns the offline state (it escalates).
     private func endIfSwitchedOff() -> Bool {
         guard readySent, displayCreated, !backend.displayIsOnline() else { return false }
+        if backend.mainDisplayAsleep() {
+            log("info", "Desk Agent Phone went offline while the Mac's display sleeps; ending the session")
+            terminate(.macAsleep)
+            return true
+        }
         log("warn", "macOS switched off Desk Agent Phone during the session (it left the desktop)")
         terminate(.displayOffline)
         return true
@@ -342,7 +353,7 @@ public final class SessionController {
             backend.destroyDisplay()
             displayCreated = false
         }
-        sink.emit(.ended(reason))
+        sink.emit(.ended(reason, freshTried: freshTried))
     }
 
     // MARK: - Connections

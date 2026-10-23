@@ -502,7 +502,8 @@ final class Harness {
         let h = Harness(freshSerial: 99)
         bothKnownOffline(h)
         h.backend.completeApply(.failure(BackendError.displayOffline))   // fresh
-        #expect(h.sink.ended == [.ended(.displayOffline)])
+        // M1: main must know the fresh identity is used up too.
+        #expect(h.sink.ended == [.ended(.displayOffline, freshTried: true)])
         #expect(h.backend.createCalls == 3)
         #expect(h.backend.destroyCalls == 3)
         #expect(h.backend.pendingApplies.isEmpty)
@@ -523,7 +524,7 @@ final class Harness {
         // Keeps the whole start well inside the phone's 12 s reply timeout.
         let h = Harness(freshSerial: 99)
         bothKnownOffline(h, primaryAfter: 2.0, spareAfter: SessionController.freshIdentityCutoff - 2.0 + 0.01)
-        #expect(h.sink.ended == [.ended(.displayOffline)])
+        #expect(h.sink.ended == [.ended(.displayOffline, freshTried: false)])
         #expect(h.backend.createCalls == 2)
         #expect(h.sink.logs(level: "warn").contains { $0.contains("no time left") })
     }
@@ -559,7 +560,7 @@ final class Harness {
         bothKnownOffline(h)
         h.ctrl.stop(.stopRequested)
         h.backend.completeApply()
-        #expect(h.sink.ended == [.ended(.stopRequested)])
+        #expect(h.sink.ended == [.ended(.stopRequested, freshTried: true)])
         #expect(h.backend.waitTimeout == nil)
     }
 
@@ -1273,6 +1274,28 @@ final class Harness {
         #expect(h.ctrl.endedReason == .displayOffline)
         #expect(c.json.contains { $0["t"] as? String == "end" && $0["reason"] as? String == "display-offline" })
         #expect(h.sink.logs(level: "warn").contains { $0.contains("switched off") })
+    }
+
+    // I1: main burns the identity on display-offline, so sleep/lock must never report it.
+    @Test func aCaptureFailureOnAnOfflineDisplayWhileTheMacSleepsEndsMacAsleep() {
+        let h = Harness()
+        let (c, _) = h.authed()
+        h.backend.online = false
+        h.backend.mainAsleep = true
+        h.ctrl.captureError(BackendError.captureFailed("stream stopped"))
+        #expect(h.ctrl.endedReason == .macAsleep)
+        #expect(h.sink.ended == [.ended(.macAsleep)])
+        #expect(c.json.contains { $0["t"] as? String == "end" && $0["reason"] as? String == "mac-asleep" })
+    }
+
+    @Test func aReconfigurationToOfflineWhileTheMacSleepsEndsMacAsleep() {
+        let h = Harness()
+        _ = h.authed()
+        h.backend.online = false
+        h.backend.mainAsleep = true
+        h.ctrl.displayReconfigured()
+        #expect(h.ctrl.endedReason == .macAsleep)
+        #expect(h.backend.destroyCalls == 1)
     }
 
     @Test func aCaptureFailureOnAnOnlineDisplayStaysCaptureFailed() {

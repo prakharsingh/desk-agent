@@ -6,6 +6,7 @@ import { Toggle } from '../ui/Toggle.js';
 import { buildDisplayStartFrame, buildDisplayStopFrame } from '../../displayFrames.js';
 import {
   INITIAL_DISPLAY_FLOW,
+  canRetryDisplay,
   displayReasonCopy,
   isStaleDisplayReply,
   noteDisplaySessionSeen,
@@ -45,6 +46,8 @@ export function DisplayScreen({ lastSession, seenSessionIds, getDisplaySeq, json
   const flowRef = useRef<DisplayFlowState>(INITIAL_DISPLAY_FLOW);
   const effectQueueRef = useRef<DisplayEffect[]>([]);
   const [flow, setFlow] = useState<DisplayFlowState>(INITIAL_DISPLAY_FLOW);
+  // Try agains in a row this visit with no streaming session in between (drives the failure copy).
+  const [retries, setRetries] = useState(0);
   const [showExit, setShowExitState] = useState(false);
   const showExitRef = useRef(false);
   const setShowExit = useCallback((v: boolean) => {
@@ -151,6 +154,10 @@ export function DisplayScreen({ lastSession, seenSessionIds, getDisplaySeq, json
     dispatch({ type: 'sessionReply', payload, stale });
   }, [lastSession, dispatch]);
 
+  useEffect(() => {
+    if (flow.phase === 'streaming') setRetries(0);
+  }, [flow.phase]);
+
   // Report "unsupported" once, when the flow lands in that failure.
   useEffect(() => {
     if (flow.phase === 'failed' && flow.reason === 'unsupported') latest.current.onUnsupported();
@@ -210,10 +217,24 @@ export function DisplayScreen({ lastSession, seenSessionIds, getDisplaySeq, json
   if (flow.phase === 'failed') {
     return (
       <View style={styles.center}>
-        <Text style={styles.failure}>{displayReasonCopy(flow.reason)}</Text>
-        <Pressable onPress={() => dispatch({ type: 'userExit' })} style={styles.button} accessibilityRole="button">
-          <Text style={styles.buttonText}>Back</Text>
-        </Pressable>
+        <Text style={styles.failure}>{displayReasonCopy(flow.reason, flow.midSession === true, retries)}</Text>
+        <View style={styles.dialogRow}>
+          <Pressable onPress={() => dispatch({ type: 'userExit' })} style={styles.button} accessibilityRole="button">
+            <Text style={styles.buttonText}>Back</Text>
+          </Pressable>
+          {canRetryDisplay(flow.reason) && (
+            <Pressable
+              onPress={() => {
+                setRetries((n) => n + 1);
+                dispatch({ type: 'retry' });
+              }}
+              style={styles.button}
+              accessibilityRole="button"
+            >
+              <Text style={styles.buttonText}>Try again</Text>
+            </Pressable>
+          )}
+        </View>
       </View>
     );
   }

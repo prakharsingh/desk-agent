@@ -5,6 +5,8 @@ import {
   DISPLAY_MEASURE_TIMEOUT_MS,
   reduceDisplayFlow,
   displayReasonCopy,
+  canRetryDisplay,
+  DISPLAY_OFFLINE_RETRY_LIMIT,
   isStaleDisplayReply,
   noteDisplaySessionSeen,
   type SeenDisplaySessions,
@@ -222,7 +224,7 @@ describe('displayFlow', () => {
     expect(e.state).toEqual({ phase: 'exited', reason: 'watchdog' });
     expect(e.effects).toEqual([{ kind: 'goHome' }]);
     const f = reduceDisplayFlow(starting(), { type: 'nativeState', state: 'error', reason: 'decoder-error' });
-    expect(f.state).toEqual({ phase: 'failed', reason: 'decoder-error' });
+    expect(f.state).toEqual({ phase: 'failed', reason: 'decoder-error', midSession: true });
   });
 
   it('a native error tells core to stop the session', () => {
@@ -234,7 +236,7 @@ describe('displayFlow', () => {
 
   it('forwards the sendStop reason only when it is a DisplayReason', () => {
     const r = reduceDisplayFlow(streaming(), { type: 'nativeState', state: 'error', reason: 'some-kotlin-thing' });
-    expect(r.state).toEqual({ phase: 'failed', reason: 'some-kotlin-thing' });
+    expect(r.state).toEqual({ phase: 'failed', reason: 'some-kotlin-thing', midSession: true });
     expect(r.effects).toEqual([{ kind: 'sendStop', sessionId: 's1' }]);
     expect('reason' in (r.effects[0] as object)).toBe(false);
   });
@@ -262,8 +264,83 @@ describe('displayFlow', () => {
 
   it('a core error reply mid-session stops native and shows the failure', () => {
     const r = reduceDisplayFlow(streaming(), reply({ state: 'error', sessionId: 's1', reason: 'helper-crashed' }));
-    expect(r.state).toEqual({ phase: 'failed', reason: 'helper-crashed' });
+    expect(r.state).toEqual({ phase: 'failed', reason: 'helper-crashed', midSession: true });
     expect(r.effects).toEqual([{ kind: 'nativeStop' }]);
+  });
+
+  describe('display switched off (display-offline): retry with a fresh display', () => {
+    it('a mid-session display-offline marks the failure as mid-session', () => {
+      const r = reduceDisplayFlow(streaming(), { type: 'nativeState', state: 'error', reason: 'display-offline' });
+      expect(r.state).toEqual({ phase: 'failed', reason: 'display-offline', midSession: true });
+      expect(r.effects).toEqual([{ kind: 'sendStop', sessionId: 's1', reason: 'display-offline' }]);
+    });
+
+    it('a start-time display-offline is not mid-session', () => {
+      const r = reduceDisplayFlow(requesting(), reply({ state: 'error', sessionId: 's1', reason: 'display-offline' }));
+      expect(r.state).toEqual({ phase: 'failed', reason: 'display-offline' });
+    });
+
+    it('retry from a display-offline failure measures again, then sends a new display.start', () => {
+      for (const failed of [
+        { phase: 'failed', reason: 'display-offline', midSession: true },
+        { phase: 'failed', reason: 'display-offline' },
+      ] as DisplayFlowState[]) {
+        const r = reduceDisplayFlow(failed, { type: 'retry' });
+        expect(r.state).toEqual({ phase: 'measuring' });
+        expect(r.effects).toEqual([]);
+        const s = reduceDisplayFlow(r.state, { type: 'surfaceSize', size, linkConnected: true, now: 5000 });
+        expect(s.state).toEqual({ phase: 'requesting', size, requestedAt: 5000 });
+        expect(s.effects).toEqual([{ kind: 'sendStart', size }]);
+      }
+    });
+
+    it('retry is ignored for reasons that are not retryable and outside failed', () => {
+      const unsupported: DisplayFlowState = { phase: 'failed', reason: 'unsupported' };
+      expect(reduceDisplayFlow(unsupported, { type: 'retry' })).toEqual({ state: unsupported, effects: [] });
+      for (const s of [INITIAL_DISPLAY_FLOW, requesting(), starting(), streaming(), { phase: 'exited', reason: 'user-exit' } as DisplayFlowState]) {
+        expect(reduceDisplayFlow(s, { type: 'retry' })).toEqual({ state: s, effects: [] });
+      }
+    });
+
+    it('only display-offline is retryable', () => {
+      expect(canRetryDisplay('display-offline')).toBe(true);
+      expect(canRetryDisplay('unsupported')).toBe(false);
+      expect(canRetryDisplay('mac-not-connected')).toBe(false);
+    });
+
+    it('never tells the user to change Control Center, and says a fresh display is used', () => {
+      for (const midSession of [false, true]) {
+        const copy = displayReasonCopy('display-offline', midSession);
+        expect(copy).not.toMatch(/Control Center/);
+        expect(copy).not.toMatch(/while it connects/);
+        expect(copy).toMatch(/fresh display/);
+        expect(copy).toMatch(/Try again/);
+      }
+      expect(displayReasonCopy('display-offline', true)).toBe(
+        "macOS took Desk Agent Phone off the Mac's desktop — tap Try again and Desk Agent will use a fresh display",
+      );
+      expect(displayReasonCopy('display-offline')).toBe(
+        'macOS has Desk Agent Phone switched off on the Mac — tap Try again and Desk Agent will use a fresh display',
+      );
+    });
+
+    it('after more than DISPLAY_OFFLINE_RETRY_LIMIT failed Try agains in a row, stops promising a fresh display (M2)', () => {
+      expect(DISPLAY_OFFLINE_RETRY_LIMIT).toBe(2);
+      for (const midSession of [false, true]) {
+        expect(displayReasonCopy('display-offline', midSession, 2)).toBe(displayReasonCopy('display-offline', midSession));
+        const stuck = displayReasonCopy('display-offline', midSession, 3);
+        expect(stuck).toBe('macOS keeps switching Desk Agent Phone off. Quit and reopen Desk Agent on the Mac, then tap Try again.');
+        expect(stuck).not.toMatch(/fresh display/);
+        expect(stuck).not.toMatch(/Control Center/);
+      }
+      // Only display-offline has a stuck form.
+      expect(displayReasonCopy('mac-asleep', false, 5)).toBe(displayReasonCopy('mac-asleep'));
+    });
+
+    it('other reasons read the same mid-session and at start', () => {
+      expect(displayReasonCopy('mac-asleep', true)).toBe(displayReasonCopy('mac-asleep'));
+      expect(displayReasonCopy('whatever', true)).toBe('Display ended');
+    });
   });
 
   it('maps reasons to copy', () => {
@@ -277,7 +354,6 @@ describe('displayFlow', () => {
     expect(displayReasonCopy('protocol-error')).toBe('Update Desk Agent on the Mac and phone');
     expect(displayReasonCopy('capture-unavailable')).toBe("The Mac can't capture the display — check Screen Recording for Desk Agent");
     expect(displayReasonCopy('connect-failed')).toBe("Couldn't connect to the Mac's display — try again");
-    expect(displayReasonCopy('display-offline')).toBe('Desk Agent Phone is switched off on the Mac — turn it on in Control Center › Display while it connects');
     expect(displayReasonCopy('mac-asleep')).toBe("The Mac's screen is asleep — wake and unlock it, then try again");
     expect(displayReasonCopy('whatever')).toBe('Display ended');
   });

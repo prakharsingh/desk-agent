@@ -99,10 +99,12 @@ public enum HelperEvent: Encodable, Equatable, Sendable {
     case resumed
     case stats(StatsEvent)
     case log(level: String, message: String)
-    case ended(EndReason)
+    /// `freshTried`: this start created the fresh identity (`freshSerial`) too. Main then knows a start-time
+    /// `display-offline` used that identity up as well. Encoded only when true (additive: an older main ignores it).
+    case ended(EndReason, freshTried: Bool = false)
 
     enum CodingKeys: String, CodingKey {
-        case evt, displayId, port, serialNum, level, message, reason
+        case evt, displayId, port, serialNum, level, message, reason, freshTried
         case fps, kbps, unacked, ackP50Ms, ackP95Ms, phoneRendered, phoneDropped
     }
 
@@ -130,9 +132,10 @@ public enum HelperEvent: Encodable, Equatable, Sendable {
             try c.encode("log", forKey: .evt)
             try c.encode(level, forKey: .level)
             try c.encode(message, forKey: .message)
-        case .ended(let reason):
+        case .ended(let reason, let freshTried):
             try c.encode("ended", forKey: .evt)
             try c.encode(reason, forKey: .reason)
+            if freshTried { try c.encode(true, forKey: .freshTried) }
         }
     }
 

@@ -35,6 +35,9 @@ import Testing
 
     @Test func endedEventLine() {
         #expect(HelperEvent.ended(.connectTimeout).jsonLine() == #"{"evt":"ended","reason":"connect-timeout"}"#)
+        #expect(HelperEvent.ended(.displayOffline, freshTried: true).jsonLine()
+                == #"{"evt":"ended","freshTried":true,"reason":"display-offline"}"#)
+        #expect(HelperEvent.ended(.displayOffline, freshTried: false).jsonLine() == #"{"evt":"ended","reason":"display-offline"}"#)
     }
 
     @Test func otherEventLines() {

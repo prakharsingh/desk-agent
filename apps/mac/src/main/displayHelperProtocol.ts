@@ -30,7 +30,8 @@ export type HelperEvent =
   | { evt: 'resumed' }
   | { evt: 'stats'; fps: number; kbps: number; unacked: number; ackP50Ms: number; ackP95Ms: number; phoneRendered: number; phoneDropped: number }
   | { evt: 'log'; level: 'info' | 'warn' | 'error'; message: string }
-  | { evt: 'ended'; reason: DisplayReason };
+  /** `freshTried` (additive, only when true): this start created the fresh identity too (Ruling P0-7). */
+  | { evt: 'ended'; reason: DisplayReason; freshTried?: true };
 
 /** The `ended.reason` values the helper may emit (Contract C / Swift `EndReason`). */
 const HELPER_END_REASONS: ReadonlySet<string> = new Set([
@@ -76,7 +77,7 @@ export function parseHelperEventLine(line: string): HelperEvent | null {
       return { evt: 'log', level: r.level === 'warn' || r.level === 'error' ? r.level : 'info', message: r.message };
     case 'ended': {
       const reason = typeof r.reason === 'string' && HELPER_END_REASONS.has(r.reason) ? (r.reason as DisplayReason) : 'helper-crashed';
-      return { evt: 'ended', reason };
+      return r.freshTried === true ? { evt: 'ended', reason, freshTried: true } : { evt: 'ended', reason };
     }
     default:
       return null;

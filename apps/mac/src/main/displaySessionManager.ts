@@ -73,6 +73,10 @@ interface Session {
   token: string;
   /** The phone's display identity: store key, the generation this session started from, its serials. */
   identity: { phoneKey: string; generation: number; serialNum: number; freshSerial: number };
+  /** The identity serial the helper reported in `ready` (undefined before ready, or from an older helper). */
+  liveSerial?: number;
+  /** The helper's `ended` said this start created the fresh identity too. */
+  freshTried?: boolean;
 }
 
 const hex32 = (n: number) => `0x${(n >>> 0).toString(16).padStart(8, '0')}`;
@@ -224,6 +228,7 @@ export class DisplaySessionManager {
           break;
         }
         session.ready = true;
+        session.liveSerial = e.serialNum;
         this.sendActive(session);
         this.noteIdentity(session, e.serialNum);
         this.changed();
@@ -237,7 +242,8 @@ export class DisplaySessionManager {
           `phone rendered ${e.phoneRendered} dropped ${e.phoneDropped}`);
         break;
       case 'ended':
-        // Informational only: onExit (which carries the same reason) ends the session.
+        // Informational: onExit (which carries the same reason) ends the session. The host delivers it first.
+        if (e.freshTried) session.freshTried = true;
         this.opts.onLog('info', `display helper ended: ${e.reason}`);
         break;
       default:
@@ -263,6 +269,8 @@ export class DisplaySessionManager {
     if (startsNext && reason !== 'superseded') {
       this.opts.onLog('info', `display session ${session.sessionId}: reporting ${reason} to core as superseded (a queued start follows)`);
     }
+    // Before a queued start reads the store, so that start already gets the fresh identity.
+    if (info.reason === 'display-offline') this.useUpIdentity(session);
     this.opts.sendToCore({ kind: 'displaySession', active: false, sessionId: session.sessionId, videoPort: null, reason: reported });
     this.clearDevToken();
     if (this.current === session) this.current = null;
@@ -287,8 +295,9 @@ export class DisplaySessionManager {
   }
 
   /**
-   * Logs which identity came up. The fresh identity coming online is the only moment the next generation is
-   * saved: it is online and capturable, so it is the phone's new last-good identity (Ruling P0-7).
+   * Logs which identity came up. The fresh identity coming online saves the next generation: it is online and
+   * capturable, so it is the phone's new last-good identity (Ruling P0-7). The other moment a generation is saved
+   * is a `display-offline` end (useUpIdentity): the generation after the used-up identity, forward-only, uncapped.
    */
   private noteIdentity(session: Session, serialNum: number | undefined): void {
     const { identity } = session;
@@ -305,6 +314,35 @@ export class DisplaySessionManager {
     } catch (err) {
       this.opts.onLog('warn', `display identity generation ${next} could not be saved (the next session escalates again): ` +
         `${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /**
+   * The session ended `display-offline`: macOS took the display off the desktop, at start (every identity tried
+   * came up switched off) or mid-session (e.g. Control Center's "Window or App"). macOS remembers that per identity
+   * and offers no way back, so the identity is used up for good: the next start moves to a generation macOS has no
+   * saved state for. The used-up identity belongs to the fresh generation when the helper reported it in `ready`
+   * or, for a start that never got ready, when its `ended` says the fresh identity was tried (it came up offline
+   * too); otherwise to the session's own generation (its primary or spare). Idempotent: the store only ever moves
+   * forward to the generation after the used-up one, never past it twice. No cap: every switch-off burns one.
+   * Never for other end reasons (mac-asleep, capture-failed, ...), which say nothing about the identity.
+   */
+  private useUpIdentity(session: Session): void {
+    const { identity } = session;
+    const freshUsed = session.liveSerial === identity.freshSerial || (session.liveSerial === undefined && session.freshTried === true);
+    const usedGeneration = freshUsed ? identity.generation + 1 : identity.generation;
+    const used = session.liveSerial ?? (freshUsed ? identity.freshSerial : identity.serialNum);
+    const next = usedGeneration + 1;
+    try {
+      const store = this.opts.identityStore;
+      if (!store) return;
+      if (store.getGeneration(identity.phoneKey) >= next) return;
+      store.setGeneration(identity.phoneKey, next);
+      this.opts.onLog('info', `display session ${session.sessionId} ended display-offline: display identity ${hex32(used)} ` +
+        `(generation ${usedGeneration}) is used up, generation ${next} saved for this phone (macOS keeps it switched off)`);
+    } catch (err) {
+      this.opts.onLog('warn', `display identity generation ${next} could not be saved after display-offline (the next session ` +
+        `escalates from generation ${identity.generation} again): ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
