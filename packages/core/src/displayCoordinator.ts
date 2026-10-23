@@ -39,6 +39,7 @@ export const DISPLAY_DEVICE_WAIT_MS = 10_000;
 export const DISPLAY_ERROR_REASONS: ReadonlySet<DisplayReason> = new Set<DisplayReason>([
   'unsupported', 'unsupported-host', 'no-device', 'permission-screen-recording', 'helper-crashed',
   'token-delivery-failed', 'port-in-use', 'capture-failed', 'capture-unavailable', 'protocol-error', 'version-mismatch',
+  'display-offline', 'mac-asleep',
 ]);
 
 function isDisplayReason(value: unknown): value is DisplayReason {

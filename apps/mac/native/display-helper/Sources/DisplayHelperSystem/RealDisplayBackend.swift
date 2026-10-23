@@ -33,6 +33,8 @@ public final class RealDisplayBackend: DisplayBackend {
 
     public func preflightPostEvent() -> Bool { CGPreflightPostEventAccess() }
 
+    public func mainDisplayAsleep() -> Bool { CGDisplayIsAsleep(CGMainDisplayID()) != 0 }
+
     public func createDisplay(maxPixels: Int, sizeInMillimeters: CGSize, serialNum: UInt32,
                               vendorId: UInt32, productId: UInt32) throws -> UInt32 {
         let vd = try VirtualDisplayController(maxPixels: maxPixels, sizeInMillimeters: sizeInMillimeters,

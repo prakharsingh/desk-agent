@@ -259,8 +259,9 @@ describe('DisplayCoordinator', () => {
 
   it('classifies exactly the Task 2.5 error reasons as errors', () => {
     expect([...DISPLAY_ERROR_REASONS].sort()).toEqual([
-      'capture-failed', 'capture-unavailable', 'helper-crashed', 'no-device', 'permission-screen-recording',
-      'port-in-use', 'protocol-error', 'token-delivery-failed', 'unsupported', 'unsupported-host', 'version-mismatch',
+      'capture-failed', 'capture-unavailable', 'display-offline', 'helper-crashed', 'mac-asleep', 'no-device',
+      'permission-screen-recording', 'port-in-use', 'protocol-error', 'token-delivery-failed', 'unsupported', 'unsupported-host',
+      'version-mismatch',
     ]);
   });
 

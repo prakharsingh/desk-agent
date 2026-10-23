@@ -277,6 +277,8 @@ describe('displayFlow', () => {
     expect(displayReasonCopy('protocol-error')).toBe('Update Desk Agent on the Mac and phone');
     expect(displayReasonCopy('capture-unavailable')).toBe("The Mac can't capture the display — check Screen Recording for Desk Agent");
     expect(displayReasonCopy('connect-failed')).toBe("Couldn't connect to the Mac's display — try again");
+    expect(displayReasonCopy('display-offline')).toBe('Desk Agent Phone is switched off on the Mac — turn it on in Control Center › Display while it connects');
+    expect(displayReasonCopy('mac-asleep')).toBe("The Mac's screen is asleep — wake and unlock it, then try again");
     expect(displayReasonCopy('whatever')).toBe('Display ended');
   });
 });

@@ -185,6 +185,10 @@ const REASON_COPY: Record<string, string> = {
   'surface-unavailable': "The phone screen couldn't be prepared — try again",
   'capture-unavailable': "The Mac can't capture the display — check Screen Recording for Desk Agent",
   'connect-failed': "Couldn't connect to the Mac's display — try again",
+  // macOS keeps the display out of the desktop (a persisted Control Center choice for this phone's
+  // serial). It only shows in Control Center while a session is connecting.
+  'display-offline': 'Desk Agent Phone is switched off on the Mac — turn it on in Control Center › Display while it connects',
+  'mac-asleep': "The Mac's screen is asleep — wake and unlock it, then try again",
 };
 
 export function displayReasonCopy(reason: string): string {

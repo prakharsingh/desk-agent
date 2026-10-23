@@ -6,6 +6,9 @@ import Foundation
 public protocol DisplayBackend: AnyObject {
     func preflightScreenRecording() -> Bool
     func preflightPostEvent() -> Bool
+    /// Whether the Mac's main display is asleep (`CGDisplayIsAsleep(CGMainDisplayID())`). Consulted
+    /// only to explain a start failure.
+    func mainDisplayAsleep() -> Bool
     /// Creates the virtual display (no modes yet; `applyModes` follows). Returns its display id.
     func createDisplay(maxPixels: Int, sizeInMillimeters: CGSize, serialNum: UInt32,
                        vendorId: UInt32, productId: UInt32) throws -> UInt32
@@ -172,7 +175,7 @@ public final class SessionController {
                 serialNum: start.serialNum, vendorId: start.vendorId, productId: start.productId)
         } catch {
             log("error", "createDisplay failed: \(error)")
-            return terminate(.unsupported)
+            return terminate(startFailureReason(.unsupported))
         }
         displayCreated = true
         backend.applyModes(DisplayModes.modes(surfaceW: w, surfaceH: h)) { [weak self] result in
@@ -181,8 +184,11 @@ public final class SessionController {
             case .success:
                 self.waitUntilCapturable()
             case .failure(let error):
-                self.log("error", "mode activation failed: \(error)")
-                self.terminate(.unsupported)
+                let offline = error as? BackendError == .displayOffline
+                self.log("error", offline
+                    ? "mode activation failed: the display stayed offline (macOS keeps Desk Agent Phone out of the desktop)"
+                    : "mode activation failed: \(error)")
+                self.terminate(self.startFailureReason(offline ? .displayOffline : .unsupported))
             }
         }
     }
@@ -200,6 +206,13 @@ public final class SessionController {
         }
     }
 
+    /// A display that could not be created or activated while the Mac's main display sleeps is
+    /// explained by the sleep (WindowServer defers display teardown then, leaving a same-serial
+    /// display registered); otherwise `reason`. Asked only on failure, so sleep never blocks a start.
+    private func startFailureReason(_ reason: EndReason) -> EndReason {
+        backend.mainDisplayAsleep() ? .macAsleep : reason
+    }
+
     /// Idempotent: sends `end{reason}` to an authenticated phone, closes connections, stops capture,
     /// destroys the display and emits `.ended(reason)`.
     public func stop(_ reason: EndReason) { terminate(reason) }
@@ -215,6 +228,7 @@ public final class SessionController {
     public static func endReason(for error: Error) -> EndReason {
         switch error as? BackendError {
         case .unsupported: return .unsupported
+        case .displayOffline: return .displayOffline
         case .captureUnavailable: return .captureUnavailable
         case .permissionDenied: return .permissionScreenRecording
         case .captureFailed, nil: return .captureFailed

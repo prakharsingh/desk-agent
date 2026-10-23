@@ -137,7 +137,7 @@ export const DISPLAY_REASONS = [
   'token-delivery-failed', 'superseded', 'mac-disconnect', 'stop-requested', 'phone-bye', 'watchdog',
   'connect-timeout', 'parent-exit', 'capture-failed', 'port-in-use', 'signal',
   'user-exit', 'link-lost', 'grace-expired', 'token-timeout', 'connect-failed', 'decoder-error', 'mac-not-connected', 'reply-timeout',
-  'version-mismatch', 'protocol-error', 'capture-unavailable',
+  'version-mismatch', 'protocol-error', 'capture-unavailable', 'display-offline', 'mac-asleep',
 ] as const;
 export type DisplayReason = (typeof DISPLAY_REASONS)[number];
 

@@ -8,6 +8,8 @@ public enum BackendError: Error, Equatable {
     case permissionDenied
     /// The stream / encoder failed after starting → `capture-failed`.
     case captureFailed(String)
+    /// The virtual display stayed offline for the whole mode-activation window → `display-offline`.
+    case displayOffline
 
     /// The error `waitUntilCapturable` reports when its timeout expires.
     public static func capturableTimeout(everOnline: Bool) -> BackendError {

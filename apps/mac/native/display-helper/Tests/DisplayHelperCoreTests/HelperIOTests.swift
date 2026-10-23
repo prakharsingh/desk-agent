@@ -55,6 +55,8 @@ import Testing
         #expect(EndReason.unsupported.rawValue == "unsupported")
         #expect(EndReason.signal.rawValue == "signal")
         #expect(EndReason.connectTimeout.rawValue == "connect-timeout")
+        #expect(EndReason.displayOffline.rawValue == "display-offline")
+        #expect(EndReason.macAsleep.rawValue == "mac-asleep")
     }
 
     @Test func eventsAreEquatable() {

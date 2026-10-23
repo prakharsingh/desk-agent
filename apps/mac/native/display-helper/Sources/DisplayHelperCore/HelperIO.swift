@@ -59,6 +59,12 @@ public enum EndReason: String, Encodable, Equatable, Sendable {
     case captureUnavailable = "capture-unavailable"
     case protocolError = "protocol-error"
     case versionMismatch = "version-mismatch"
+    /// Created, but macOS kept it out of the desktop (offline) for the whole activation window: it has
+    /// this display (vendor/product/serial) persisted as not extending the desktop, e.g. set to
+    /// Control Center's independent output (F1).
+    case displayOffline = "display-offline"
+    /// The display could not be created or activated while the Mac's main display was asleep (F2).
+    case macAsleep = "mac-asleep"
 }
 
 public struct StatsEvent: Encodable, Equatable, Sendable {

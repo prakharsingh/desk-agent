@@ -85,6 +85,27 @@ import Testing
         #expect(p.record(.notListed) == .failed(.modeSwitchFailed(1001)))
     }
 
+    /// F1: macOS kept the display out of the desktop (Control Center "independent output" persisted
+    /// for this vendor/product/serial) for the whole window.
+    @Test func offlineForTheWholeWindowFailsDisplayOffline() {
+        var p = ActivationPoll()
+        for _ in 1..<ActivationPoll.maxAttempts { #expect(p.record(.offline) == .retry) }
+        #expect(p.record(.offline) == .failed(.displayOffline))
+    }
+
+    @Test func onlineOnceButNeverListedStillFailsModeUnavailable() {
+        var p = ActivationPoll()
+        #expect(p.record(.notListed) == .retry)
+        for _ in 2..<ActivationPoll.maxAttempts { #expect(p.record(.offline) == .retry) }
+        #expect(p.record(.offline) == .failed(.modeUnavailable))
+    }
+
+    @Test func offlineThenOnlineAndSwitchedFinishes() {
+        var p = ActivationPoll()
+        for _ in 0..<5 { #expect(p.record(.offline) == .retry) }
+        #expect(p.record(.switchSucceeded) == .finished)
+    }
+
     @Test func aLateSuccessFinishes() {
         var p = ActivationPoll()
         for _ in 0..<10 { #expect(p.record(.notListed) == .retry) }

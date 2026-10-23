@@ -41,6 +41,7 @@ describe('displayHelperProtocol', () => {
     for (const reason of [
       'stop-requested', 'phone-bye', 'watchdog', 'connect-timeout', 'parent-exit', 'unsupported', 'capture-unavailable',
       'permission-screen-recording', 'capture-failed', 'port-in-use', 'signal', 'protocol-error', 'version-mismatch',
+      'display-offline', 'mac-asleep',
     ]) {
       expect(parseHelperEventLine(JSON.stringify({ evt: 'ended', reason }))).toEqual({ evt: 'ended', reason });
     }

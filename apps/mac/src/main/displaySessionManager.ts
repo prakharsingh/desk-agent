@@ -48,6 +48,7 @@ export interface DisplayStartRequest {
 export const HELPER_ERROR_REASONS: ReadonlySet<DisplayReason> = new Set<DisplayReason>([
   'unsupported', 'unsupported-host', 'no-device', 'permission-screen-recording',
   'token-delivery-failed', 'port-in-use', 'capture-failed', 'capture-unavailable', 'protocol-error', 'version-mismatch',
+  'display-offline', 'mac-asleep',
 ]);
 
 // Core's adb delivery (displayCoordinator) rejects any other token shape.

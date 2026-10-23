@@ -16,7 +16,7 @@ describe('display frames', () => {
   it('exposes the display constants and leaves PROTOCOL_VERSION alone', () => {
     expect(DISPLAY_VIDEO_PORT).toBe(8788);
     expect(PROTOCOL_VERSION).toBe(1);
-    expect(DISPLAY_REASONS).toEqual(expect.arrayContaining(['version-mismatch', 'protocol-error', 'capture-unavailable']));
+    expect(DISPLAY_REASONS).toEqual(expect.arrayContaining(['version-mismatch', 'protocol-error', 'capture-unavailable', 'display-offline', 'mac-asleep']));
   });
 
   it('accepts display.start, with or without dpi', () => {

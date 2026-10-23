@@ -71,6 +71,8 @@ public struct ActivationPoll {
         case notListed
         /// CGConfigureDisplayWithDisplayMode / CGCompleteDisplayConfiguration failed with this CGError.
         case switchFailed(Int32)
+        /// The display is not online (`CGDisplayIsOnline` false), so nothing was decided or configured.
+        case offline
     }
 
     public enum Failure: Error, Equatable {
@@ -78,6 +80,8 @@ public struct ActivationPoll {
         case modeUnavailable
         /// It appeared, but switching to it kept failing (the last CGError).
         case modeSwitchFailed(Int32)
+        /// The display was offline on every attempt: macOS keeps it out of the desktop.
+        case displayOffline
     }
 
     public enum Next: Equatable {
@@ -88,6 +92,7 @@ public struct ActivationPoll {
 
     public private(set) var attempts = 0
     private var sawTarget = false
+    private var sawOnline = false
     private var lastError: Int32 = 0
 
     public init() {}
@@ -98,12 +103,16 @@ public struct ActivationPoll {
         case .kept, .switchSucceeded:
             return .finished
         case .switchFailed(let err):
+            sawOnline = true
             sawTarget = true
             lastError = err
         case .notListed:
+            sawOnline = true
+        case .offline:
             break
         }
         guard attempts >= Self.maxAttempts else { return .retry }
+        guard sawOnline else { return .failed(.displayOffline) }
         return .failed(sawTarget ? .modeSwitchFailed(lastError) : .modeUnavailable)
     }
 }

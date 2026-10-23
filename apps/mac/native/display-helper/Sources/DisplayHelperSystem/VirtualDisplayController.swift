@@ -100,6 +100,9 @@ public final class VirtualDisplayController {
     /// One activation attempt: keep a HiDPI mode of ours that is already active, otherwise switch
     /// (permanently) to the first usable applied mode.
     private static func attemptActivation(displayId: UInt32, applied: [ModeSpec]) -> ActivationPoll.Attempt {
+        // An offline display (macOS keeps it out of the desktop, e.g. a persisted Control Center
+        // "independent output" for this serial) is never configured: report it instead.
+        guard CGDisplayIsOnline(displayId) != 0 else { return .offline }
         let modes = allModes(displayId)
         let current = CGDisplayCopyDisplayMode(displayId).map(info)
         switch ModeActivation.decide(current: current, available: modes.map(info), applied: applied) {
@@ -126,7 +129,8 @@ public final class VirtualDisplayController {
     /// (`ActivationPoll`) on `activationQueue` — never on the session queue — until a HiDPI mode of
     /// ours is active. The mode list can lag behind applySettings and a fresh display may reject
     /// configuration briefly, so "none available" and failed switches are retried; expiry fails with
-    /// `modeSwitchFailed` / `modeUnavailable`. `destroy()` cancels the poll (`destroyed`).
+    /// `modeSwitchFailed` / `modeUnavailable`, or `BackendError.displayOffline` when the display was
+    /// offline on every attempt. `destroy()` cancels the poll (`destroyed`).
     private func activatePreferredMode(applied: [ModeSpec], deliverOn queue: DispatchQueue,
                                        completion: @escaping (Result<Void, Error>) -> Void) {
         let displayId = self.displayId
@@ -144,6 +148,8 @@ public final class VirtualDisplayController {
                 queue.async { completion(.failure(VirtualDisplayError.modeUnavailable)) }
             case .failed(.modeSwitchFailed(let err)):
                 queue.async { completion(.failure(VirtualDisplayError.modeSwitchFailed(err))) }
+            case .failed(.displayOffline):
+                queue.async { completion(.failure(BackendError.displayOffline)) }
             }
         }
         pollQueue.async { attempt() }

@@ -12,6 +12,8 @@ final class FakeBackend: DisplayBackend {
     var startError: Error?
     var applyError: Error?
     var widthPoints = 936   // 2340 / 2.5 — the 6T at the default preferred divisor
+    var mainAsleep = false
+    var mainAsleepCalls = 0
 
     var createCalls = 0
     var createArgs: (maxPixels: Int, size: CGSize)?
@@ -37,6 +39,7 @@ final class FakeBackend: DisplayBackend {
 
     func preflightScreenRecording() -> Bool { screenRecording }
     func preflightPostEvent() -> Bool { postEvent }
+    func mainDisplayAsleep() -> Bool { mainAsleepCalls += 1; return mainAsleep }
     func createDisplay(maxPixels: Int, sizeInMillimeters: CGSize, serialNum: UInt32,
                        vendorId: UInt32, productId: UInt32) throws -> UInt32 {
         createCalls += 1
@@ -278,6 +281,59 @@ final class Harness {
         #expect(h.sink.ended.count == 1)
         #expect(!h.sink.events.contains(.ready(displayId: 7, port: 8788)))
         #expect(h.backend.destroyCalls == 0)
+    }
+
+    // MARK: begin() — accurate start-failure reasons (F1, F2)
+
+    @Test func initialActivationOfflineEndsDisplayOffline() {
+        let h = Harness()
+        h.backend.deferApply = true
+        h.ctrl.begin()
+        h.backend.completeApply(.failure(BackendError.displayOffline))
+        #expect(h.sink.ended == [.ended(.displayOffline)])
+        #expect(h.backend.destroyCalls == 1)
+        #expect(h.backend.waitTimeout == nil)
+    }
+
+    @Test func initialActivationFailureWhileTheMacSleepsEndsMacAsleep() {
+        let h = Harness()
+        h.backend.deferApply = true
+        h.backend.mainAsleep = true
+        h.ctrl.begin()
+        h.backend.completeApply(.failure(BackendError.displayOffline))
+        #expect(h.sink.ended == [.ended(.macAsleep)])
+        #expect(h.backend.destroyCalls == 1)
+    }
+
+    @Test func otherInitialActivationFailuresStayUnsupportedWhileAwake() {
+        let h = Harness()
+        h.backend.deferApply = true
+        h.ctrl.begin()
+        h.backend.completeApply(.failure(BackendError.unsupported))
+        #expect(h.sink.ended == [.ended(.unsupported)])
+    }
+
+    @Test func createDisplayThrowWhileTheMacSleepsEndsMacAsleep() {
+        let h = Harness()
+        h.backend.mainAsleep = true
+        h.backend.createError = BackendError.unsupported
+        h.ctrl.begin()
+        #expect(h.sink.ended == [.ended(.macAsleep)])
+        #expect(h.backend.destroyCalls == 0)
+    }
+
+    @Test func aSleepingMacDoesNotBlockASessionThatStarts() {
+        // Sleep only explains a failure; it never pre-empts a display that comes up fine.
+        let h = Harness()
+        h.backend.mainAsleep = true
+        h.ctrl.begin()
+        h.backend.waitCompletion?(.success(()))
+        #expect(h.sink.events == [.ready(displayId: 7, port: 8788)])
+        #expect(h.backend.mainAsleepCalls == 0)
+    }
+
+    @Test func displayOfflineMapsToItsOwnReason() {
+        #expect(SessionController.endReason(for: BackendError.displayOffline) == .displayOffline)
     }
 
     @Test func unsupportedWhenDisplayNeverAppears() {

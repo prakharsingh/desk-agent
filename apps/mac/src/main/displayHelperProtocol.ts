@@ -30,6 +30,7 @@ export type HelperEvent =
 const HELPER_END_REASONS: ReadonlySet<string> = new Set([
   'stop-requested', 'phone-bye', 'watchdog', 'connect-timeout', 'parent-exit', 'unsupported', 'capture-unavailable',
   'permission-screen-recording', 'capture-failed', 'port-in-use', 'signal', 'protocol-error', 'version-mismatch',
+  'display-offline', 'mac-asleep',
 ]);
 
 const STATS_KEYS = ['fps', 'kbps', 'unacked', 'ackP50Ms', 'ackP95Ms', 'phoneRendered', 'phoneDropped'] as const;
