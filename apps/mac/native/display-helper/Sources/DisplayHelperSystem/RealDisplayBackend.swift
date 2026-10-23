@@ -35,6 +35,8 @@ public final class RealDisplayBackend: DisplayBackend {
 
     public func mainDisplayAsleep() -> Bool { CGDisplayIsAsleep(CGMainDisplayID()) != 0 }
 
+    public func displayIsOnline() -> Bool { display.map { CGDisplayIsOnline($0.displayId) != 0 } ?? false }
+
     public func createDisplay(maxPixels: Int, sizeInMillimeters: CGSize, serialNum: UInt32,
                               vendorId: UInt32, productId: UInt32) throws -> UInt32 {
         let vd = try VirtualDisplayController(maxPixels: maxPixels, sizeInMillimeters: sizeInMillimeters,

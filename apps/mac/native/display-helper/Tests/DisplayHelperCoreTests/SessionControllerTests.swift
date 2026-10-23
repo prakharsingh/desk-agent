@@ -14,6 +14,8 @@ final class FakeBackend: DisplayBackend {
     var widthPoints = 936   // 2340 / 2.5 — the 6T at the default preferred divisor
     var mainAsleep = false
     var mainAsleepCalls = 0
+    /// `displayIsOnline()`: false once macOS took the display out of the desktop.
+    var online = true
 
     var createCalls = 0
     var createArgs: (maxPixels: Int, size: CGSize)?
@@ -44,6 +46,7 @@ final class FakeBackend: DisplayBackend {
     func preflightScreenRecording() -> Bool { screenRecording }
     func preflightPostEvent() -> Bool { postEvent }
     func mainDisplayAsleep() -> Bool { mainAsleepCalls += 1; return mainAsleep }
+    func displayIsOnline() -> Bool { online }
     func createDisplay(maxPixels: Int, sizeInMillimeters: CGSize, serialNum: UInt32,
                        vendorId: UInt32, productId: UInt32) throws -> UInt32 {
         createCalls += 1
@@ -1210,6 +1213,70 @@ final class Harness {
         _ = b.authed()
         b.ctrl.captureError(BackendError.unsupported)
         #expect(b.ctrl.endedReason == .unsupported)
+    }
+
+    // MARK: switched off mid-session (display-offline, not capture-failed)
+
+    @Test func aCaptureFailureOnADisplaySwitchedOffEndsDisplayOffline() {
+        let h = Harness()
+        let (c, _) = h.authed()
+        h.backend.online = false
+        h.ctrl.captureError(BackendError.captureFailed("stream stopped"))
+        #expect(h.ctrl.endedReason == .displayOffline)
+        #expect(c.json.contains { $0["t"] as? String == "end" && $0["reason"] as? String == "display-offline" })
+        #expect(h.sink.logs(level: "warn").contains { $0.contains("switched off") })
+    }
+
+    @Test func aCaptureFailureOnAnOnlineDisplayStaysCaptureFailed() {
+        let h = Harness()
+        _ = h.authed()
+        h.ctrl.captureError(BackendError.captureFailed("stream stopped"))
+        #expect(h.ctrl.endedReason == .captureFailed)
+    }
+
+    @Test func revokedScreenRecordingWinsOverAnOfflineDisplay() {
+        let h = Harness()
+        _ = h.authed()
+        h.backend.online = false
+        h.ctrl.captureError(BackendError.permissionDenied)
+        #expect(h.ctrl.endedReason == .permissionScreenRecording)
+    }
+
+    @Test func aReconfigurationThatSwitchesTheDisplayOffEndsDisplayOffline() {
+        let h = Harness()
+        _ = h.authed()
+        h.backend.online = false
+        h.ctrl.displayReconfigured()
+        #expect(h.ctrl.endedReason == .displayOffline)
+        #expect(h.backend.destroyCalls == 1)
+    }
+
+    @Test func aDisplaySwitchedOffWhilePausedEndsDisplayOffline() {
+        let h = Harness()
+        let (_, id) = h.authed()
+        h.ctrl.receive(jsonFrame(#"{"t":"pause"}"#), on: id)
+        h.backend.online = false
+        h.ctrl.displayReconfigured()
+        #expect(h.ctrl.endedReason == .displayOffline)
+    }
+
+    @Test func aDisplaySwitchedOffAfterReadyBeforeHelloEndsDisplayOffline() {
+        let h = Harness().ready()
+        h.backend.online = false
+        h.ctrl.displayReconfigured()
+        #expect(h.ctrl.endedReason == .displayOffline)
+    }
+
+    @Test func anOfflineReconfigurationBeforeReadyLeavesEscalationToActivation() {
+        // During the start the offline state is ActivationPoll's call (it escalates identities).
+        let h = Harness()
+        h.backend.deferApply = true
+        h.ctrl.begin()
+        h.backend.online = false
+        h.ctrl.displayReconfigured()
+        #expect(h.ctrl.endedReason == nil)
+        h.backend.completeApply(.failure(BackendError.displayOffline))
+        #expect(h.backend.createCalls == 2)
     }
 
     @Test func nonBackendErrorMapsToCaptureFailed() {

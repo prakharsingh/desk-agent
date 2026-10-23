@@ -222,6 +222,16 @@ class DisplaySessionMachineTest {
         }
     }
 
+    @Test fun `helper end with display-offline mid-session is reported as an error`() {
+        // macOS switched the display off (Control Center): the phone shows why instead of going home.
+        val m = m().toStreaming()
+        assertEquals(
+            listOf(CloseLink, ReleaseDecoder, ClearToken, Emit("error", "display-offline")),
+            m.handle(SessionInput.HelperEnd("display-offline")),
+        )
+        assertEquals(SessionState.Ended("display-offline"), m.state)
+    }
+
     @Test fun `helper end with an ordinary reason closes the link and reports ended`() {
         val m = m().toStreaming()
         assertEquals(

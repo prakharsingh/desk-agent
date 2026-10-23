@@ -193,6 +193,7 @@ class DisplaySessionMachine(private val tokenWaitMs: Long = 5000) {
 
     private companion object {
         val LINK_ERRORS = setOf(VideoLink.REASON_CONNECT_FAILED, VideoLink.REASON_PROTOCOL_ERROR)
-        val HELPER_ERRORS = setOf("version-mismatch", VideoLink.REASON_PROTOCOL_ERROR, "capture-failed", "capture-unavailable")
+        // display-offline: macOS switched the display off mid-session (Control Center); shown, not a silent exit.
+        val HELPER_ERRORS = setOf("version-mismatch", VideoLink.REASON_PROTOCOL_ERROR, "capture-failed", "capture-unavailable", "display-offline")
     }
 }

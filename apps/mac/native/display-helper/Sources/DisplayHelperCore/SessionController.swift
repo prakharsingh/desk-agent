@@ -9,6 +9,9 @@ public protocol DisplayBackend: AnyObject {
     /// Whether the Mac's main display is asleep (`CGDisplayIsAsleep(CGMainDisplayID())`). Consulted
     /// only to explain a start failure.
     func mainDisplayAsleep() -> Bool
+    /// Whether our virtual display is still part of the desktop (`CGDisplayIsOnline`). Consulted after
+    /// `ready`, on a capture failure or a reconfiguration, to tell "switched off" from a capture fault.
+    func displayIsOnline() -> Bool
     /// Creates the virtual display (no modes yet; `applyModes` follows). Returns its display id.
     func createDisplay(maxPixels: Int, sizeInMillimeters: CGSize, serialNum: UInt32,
                        vendorId: UInt32, productId: UInt32) throws -> UInt32
@@ -124,6 +127,8 @@ public final class SessionController {
 
     private var begun = false
     private var beganAt: TimeInterval = 0
+    /// `ready` was emitted: from then on a display macOS switches off ends the session `display-offline`.
+    private var readySent = false
     private var displayCreated = false
     private var displayId: UInt32 = 0
     private var deadline: ConnectDeadline?          // non-nil from `ready` until authenticated
@@ -264,6 +269,7 @@ public final class SessionController {
             switch result {
             case .success:
                 self.deadline = ConnectDeadline(createdAt: self.now(), timeout: Self.connectDeadline)
+                self.readySent = true
                 self.sink.emit(.ready(displayId: self.displayId, port: self.start.port, serialNum: serialNum))
             case .failure(let error):
                 self.terminate(Self.endReason(for: error))
@@ -286,7 +292,20 @@ public final class SessionController {
     public func captureError(_ error: Error) {
         guard endedReason == nil else { return }
         log("error", "capture error: \(error)")
-        terminate(Self.endReason(for: error))
+        // macOS switching the display off (Control Center) stops the stream first; name the real cause.
+        // Revoked Screen Recording keeps its own reason.
+        let reason = Self.endReason(for: error)
+        if reason == .captureFailed, endIfSwitchedOff() { return }
+        terminate(reason)
+    }
+
+    /// After `ready`, a display macOS took out of the desktop ends the session `display-offline`.
+    /// Returns whether it did. Before `ready`, ActivationPoll owns the offline state (it escalates).
+    private func endIfSwitchedOff() -> Bool {
+        guard readySent, displayCreated, !backend.displayIsOnline() else { return false }
+        log("warn", "macOS switched off Desk Agent Phone during the session (it left the desktop)")
+        terminate(.displayOffline)
+        return true
     }
 
     /// BackendError → Contract C `ended` reason. Anything else is a capture failure.
@@ -597,6 +616,7 @@ public final class SessionController {
     /// echo; capture already started on the new mode) or before hello: bounds only.
     public func displayReconfigured() {
         guard endedReason == nil, displayCreated else { return }
+        if endIfSwitchedOff() { return }
         onBoundsChanged?(backend.displayBounds())
         captureTargetStale = true
         guard capturing, now() >= reconfigurationQuietUntil else { return }
