@@ -18,8 +18,14 @@ import {
 } from '../displayFlow.js';
 import { DisplayView, displayNative, subscribeDisplayEvents } from '../displayNative.js';
 import {
+  INITIAL_HINT,
   INITIAL_ROTATE,
   ROTATE_LABEL,
+  asPlacementSide,
+  hintOnFlow,
+  hintTicked,
+  placementHintCopy,
+  type HintState,
   ROTATING_COPY,
   TOUCH_OFF_BANNER,
   rotateButtonVisible,
@@ -131,6 +137,17 @@ export function DisplayScreen({ lastSession, seenSessionIds, getDisplaySeq, json
     setRotateState(next);
   }, []);
   const surfaceOrientationRef = useRef<DisplayOrientation | null>(null);
+  // For the placement hint's portrait tip.
+  const [surfaceOrientation, setSurfaceOrientation] = useState<DisplayOrientation>('landscape');
+
+  // The one-time placement hint (displayOverlay.ts).
+  const [hint, setHintState] = useState<HintState>(INITIAL_HINT);
+  const hintRef = useRef<HintState>(INITIAL_HINT);
+  const setHint = useCallback((next: HintState) => {
+    if (next === hintRef.current) return;
+    hintRef.current = next;
+    setHintState(next);
+  }, []);
   const onRotatePress = useCallback(() => {
     const current = surfaceOrientationRef.current;
     if (current === null) return;
@@ -194,6 +211,7 @@ export function DisplayScreen({ lastSession, seenSessionIds, getDisplaySeq, json
     const unsubscribe = subscribeDisplayEvents({
         onSize: (size) => {
           surfaceOrientationRef.current = size.orientation;
+          setSurfaceOrientation(size.orientation);
           dispatch({
             type: 'surfaceSize',
             size,
@@ -205,7 +223,16 @@ export function DisplayScreen({ lastSession, seenSessionIds, getDisplaySeq, json
           const next = rotateStreamed(rotateRef.current, e.orientation);
           if (next !== rotateRef.current) setRotate(next);
         },
-        onState: (e) => dispatch({ type: 'nativeState', state: e.state as NativeStateEvent['state'], reason: e.reason, inputEnabled: e.inputEnabled }),
+        onState: (e) => {
+          const side = asPlacementSide(e.side);
+          dispatch({
+            type: 'nativeState',
+            state: e.state as NativeStateEvent['state'],
+            reason: e.reason,
+            inputEnabled: e.inputEnabled,
+            ...(side !== undefined ? { side } : {}),
+          });
+        },
     });
     // The surface may have reported its size before we subscribed.
     displayNative.requestSize();
@@ -219,9 +246,15 @@ export function DisplayScreen({ lastSession, seenSessionIds, getDisplaySeq, json
       dispatch({ type: 'tick', now });
       const next = rotateTicked(rotateRef.current, now);
       if (next !== rotateRef.current) setRotate(next);
+      setHint(hintTicked(hintRef.current, now));
     }, TICK_MS);
     return () => clearInterval(id);
-  }, [dispatch, setRotate]);
+  }, [dispatch, setRotate, setHint]);
+
+  // Once per session, as soon as it streams.
+  useEffect(() => {
+    setHint(hintOnFlow(hintRef.current, flow, Date.now()));
+  }, [flow, setHint]);
 
   // A rotate-control lock lasts for the session only.
   useEffect(() => {
@@ -344,8 +377,13 @@ export function DisplayScreen({ lastSession, seenSessionIds, getDisplaySeq, json
     <View style={styles.root}>
       <DisplayView style={StyleSheet.absoluteFill} />
       <OverlaySlot testID="display-touch-banner" visible={touchBannerVisible(flow)} style={styles.touchBanner}>
-        <Text style={styles.slotText} numberOfLines={2}>
+        <Text style={styles.slotText} numberOfLines={3}>
           {TOUCH_OFF_BANNER}
+        </Text>
+      </OverlaySlot>
+      <OverlaySlot testID="display-placement-hint" visible={hint.visible} style={styles.placementHint}>
+        <Text style={styles.slotText} numberOfLines={3}>
+          {placementHintCopy(flow.phase === 'streaming' ? flow.side : undefined, surfaceOrientation)}
         </Text>
       </OverlaySlot>
       <OverlaySlot testID="display-rotating" visible={rotate.rotatingTo !== null} style={styles.rotating}>
@@ -428,8 +466,11 @@ const styles = StyleSheet.create({
   },
   slotText: { fontSize: 12, color: theme.colors.text, fontFamily: theme.font.regular, textAlign: 'center' },
   slotPress: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' },
-  // Bottom centre, one or two lines; the video above it stays visible.
-  touchBanner: { bottom: 28, alignSelf: 'center', width: 300, height: 48 },
+  // Bottom, full width minus a 16 gutter and up to three lines, so the copy is never cut off on the narrow
+  // portrait phone; the video above it stays visible.
+  touchBanner: { bottom: 28, left: 16, right: 16, height: 56 },
+  // Above the touch banner. Never takes touches (M3): a tap on it reaches the Mac; it auto-hides.
+  placementHint: { bottom: 92, left: 16, right: 16, height: 64, borderRadius: theme.radii.card },
   // Centre, while the Mac switches the display mode after a rotate tap.
   rotating: { top: '50%', marginTop: -18, alignSelf: 'center', width: 140, height: 36 },
   // Top-right, inset 40 from the side (outside the back-gesture strip) and 24 from the top (status-bar pull):

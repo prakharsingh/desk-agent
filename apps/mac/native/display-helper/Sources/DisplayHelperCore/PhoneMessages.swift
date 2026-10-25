@@ -120,7 +120,9 @@ public enum PhoneMessage: Equatable, Sendable {
 }
 
 public enum HelperMessage: Encodable, Equatable, Sendable {
-    case helloAck(inputEnabled: Bool)
+    /// `side` (additive, omitted when nil): where Desk Agent Phone is arranged relative to the main display
+    /// (`DisplayArrangement.Side` raw value), for the phone's one-time "drag a window off the … edge" hint.
+    case helloAck(inputEnabled: Bool, side: String? = nil)
     /// Additive (an older phone ignores the unknown `t`): Accessibility (PostEvent) was granted or revoked
     /// mid-session, so touch input is now on or off. Same flag semantics as `helloAck.inputEnabled`.
     case inputState(inputEnabled: Bool)
@@ -128,14 +130,15 @@ public enum HelperMessage: Encodable, Equatable, Sendable {
     case keepalive
     case end(reason: String)
 
-    enum CodingKeys: String, CodingKey { case t, inputEnabled, w, h, reason }
+    enum CodingKeys: String, CodingKey { case t, inputEnabled, side, w, h, reason }
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case .helloAck(let enabled):
+        case .helloAck(let enabled, let side):
             try c.encode("helloAck", forKey: .t)
             try c.encode(enabled, forKey: .inputEnabled)
+            try c.encodeIfPresent(side, forKey: .side)
         case .inputState(let enabled):
             try c.encode("inputState", forKey: .t)
             try c.encode(enabled, forKey: .inputEnabled)

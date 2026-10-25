@@ -9,7 +9,7 @@ import com.facebook.react.bridge.ReactMethod
 
 /**
  * JS surface of the phone extended display (`NativeModules.DisplayModule`).
- * Events (`DeviceEventEmitter`): `DisplayState` `{ state, reason?, inputEnabled? }`,
+ * Events (`DeviceEventEmitter`): `DisplayState` `{ state, reason?, inputEnabled?, side? }`,
  * `DisplaySurfaceSize` `{ w, h, orientation, dpi }` and `DisplayStreamSize` `{ w, h, orientation }` (each
  * helper `streamConfig`: the size the Mac now streams).
  * All work is queued onto the display-session thread; nothing here blocks the JS thread.
@@ -98,6 +98,7 @@ class DisplayModule(
             put("state", e.state)
             e.reason?.let { put("reason", it) }
             e.inputEnabled?.let { put("inputEnabled", it) }
+            e.side?.let { put("side", it) }
         }
 
         fun requestedOrientationFor(mode: String): Int? = when (mode) {

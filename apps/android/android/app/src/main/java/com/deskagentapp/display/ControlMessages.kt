@@ -7,7 +7,8 @@ import org.json.JSONObject
 fun orientationOf(w: Int, h: Int): String = if (w >= h) "landscape" else "portrait"
 
 sealed class HelperMessage {
-    data class HelloAck(val inputEnabled: Boolean) : HelperMessage()
+    /** [side]: additive, where Desk Agent Phone sits relative to the Mac's main display (left/right/above/below). */
+    data class HelloAck(val inputEnabled: Boolean, val side: String? = null) : HelperMessage()
     /** Additive: Accessibility was granted or revoked on the Mac mid-session (same flag as [HelloAck]). */
     data class InputState(val inputEnabled: Boolean) : HelperMessage()
     data class StreamConfig(val w: Int, val h: Int) : HelperMessage()
@@ -18,6 +19,9 @@ sealed class HelperMessage {
 
 /** Contract D JSON messages (phone -> helper builders, helper -> phone parser). */
 object ControlMessages {
+    /** `helloAck.side` values; anything else is ignored (forward compatible). */
+    val SIDES = setOf("left", "right", "above", "below")
+
     private fun msg(t: String, build: JSONObject.() -> Unit = {}): String =
         JSONObject().apply { put("t", t); build() }.toString()
 
@@ -79,7 +83,7 @@ object ControlMessages {
             val j = JSONObject(text)
             val t = j.opt("t") as? String ?: throw ProtocolException("missing string t")
             return when (t) {
-                "helloAck" -> HelperMessage.HelloAck(j.getBoolean("inputEnabled"))
+                "helloAck" -> HelperMessage.HelloAck(j.getBoolean("inputEnabled"), (j.opt("side") as? String)?.takeIf { it in SIDES })
                 "inputState" -> HelperMessage.InputState(j.getBoolean("inputEnabled"))
                 "streamConfig" -> HelperMessage.StreamConfig(j.getInt("w"), j.getInt("h"))
                 "keepalive" -> HelperMessage.Keepalive

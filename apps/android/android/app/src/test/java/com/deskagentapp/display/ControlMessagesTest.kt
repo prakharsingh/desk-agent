@@ -17,6 +17,14 @@ class ControlMessagesTest {
         assertEquals(HelperMessage.HelloAck(true), ControlMessages.parse("""{"t":"helloAck","inputEnabled":true,"future":1}"""))
     }
 
+    @Test fun `helloAck carries the additive side, and only a known one`() {
+        assertEquals(HelperMessage.HelloAck(true, "left"), ControlMessages.parse("""{"t":"helloAck","inputEnabled":true,"side":"left"}"""))
+        assertEquals(HelperMessage.HelloAck(false, "below"), ControlMessages.parse("""{"t":"helloAck","inputEnabled":false,"side":"below"}"""))
+        assertEquals(HelperMessage.HelloAck(true, null), ControlMessages.parse("""{"t":"helloAck","inputEnabled":true,"side":"diagonal"}"""))
+        assertEquals(HelperMessage.HelloAck(true, null), ControlMessages.parse("""{"t":"helloAck","inputEnabled":true,"side":3}"""))
+        assertEquals(HelperMessage.HelloAck(true, null), ControlMessages.parse("""{"t":"helloAck","inputEnabled":true}"""))
+    }
+
     @Test fun `parses the additive inputState`() {
         assertEquals(HelperMessage.InputState(true), ControlMessages.parse("""{"t":"inputState","inputEnabled":true}"""))
         assertEquals(HelperMessage.InputState(false), ControlMessages.parse("""{"t":"inputState","inputEnabled":false}"""))

@@ -42,6 +42,8 @@ public protocol DisplayBackend: AnyObject {
     func refreshCaptureTarget(completion: @escaping (Result<Void, BackendError>) -> Void)
     func currentWidthPoints() -> Int
     func displayBounds() -> CGRect
+    /// The Mac's main display bounds (`CGDisplayBounds(CGMainDisplayID())`, read-only), for the placement hint.
+    func mainDisplayBounds() -> CGRect
     func destroyDisplay()
 }
 
@@ -591,7 +593,8 @@ public final class SessionController {
         lastInputCheckAt = t
 
         sink.emit(.connected)
-        send(.helloAck(inputEnabled: inputEnabled), to: conn)
+        let side = DisplayArrangement.side(of: backend.displayBounds(), main: backend.mainDisplayBounds())
+        send(.helloAck(inputEnabled: inputEnabled, side: side?.rawValue), to: conn)
 
         var modes: [ModeSpec]?
         if hello.surfaceW != start.surfaceW || hello.surfaceH != start.surfaceH {

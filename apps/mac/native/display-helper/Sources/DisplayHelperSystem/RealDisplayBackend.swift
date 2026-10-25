@@ -107,6 +107,8 @@ public final class RealDisplayBackend: DisplayBackend {
     public func currentWidthPoints() -> Int { display?.currentWidthPoints() ?? 0 }
     public func displayBounds() -> CGRect { display?.bounds() ?? .zero }
 
+    public func mainDisplayBounds() -> CGRect { CGDisplayBounds(CGMainDisplayID()) }
+
     /// Idempotent: stops capture first so nothing keeps streaming a display that is going away.
     public func destroyDisplay() {
         encoder.stop()

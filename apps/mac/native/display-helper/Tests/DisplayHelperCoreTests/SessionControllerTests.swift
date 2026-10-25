@@ -161,6 +161,9 @@ final class FakeBackend: DisplayBackend {
     /// Overrides `displayBounds()` (e.g. after the user moved the display in the arrangement).
     var bounds: CGRect?
     func displayBounds() -> CGRect { bounds ?? CGRect(x: 0, y: 0, width: widthPoints, height: 432) }
+    /// The Mac's main display (global points). Default: right of the default `displayBounds()`.
+    var mainBounds = CGRect(x: 936, y: 0, width: 1512, height: 982)
+    func mainDisplayBounds() -> CGRect { mainBounds }
     func destroyDisplay() { destroyCalls += 1; log.append("destroyDisplay") }
 }
 
@@ -1991,6 +1994,32 @@ final class Harness {
         #expect(h.ctrl.endedReason == nil)
         #expect(!c.closed)
         #expect(h.sink.logs.count == 1)   // logged once, not per event
+    }
+
+    // MARK: Placement hint (helloAck.side)
+
+    @Test func helloAckNamesTheSideOfTheMainDisplayWeAreOn() {
+        let h = Harness()
+        h.backend.bounds = CGRect(x: -540, y: -50, width: 540, height: 1130)
+        h.backend.mainBounds = CGRect(x: 0, y: 0, width: 1512, height: 982)
+        let (c, _) = h.authed()
+        #expect(c.json.first?["t"] as? String == "helloAck")
+        #expect(c.json.first?["side"] as? String == "left")
+    }
+
+    @Test func helloAckOmitsTheSideWhenThereIsNone() {
+        let h = Harness()
+        h.backend.mainBounds = h.backend.displayBounds()   // we are the main display
+        let (c, _) = h.authed()
+        #expect(c.json.first?["side"] == nil)
+        #expect(c.json.first?["inputEnabled"] as? Bool == true)
+    }
+
+    @Test func helloAckEncodesSideOnlyWhenPresent() throws {
+        let with = try JSONSerialization.jsonObject(with: JSONEncoder().encode(HelperMessage.helloAck(inputEnabled: false, side: "below"))) as? [String: Any]
+        #expect(with?["side"] as? String == "below")
+        let without = try JSONSerialization.jsonObject(with: JSONEncoder().encode(HelperMessage.helloAck(inputEnabled: false))) as? [String: Any]
+        #expect(without?.keys.sorted() == ["inputEnabled", "t"])
     }
 
     // MARK: Accessibility (PostEvent) re-check mid-session

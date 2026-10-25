@@ -4,7 +4,8 @@ sealed class SessionState {
     object Idle : SessionState()
     data class AwaitingToken(val sessionId: String, val port: Int, val deadlineMs: Long) : SessionState()
     data class Connecting(val sessionId: String) : SessionState()
-    data class Streaming(val sessionId: String, val inputEnabled: Boolean) : SessionState()
+    /** [side]: from helloAck, for the JS placement hint; re-emitted with every streaming state. */
+    data class Streaming(val sessionId: String, val inputEnabled: Boolean, val side: String? = null) : SessionState()
     data class Ended(val reason: String) : SessionState()
 }
 
@@ -15,7 +16,7 @@ sealed class SessionInput {
     /** The ready surface changed size (rotation). Fed instead of [SurfaceReady] while a surface is held. */
     data class SurfaceResized(val w: Int, val h: Int) : SessionInput()
     object SurfaceLost : SessionInput()
-    data class HelloAck(val inputEnabled: Boolean) : SessionInput()
+    data class HelloAck(val inputEnabled: Boolean, val side: String? = null) : SessionInput()
     /** The helper's `inputState`: touch input turned on or off mid-session (Accessibility granted/revoked). */
     data class InputAccess(val enabled: Boolean) : SessionInput()
     data class LinkClosed(val reason: String) : SessionInput()
@@ -35,7 +36,7 @@ sealed class SessionAction {
     object ReleaseDecoder : SessionAction()
     object ClearToken : SessionAction()
     /** state is one of connecting|streaming|paused|ended|error. */
-    data class Emit(val state: String, val reason: String? = null, val inputEnabled: Boolean? = null) : SessionAction()
+    data class Emit(val state: String, val reason: String? = null, val inputEnabled: Boolean? = null, val side: String? = null) : SessionAction()
 }
 
 /**
@@ -93,15 +94,15 @@ class DisplaySessionMachine(private val tokenWaitMs: Long = 5000) {
             }
             is SessionInput.HelloAck -> {
                 if (s is SessionState.Connecting) {
-                    state = SessionState.Streaming(s.sessionId, input.inputEnabled)
+                    state = SessionState.Streaming(s.sessionId, input.inputEnabled, input.side)
                     // A rotation between the hello and its ack: tell the helper now.
-                    listOf(SessionAction.Emit("streaming", inputEnabled = input.inputEnabled)) + syncSize()
+                    listOf(SessionAction.Emit("streaming", inputEnabled = input.inputEnabled, side = input.side)) + syncSize()
                 } else emptyList()
             }
             is SessionInput.InputAccess -> {
                 if (s is SessionState.Streaming && s.inputEnabled != input.enabled) {
                     state = s.copy(inputEnabled = input.enabled)
-                    listOf(SessionAction.Emit("streaming", inputEnabled = input.enabled))
+                    listOf(SessionAction.Emit("streaming", inputEnabled = input.enabled, side = s.side))
                 } else emptyList()
             }
             // The link itself is gone, so it is not closed again.

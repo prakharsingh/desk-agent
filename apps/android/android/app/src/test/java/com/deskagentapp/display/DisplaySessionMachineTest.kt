@@ -84,6 +84,13 @@ class DisplaySessionMachineTest {
         assertEquals(SessionState.Streaming("s1", true), m.state)
     }
 
+    @Test fun `hello ack side is kept and emitted with streaming, and again on an input change`() {
+        val m = m().toConnecting()
+        assertEquals(listOf<SessionAction>(Emit("streaming", inputEnabled = false, side = "left")), m.handle(SessionInput.HelloAck(false, "left")))
+        assertEquals(SessionState.Streaming("s1", false, "left"), m.state)
+        assertEquals(listOf<SessionAction>(Emit("streaming", inputEnabled = true, side = "left")), m.handle(SessionInput.InputAccess(true)))
+    }
+
     @Test fun `input access granted mid-session turns input on and re-emits streaming`() {
         val m = m().toConnecting()
         m.handle(SessionInput.HelloAck(false))

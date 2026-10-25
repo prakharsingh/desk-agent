@@ -798,3 +798,63 @@ describe('DisplayScreen rotate control (user report 3)', () => {
     expect(mod().setOrientation).not.toHaveBeenCalled();
   });
 });
+
+describe('DisplayScreen placement hint (user report 3)', () => {
+  const LEFT = 'Drag a window off the left edge of your main screen to move it here.';
+  const PORTRAIT_TIP = ' Wide apps fit better in landscape — tap ⟳';
+
+  afterEach(() => jest.useRealTimers());
+
+  async function stream(props: DisplayScreenProps, size: typeof SIZE, side?: string) {
+    const r = await render(<DisplayScreen {...props} />);
+    await act(() => void DeviceEventEmitter.emit('DisplaySurfaceSize', size));
+    await r.rerender(<DisplayScreen {...props} lastSession={session(1, { state: 'ready', sessionId: 's1', videoPort: 8788 })} />);
+    await act(() => void DeviceEventEmitter.emit('DisplayState', { state: 'streaming', inputEnabled: true, ...(side ? { side } : {}) }));
+    return r;
+  }
+
+  it('is mounted with the surface, hidden and touch-transparent before streaming', async () => {
+    await render(<DisplayScreen {...setup()} />);
+    expect(opacity('display-placement-hint')).toBe(0);
+    expect(slot('display-placement-hint').props.pointerEvents).toBe('none');
+    expect(inModal('display-placement-hint')).toBe(false);
+  });
+
+  it('once streaming, names the side of the main screen from the Mac', async () => {
+    await stream(setup(), SIZE, 'left');
+    expect(opacity('display-placement-hint')).toBe(1);
+    expect(screen.getByText(LEFT)).toBeTruthy();
+  });
+
+  it('adds the landscape tip in portrait', async () => {
+    await stream(setup(), { w: 1080, h: 2260, orientation: 'portrait', dpi: 420 } as unknown as typeof SIZE, 'left');
+    expect(screen.getByText(LEFT + PORTRAIT_TIP)).toBeTruthy();
+  });
+
+  it('auto-hides after about 8 s and does not come back in the same session', async () => {
+    jest.useFakeTimers({ now: 1_000_000 });
+    await stream(setup(), SIZE, 'left');
+    await act(() => void jest.advanceTimersByTime(7000));
+    expect(opacity('display-placement-hint')).toBe(1);
+    await act(() => void jest.advanceTimersByTime(2000));
+    expect(opacity('display-placement-hint')).toBe(0);
+    expect(slot('display-placement-hint').props.pointerEvents).toBe('none');
+    await act(() => void DeviceEventEmitter.emit('DisplayState', { state: 'streaming', inputEnabled: false, side: 'left' }));
+    expect(opacity('display-placement-hint')).toBe(0);
+  });
+
+  it('never swallows a tap meant for the Mac, even while it shows (M3)', async () => {
+    await stream(setup(), SIZE, 'left');
+    expect(opacity('display-placement-hint')).toBe(1);
+    expect(slot('display-placement-hint').props.pointerEvents).toBe('none');
+    // No pressable inside: the touch goes through to the surface.
+    expect(screen.queryByRole('button', { name: LEFT })).toBeNull();
+  });
+
+  it('keeps clear of the touch banner below it', async () => {
+    await stream(setup(), SIZE, 'left');
+    const hint = StyleSheet.flatten(slot('display-placement-hint').props.style);
+    const banner = StyleSheet.flatten(slot('display-touch-banner').props.style);
+    expect(hint.bottom).toBeGreaterThanOrEqual((banner.bottom as number) + (banner.height as number));
+  });
+});

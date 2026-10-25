@@ -1,5 +1,5 @@
 import type { DisplayOrientation } from '@desk-agent/protocol';
-import type { DisplayFlowState } from './displayFlow.js';
+import type { DisplayFlowState, PlacementSide } from './displayFlow.js';
 
 // Small, non-blocking hints drawn over the live display stream (DisplayScreen).
 //
@@ -67,4 +67,47 @@ export function rotateTicked(state: RotateState, now: number): RotateState {
 /** The session ended: `restore` = hand the orientation back to the sensor (only if the user pinned one). */
 export function rotateEnded(state: RotateState): { state: RotateState; restore: boolean } {
   return { state: INITIAL_ROTATE, restore: state.locked !== null };
+}
+
+// ---- Placement hint ----
+//
+// macOS 27 has no Window › "Move to Desk Agent Phone" item (user report 3): a window gets here by being dragged
+// off the edge of the main screen where Desk Agent Phone is arranged. The helper reports that side in helloAck;
+// the phone shows it once per session, as soon as the stream is live, for PLACEMENT_HINT_MS. It never takes
+// touches (a tap on it reaches the Mac), so it is not tap-dismissible; it only auto-hides.
+
+export type { PlacementSide } from './displayFlow.js';
+
+export const PLACEMENT_HINT_MS = 8000;
+
+const SIDES: readonly string[] = ['left', 'right', 'above', 'below'];
+
+/** The native event's side, if it is one we know (anything else gets the generic hint). */
+export function asPlacementSide(v: unknown): PlacementSide | undefined {
+  return typeof v === 'string' && SIDES.includes(v) ? (v as PlacementSide) : undefined;
+}
+
+const EDGE: Record<PlacementSide, string> = { left: 'left', right: 'right', above: 'top', below: 'bottom' };
+const PORTRAIT_TIP = ' Wide apps fit better in landscape — tap ⟳';
+
+export function placementHintCopy(side: PlacementSide | undefined, orientation: DisplayOrientation): string {
+  const line =
+    side === undefined
+      ? 'Drag a window from your main screen onto Desk Agent Phone to move it here.'
+      : `Drag a window off the ${EDGE[side]} edge of your main screen to move it here.`;
+  return orientation === 'portrait' ? line + PORTRAIT_TIP : line;
+}
+
+export type HintState = { sessionId: string | null; visible: boolean; until: number };
+
+export const INITIAL_HINT: HintState = { sessionId: null, visible: false, until: 0 };
+
+/** Shows the hint the first time `flow` streams a session; every later streaming state of it changes nothing. */
+export function hintOnFlow(hint: HintState, flow: DisplayFlowState, now: number): HintState {
+  if (flow.phase !== 'streaming' || flow.sessionId === hint.sessionId) return hint;
+  return { sessionId: flow.sessionId, visible: true, until: now + PLACEMENT_HINT_MS };
+}
+
+export function hintTicked(hint: HintState, now: number): HintState {
+  return hint.visible && now > hint.until ? { ...hint, visible: false } : hint;
 }

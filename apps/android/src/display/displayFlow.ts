@@ -15,11 +15,14 @@ export const DISPLAY_MEASURE_TIMEOUT_MS = 3000;
 
 export type DisplaySize = { w: number; h: number; orientation: DisplayOrientation; dpi?: number };
 
+/** Where Desk Agent Phone is arranged relative to the Mac's main display (helper helloAck, additive). */
+export type PlacementSide = 'left' | 'right' | 'above' | 'below';
+
 export type DisplayFlowState =
   | { phase: 'measuring'; measuringSince?: number }
   | { phase: 'requesting'; size: DisplaySize; requestedAt: number }
   | { phase: 'starting'; sessionId: string }
-  | { phase: 'streaming'; sessionId: string; inputEnabled: boolean }
+  | { phase: 'streaming'; sessionId: string; inputEnabled: boolean; side?: PlacementSide }
   // `midSession`: the failure ended a session the Mac had already made ready (starting/streaming),
   // as opposed to a start that never got a display.
   | { phase: 'failed'; reason: string; midSession?: true }
@@ -30,7 +33,13 @@ export type DisplayFlowEvent =
   // `stale`: the reply names a sessionId this app already saw before this frame
   // (a previous visit's session), so it cannot be the answer to the pending start.
   | { type: 'sessionReply'; payload: DisplaySessionPayload; stale: boolean }
-  | { type: 'nativeState'; state: 'connecting' | 'streaming' | 'paused' | 'ended' | 'error'; reason?: string; inputEnabled?: boolean }
+  | {
+      type: 'nativeState';
+      state: 'connecting' | 'streaming' | 'paused' | 'ended' | 'error';
+      reason?: string;
+      inputEnabled?: boolean;
+      side?: PlacementSide;
+    }
   | { type: 'tick'; now: number }
   | { type: 'userExit' }
   // "Try again" on a retryable failure card (see canRetryDisplay).
@@ -100,7 +109,15 @@ export function reduceDisplayFlow(state: DisplayFlowState, event: DisplayFlowEve
       if (state.phase !== 'starting' && state.phase !== 'streaming') return same;
       switch (event.state) {
         case 'streaming':
-          return { state: { phase: 'streaming', sessionId: state.sessionId, inputEnabled: event.inputEnabled ?? false }, effects: [] };
+          return {
+            state: {
+              phase: 'streaming',
+              sessionId: state.sessionId,
+              inputEnabled: event.inputEnabled ?? false,
+              ...(event.side !== undefined ? { side: event.side } : {}),
+            },
+            effects: [],
+          };
         case 'ended':
           return { state: { phase: 'exited', reason: event.reason ?? 'ended' }, effects: [{ kind: 'goHome' }] };
         case 'error':

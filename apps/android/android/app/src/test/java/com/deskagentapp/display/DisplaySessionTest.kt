@@ -582,6 +582,13 @@ class DisplaySessionTest {
         assertTrue(inputs(l).isEmpty())
     }
 
+    @Test fun `helloAck side reaches JS with the streaming state`() {
+        val l = connect()
+        l.listener.onFrame(json("helloAck", "inputEnabled" to true, "side" to "right"))
+        exec.drain()
+        assertEquals(mapOf<String, Any?>("state" to "streaming", "inputEnabled" to true, "side" to "right"), states().last())
+    }
+
     @Test fun `each streamConfig tells JS the stream size and orientation`() {
         val l = streaming()
         l.listener.onFrame(json("streamConfig", "w" to 1080, "h" to 2340))

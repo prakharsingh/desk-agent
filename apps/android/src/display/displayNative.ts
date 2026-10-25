@@ -38,7 +38,7 @@ export const displayNative = {
 };
 
 export interface DisplayEventHandlers {
-  onState: (e: { state: string; reason?: string; inputEnabled?: boolean }) => void;
+  onState: (e: { state: string; reason?: string; inputEnabled?: boolean; side?: string }) => void;
   onSize: (e: { w: number; h: number; orientation: DisplayOrientation; dpi?: number }) => void;
   /** Each helper streamConfig: the size the Mac streams now. */
   onStream?: (e: { w: number; h: number; orientation: DisplayOrientation }) => void;
