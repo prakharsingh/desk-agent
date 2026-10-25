@@ -582,6 +582,16 @@ class DisplaySessionTest {
         assertTrue(inputs(l).isEmpty())
     }
 
+    @Test fun `each streamConfig tells JS the stream size and orientation`() {
+        val l = streaming()
+        l.listener.onFrame(json("streamConfig", "w" to 1080, "h" to 2340))
+        exec.drain()
+        assertEquals(
+            listOf<Map<String, Any?>>(mapOf("w" to 1080, "h" to 2340, "orientation" to "portrait")),
+            emitted.filter { it.first == "DisplayStreamSize" }.map { it.second },
+        )
+    }
+
     @Test fun `an inputState grant mid-session starts sending touch input and tells JS`() {
         val l = connect()
         l.listener.onFrame(json("helloAck", "inputEnabled" to false))

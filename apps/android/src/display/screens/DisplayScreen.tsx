@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { BackHandler, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
-import type { DisplaySessionPayload } from '@desk-agent/protocol';
+import type { DisplayOrientation, DisplaySessionPayload } from '@desk-agent/protocol';
 import { theme } from '../theme.js';
 import { Toggle } from '../ui/Toggle.js';
 import { buildDisplayStartFrame, buildDisplayStopFrame } from '../../displayFrames.js';
@@ -17,7 +17,19 @@ import {
   type DisplayFlowState,
 } from '../displayFlow.js';
 import { DisplayView, displayNative, subscribeDisplayEvents } from '../displayNative.js';
-import { TOUCH_OFF_BANNER, touchBannerVisible } from '../displayOverlay.js';
+import {
+  INITIAL_ROTATE,
+  ROTATE_LABEL,
+  ROTATING_COPY,
+  TOUCH_OFF_BANNER,
+  rotateButtonVisible,
+  rotateEnded,
+  rotateStreamed,
+  rotateTap,
+  rotateTicked,
+  touchBannerVisible,
+  type RotateState,
+} from '../displayOverlay.js';
 
 export interface DisplayScreenProps {
   lastSession: { payload: DisplaySessionPayload; seq: number } | null;
@@ -42,16 +54,37 @@ const TICK_MS = 1000;
  * displayOverlay.ts: a view mounted later over the video is composited away, F1). Hidden, or without `onPress`,
  * it passes every touch through to the surface (the Mac).
  */
-function OverlaySlot({ testID, visible, style, children }: { testID: string; visible: boolean; style: object; children: React.ReactNode }) {
+function OverlaySlot({
+  testID,
+  visible,
+  style,
+  children,
+  onPress,
+  accessibilityLabel,
+}: {
+  testID: string;
+  visible: boolean;
+  style: object;
+  children: React.ReactNode;
+  // A control: only its own small box takes touches, and only while it shows.
+  onPress?: () => void;
+  accessibilityLabel?: string;
+}) {
   return (
     <View
       testID={testID}
       collapsable={false}
-      pointerEvents="none"
+      pointerEvents={visible && onPress ? 'auto' : 'none'}
       style={[styles.slot, style, { opacity: visible ? 1 : 0 }]}
       importantForAccessibility={visible ? 'auto' : 'no-hide-descendants'}
     >
-      {children}
+      {onPress ? (
+        <Pressable onPress={onPress} style={styles.slotPress} accessibilityRole="button" accessibilityLabel={accessibilityLabel}>
+          {children}
+        </Pressable>
+      ) : (
+        children
+      )}
     </View>
   );
 }
@@ -89,6 +122,28 @@ export function DisplayScreen({ lastSession, seenSessionIds, getDisplaySeq, json
     setTrackpad(next);
     displayNative.setTrackpadMode(next);
   }, [setTrackpad]);
+
+  // The rotate control (displayOverlay.ts). The ref keeps native calls out of state updaters.
+  const [rotate, setRotateState] = useState<RotateState>(INITIAL_ROTATE);
+  const rotateRef = useRef<RotateState>(INITIAL_ROTATE);
+  const setRotate = useCallback((next: RotateState) => {
+    rotateRef.current = next;
+    setRotateState(next);
+  }, []);
+  const surfaceOrientationRef = useRef<DisplayOrientation | null>(null);
+  const onRotatePress = useCallback(() => {
+    const current = surfaceOrientationRef.current;
+    if (current === null) return;
+    const r = rotateTap(rotateRef.current, current, Date.now());
+    setRotate(r.state);
+    displayNative.setOrientation(r.request);
+  }, [setRotate]);
+  // Session over (or screen left): hand the orientation back to the sensor if the user pinned one.
+  const endRotate = useCallback(() => {
+    const r = rotateEnded(rotateRef.current);
+    if (r.restore) displayNative.setOrientation('unspecified');
+    if (rotateRef.current !== INITIAL_ROTATE) setRotate(r.state);
+  }, [setRotate]);
 
   const latest = useRef({ sendFrame, onExit, onUnsupported, onSupported, jsonConnected, seenSessionIds, getDisplaySeq });
   latest.current = { sendFrame, onExit, onUnsupported, onSupported, jsonConnected, seenSessionIds, getDisplaySeq };
@@ -137,25 +192,42 @@ export function DisplayScreen({ lastSession, seenSessionIds, getDisplaySeq, json
   // Native events (surface size starts the flow; state drives streaming/failed).
   useEffect(() => {
     const unsubscribe = subscribeDisplayEvents({
-        onSize: (size) =>
+        onSize: (size) => {
+          surfaceOrientationRef.current = size.orientation;
           dispatch({
             type: 'surfaceSize',
             size,
             linkConnected: latest.current.jsonConnected,
             now: Date.now(),
-          }),
+          });
+        },
+        onStream: (e) => {
+          const next = rotateStreamed(rotateRef.current, e.orientation);
+          if (next !== rotateRef.current) setRotate(next);
+        },
         onState: (e) => dispatch({ type: 'nativeState', state: e.state as NativeStateEvent['state'], reason: e.reason, inputEnabled: e.inputEnabled }),
     });
     // The surface may have reported its size before we subscribed.
     displayNative.requestSize();
     return unsubscribe;
-  }, [dispatch]);
+  }, [dispatch, setRotate]);
 
-  // Reply timeout clock.
+  // Reply timeout clock (and the "Rotating…" give-up).
   useEffect(() => {
-    const id = setInterval(() => dispatch({ type: 'tick', now: Date.now() }), TICK_MS);
+    const id = setInterval(() => {
+      const now = Date.now();
+      dispatch({ type: 'tick', now });
+      const next = rotateTicked(rotateRef.current, now);
+      if (next !== rotateRef.current) setRotate(next);
+    }, TICK_MS);
     return () => clearInterval(id);
-  }, [dispatch]);
+  }, [dispatch, setRotate]);
+
+  // A rotate-control lock lasts for the session only.
+  useEffect(() => {
+    if (flow.phase === 'exited' || flow.phase === 'failed') endRotate();
+  }, [flow.phase, endRotate]);
+  useEffect(() => () => endRotate(), [endRotate]);
 
   // display.session replies from core. Each seq is processed once; a value that
   // was already present at mount belongs to a previous visit and is ignored.
@@ -276,6 +348,18 @@ export function DisplayScreen({ lastSession, seenSessionIds, getDisplaySeq, json
           {TOUCH_OFF_BANNER}
         </Text>
       </OverlaySlot>
+      <OverlaySlot testID="display-rotating" visible={rotate.rotatingTo !== null} style={styles.rotating}>
+        <Text style={styles.slotText}>{ROTATING_COPY}</Text>
+      </OverlaySlot>
+      <OverlaySlot
+        testID="display-rotate"
+        visible={rotateButtonVisible(flow)}
+        style={styles.rotateButton}
+        onPress={onRotatePress}
+        accessibilityLabel={ROTATE_LABEL}
+      >
+        <Text style={styles.rotateGlyph}>⟳</Text>
+      </OverlaySlot>
       {status !== null && (
         <View style={styles.status} pointerEvents="none">
           <Text style={styles.statusText}>{status}</Text>
@@ -343,8 +427,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   slotText: { fontSize: 12, color: theme.colors.text, fontFamily: theme.font.regular, textAlign: 'center' },
+  slotPress: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' },
   // Bottom centre, one or two lines; the video above it stays visible.
   touchBanner: { bottom: 28, alignSelf: 'center', width: 300, height: 48 },
+  // Centre, while the Mac switches the display mode after a rotate tap.
+  rotating: { top: '50%', marginTop: -18, alignSelf: 'center', width: 140, height: 36 },
+  // Top-right, inset 40 from the side (outside the back-gesture strip) and 24 from the top (status-bar pull):
+  // its 44x44 box is the only area that takes touches away from the Mac.
+  rotateButton: { top: 24, right: 40, width: 44, height: 44, paddingHorizontal: 0, borderRadius: 22 },
+  rotateGlyph: { fontSize: 22, color: theme.colors.text, fontFamily: theme.font.regular },
   overlay: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
     backgroundColor: 'rgba(0,0,0,0.7)',

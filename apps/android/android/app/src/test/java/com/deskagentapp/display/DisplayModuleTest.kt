@@ -6,7 +6,9 @@ import com.facebook.react.uimanager.SimpleViewManager
 import com.facebook.react.uimanager.ThemedReactContext
 import com.facebook.react.uimanager.annotations.ReactProp
 import com.facebook.react.uimanager.annotations.ReactPropGroup
+import io.mockk.every
 import io.mockk.mockk
+import org.robolectric.shadows.ShadowLog
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -56,6 +58,21 @@ class DisplayModuleTest {
         val host = FakeHost()
         DisplayModule(ctx, host).start("s1", 8788.0)
         assertEquals(listOf("trackpad:false", "Start"), host.order)
+    }
+
+    @Test fun `rotate modes map to the activity's requested orientation`() {
+        assertEquals(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT, DisplayModule.requestedOrientationFor("portrait"))
+        assertEquals(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE, DisplayModule.requestedOrientationFor("landscape"))
+        assertEquals(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED, DisplayModule.requestedOrientationFor("unspecified"))
+        assertEquals(null, DisplayModule.requestedOrientationFor("sideways"))
+    }
+
+    @Test fun `setOrientation without an activity is logged, not silent`() {
+        ShadowLog.clear()
+        val noActivity = mockk<ReactApplicationContext>(relaxed = true)
+        every { noActivity.currentActivity } returns null
+        DisplayModule(noActivity, FakeHost()).setOrientation("unspecified")
+        assertTrue(ShadowLog.getLogsForTag(DisplaySessionRunner.TAG).any { it.type == android.util.Log.WARN && it.msg.contains("no activity") })
     }
 
     @Test fun `setTrackpadMode forwards to the session`() {

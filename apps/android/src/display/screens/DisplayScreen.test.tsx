@@ -22,6 +22,7 @@ beforeEach(() => {
     stop: jest.fn(),
     requestSize: jest.fn(),
     setTrackpadMode: jest.fn(),
+    setOrientation: jest.fn(),
     addListener: jest.fn(),
     removeListeners: jest.fn(),
   };
@@ -645,31 +646,33 @@ describe('AppShell display screen', () => {
 
 // Overlays over the live stream live in fixed slots mounted with the surface (see displayOverlay.ts): they toggle
 // opacity, never mount later (F1), and pass touches through to the Mac unless they are a control.
-describe('DisplayScreen touch-off banner (user report 3)', () => {
-  const BANNER = TOUCH_OFF;
-  // Hidden slots are hidden from accessibility too, so the queries include hidden elements.
-  const slot = (testID: string) => screen.getByTestId(testID, { includeHiddenElements: true });
-  const opacity = (testID: string) => StyleSheet.flatten(slot(testID).props.style)?.opacity;
-  type HostNode = { type: string; props: Record<string, unknown>; children: (HostNode | string)[] | null };
-  // Whether the host node with `testID` sits inside a Modal (a separate window that would take every touch).
-  function inModal(testID: string): boolean | null {
-    const walk = (n: HostNode | string, modal: boolean): boolean | null => {
-      if (typeof n === 'string') return null;
-      const here = modal || n.type === 'Modal';
-      if (n.props.testID === testID) return here;
-      for (const c of n.children ?? []) {
-        const hit = walk(c, here);
-        if (hit !== null) return hit;
-      }
-      return null;
-    };
-    const json = screen.toJSON() as HostNode | HostNode[] | null;
-    for (const root of Array.isArray(json) ? json : json ? [json] : []) {
-      const hit = walk(root, false);
+// Hidden slots are hidden from accessibility too, so the queries include hidden elements.
+const slot = (testID: string) => screen.getByTestId(testID, { includeHiddenElements: true });
+const opacity = (testID: string) => StyleSheet.flatten(slot(testID).props.style)?.opacity;
+type HostNode = { type: string; props: Record<string, unknown>; children: (HostNode | string)[] | null };
+// Whether the host node with `testID` sits inside a Modal (a separate window that would take every touch).
+function inModal(testID: string): boolean | null {
+  const walk = (n: HostNode | string, modal: boolean): boolean | null => {
+    if (typeof n === 'string') return null;
+    const here = modal || n.type === 'Modal';
+    if (n.props.testID === testID) return here;
+    for (const c of n.children ?? []) {
+      const hit = walk(c, here);
       if (hit !== null) return hit;
     }
     return null;
+  };
+  const json = screen.toJSON() as HostNode | HostNode[] | null;
+  for (const root of Array.isArray(json) ? json : json ? [json] : []) {
+    const hit = walk(root, false);
+    if (hit !== null) return hit;
   }
+  return null;
+}
+
+
+describe('DisplayScreen touch-off banner (user report 3)', () => {
+  const BANNER = TOUCH_OFF;
 
   it('is mounted from the first render, hidden, next to the surface and outside any Modal', async () => {
     await render(<DisplayScreen {...setup()} />);
@@ -707,5 +710,91 @@ describe('DisplayScreen touch-off banner (user report 3)', () => {
     await emitSize();
     await act(() => void DeviceEventEmitter.emit('DisplayState', { state: 'streaming', inputEnabled: false }));
     expect(slot('display-touch-banner')).toBe(before);
+  });
+});
+
+describe('DisplayScreen rotate control (user report 3)', () => {
+  const emitStream = (w: number, h: number) =>
+    act(() => void DeviceEventEmitter.emit('DisplayStreamSize', { w, h, orientation: w >= h ? 'landscape' : 'portrait' }));
+  const PORTRAIT = { w: 1080, h: 2260, orientation: 'portrait' as const, dpi: 420 };
+
+  async function toStreamingPortrait(props: DisplayScreenProps) {
+    const r = await render(<DisplayScreen {...props} />);
+    await act(() => void DeviceEventEmitter.emit('DisplaySurfaceSize', PORTRAIT));
+    await r.rerender(<DisplayScreen {...props} lastSession={session(1, { state: 'ready', sessionId: 's1', videoPort: 8788 })} />);
+    await act(() => void DeviceEventEmitter.emit('DisplayState', { state: 'streaming', inputEnabled: true }));
+    return r;
+  }
+
+  afterEach(() => jest.useRealTimers());
+
+  it('is mounted with the surface but hidden and touch-transparent until streaming', async () => {
+    await render(<DisplayScreen {...setup()} />);
+    expect(opacity('display-rotate')).toBe(0);
+    expect(slot('display-rotate').props.pointerEvents).toBe('none');
+    expect(inModal('display-rotate')).toBe(false);
+    expect(opacity('display-rotating')).toBe(0);
+  });
+
+  it('while streaming it is a small button that rotates to the other orientation', async () => {
+    await toStreamingPortrait(setup());
+    expect(opacity('display-rotate')).toBe(1);
+    expect(slot('display-rotate').props.pointerEvents).toBe('auto');
+    await fireEvent.press(screen.getByLabelText('Rotate display'));
+    expect(mod().setOrientation).toHaveBeenCalledWith('landscape');
+  });
+
+  it('shows Rotating… until the stream arrives in the new orientation', async () => {
+    await toStreamingPortrait(setup());
+    await fireEvent.press(screen.getByLabelText('Rotate display'));
+    expect(opacity('display-rotating')).toBe(1);
+    expect(screen.getByText('Rotating…')).toBeTruthy();
+    await emitStream(1080, 2260); // still the old stream
+    expect(opacity('display-rotating')).toBe(1);
+    await emitStream(2260, 1080);
+    expect(opacity('display-rotating')).toBe(0);
+  });
+
+  it('Rotating… gives up after the timeout', async () => {
+    jest.useFakeTimers({ now: 1_000_000 });
+    await toStreamingPortrait(setup());
+    await fireEvent.press(screen.getByLabelText('Rotate display'));
+    expect(opacity('display-rotating')).toBe(1);
+    await act(() => void jest.advanceTimersByTime(7000));
+    expect(opacity('display-rotating')).toBe(0);
+  });
+
+  it('a second tap rotates back', async () => {
+    await toStreamingPortrait(setup());
+    await fireEvent.press(screen.getByLabelText('Rotate display'));
+    await emitStream(2260, 1080);
+    await act(() => void DeviceEventEmitter.emit('DisplaySurfaceSize', { w: 2260, h: 1080, orientation: 'landscape', dpi: 420 }));
+    await fireEvent.press(screen.getByLabelText('Rotate display'));
+    expect(mod().setOrientation).toHaveBeenLastCalledWith('portrait');
+  });
+
+  it('the session end restores auto-rotate once, when the user had rotated', async () => {
+    const props = setup();
+    const r = await toStreamingPortrait(props);
+    await fireEvent.press(screen.getByLabelText('Rotate display'));
+    await r.rerender(<DisplayScreen {...props} lastSession={session(2, { state: 'ended', sessionId: 's1', reason: 'mac-disconnect' })} />);
+    expect(mod().setOrientation).toHaveBeenLastCalledWith('unspecified');
+    await r.unmount();
+    expect(mod().setOrientation.mock.calls.filter((c) => c[0] === 'unspecified')).toHaveLength(1);
+  });
+
+  it('leaving the screen mid-session restores auto-rotate', async () => {
+    const r = await toStreamingPortrait(setup());
+    await fireEvent.press(screen.getByLabelText('Rotate display'));
+    await r.unmount();
+    expect(mod().setOrientation).toHaveBeenLastCalledWith('unspecified');
+  });
+
+  it('a session the user never rotated leaves the orientation alone', async () => {
+    const props = setup();
+    const r = await toStreamingPortrait(props);
+    await r.rerender(<DisplayScreen {...props} lastSession={session(2, { state: 'ended', sessionId: 's1', reason: 'mac-disconnect' })} />);
+    await r.unmount();
+    expect(mod().setOrientation).not.toHaveBeenCalled();
   });
 });

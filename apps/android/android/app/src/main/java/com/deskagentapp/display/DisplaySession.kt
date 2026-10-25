@@ -383,6 +383,11 @@ class DisplaySessionRunner(
                     is HelperMessage.StreamConfig -> {
                         streamW = msg.w; streamH = msg.h
                         Log.i(TAG, "stream config ${msg.w}x${msg.h}")
+                        try {
+                            events?.emit(EVENT_STREAM, mapOf("w" to msg.w, "h" to msg.h, "orientation" to orientationOf(msg.w, msg.h)))
+                        } catch (e: Exception) {
+                            Log.w(TAG, "DisplayStreamSize emit failed: ${e.message}")
+                        }
                     }
                     HelperMessage.Keepalive -> Unit
                     is HelperMessage.Unknown -> if (loggedUnknown.add(msg.t)) Log.i(TAG, "ignoring unknown message type ${msg.t}")
@@ -537,6 +542,8 @@ class DisplaySessionRunner(
         const val TAG = "DeskAgentDisplay"
         const val EVENT_STATE = "DisplayState"
         const val EVENT_SIZE = "DisplaySurfaceSize"
+        /** Each helper `streamConfig`: the size the Mac streams now (ends the rotate control's "Rotating…"). */
+        const val EVENT_STREAM = "DisplayStreamSize"
         const val TOKEN_WAIT_MS = 5000L
         const val TICK_MS = 250L
         const val REQUEST_IDR_MIN_INTERVAL_MS = 500L
