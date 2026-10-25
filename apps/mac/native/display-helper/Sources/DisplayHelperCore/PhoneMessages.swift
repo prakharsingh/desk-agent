@@ -121,6 +121,9 @@ public enum PhoneMessage: Equatable, Sendable {
 
 public enum HelperMessage: Encodable, Equatable, Sendable {
     case helloAck(inputEnabled: Bool)
+    /// Additive (an older phone ignores the unknown `t`): Accessibility (PostEvent) was granted or revoked
+    /// mid-session, so touch input is now on or off. Same flag semantics as `helloAck.inputEnabled`.
+    case inputState(inputEnabled: Bool)
     case streamConfig(w: Int, h: Int)
     case keepalive
     case end(reason: String)
@@ -132,6 +135,9 @@ public enum HelperMessage: Encodable, Equatable, Sendable {
         switch self {
         case .helloAck(let enabled):
             try c.encode("helloAck", forKey: .t)
+            try c.encode(enabled, forKey: .inputEnabled)
+        case .inputState(let enabled):
+            try c.encode("inputState", forKey: .t)
             try c.encode(enabled, forKey: .inputEnabled)
         case .streamConfig(let w, let h):
             try c.encode("streamConfig", forKey: .t)

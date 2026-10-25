@@ -101,9 +101,13 @@ public final class SessionController {
     /// `startBudget - 6.75` s (≥ `minCapturableTimeout`). An identity dropped as mirrored takes its
     /// activation plus at most the settle window, and counts toward this cutoff like an offline one.
     public static let freshIdentityCutoff: TimeInterval = 3.5
+    /// While a phone is connected, Accessibility (PostEvent) is re-checked this often (in `tick()`), so a
+    /// grant turns touch on mid-session and a revoke turns it off; the phone hears `inputState`.
+    public static let inputRecheckInterval: TimeInterval = 2.0
 
     public private(set) var endedReason: EndReason?
-    /// Authenticated `input` messages, only when PostEvent access was granted at hello. Never called
+    /// Authenticated `input` messages, only while PostEvent access is granted (at hello, then re-checked
+    /// every `inputRecheckInterval`). Never called
     /// once the session has started ending.
     public var onInput: ((InputEvent) -> Void)?
     /// Invoked exactly once per session, from every end path, BEFORE the display is destroyed: the
@@ -159,8 +163,9 @@ public final class SessionController {
     private var surface = (w: 0, h: 0)
     private var decoderMax = (w: 0, h: 0)
     private var showsCursor = false
-    /// `preflightPostEvent()` at hello; `input` is dropped while false.
+    /// `preflightPostEvent()` at hello, then every `inputRecheckInterval`; `input` is dropped while false.
     private var inputEnabled = false
+    private var lastInputCheckAt: TimeInterval = 0
     private var lastKeepaliveAt: TimeInterval = 0
     private var statsWindowStart: TimeInterval = 0
     private var framesInWindow = 0
@@ -392,7 +397,8 @@ public final class SessionController {
                 self.deadline = ConnectDeadline(createdAt: self.now(), timeout: Self.connectDeadline)
                 self.readySent = true
                 self.sink.emit(.ready(displayId: self.displayId, port: self.start.port, serialNum: serialNum,
-                                      mirroredSkipped: self.mirroredSkipped))
+                                      mirroredSkipped: self.mirroredSkipped,
+                                      postEventMissing: !self.backend.preflightPostEvent()))
             case .failure(let error):
                 self.terminate(Self.endReason(for: error))
             }
@@ -582,6 +588,7 @@ public final class SessionController {
         decoderMax = (hello.maxW, hello.maxH)
         showsCursor = hello.trackpad   // initial captured-cursor visibility (applied by startCapture)
         inputEnabled = backend.preflightPostEvent()
+        lastInputCheckAt = t
 
         sink.emit(.connected)
         send(.helloAck(inputEnabled: inputEnabled), to: conn)
@@ -849,6 +856,10 @@ public final class SessionController {
             applyResize(w: resize.w, h: resize.h)
             guard endedReason == nil else { return }
         }
+        if t - lastInputCheckAt >= Self.inputRecheckInterval {
+            lastInputCheckAt = t
+            recheckInputAccess(conn)
+        }
         if flow.isStalled(at: t) {
             log("warn", "ack stall: \(flow.lastSent - flow.acked) unacked for > \(Self.ackStall) s; resetting window with IDR")
             flow.reset()
@@ -861,6 +872,21 @@ public final class SessionController {
         if t - statsWindowStart >= Self.statsInterval {
             emitStats(at: t)
         }
+    }
+
+    /// Accessibility (PostEvent) changed since the last check: input follows it and the phone is told
+    /// (`inputState`, additive). Nothing is sent while it is unchanged.
+    private func recheckInputAccess(_ conn: Conn) {
+        let granted = backend.preflightPostEvent()
+        guard granted != inputEnabled else { return }
+        inputEnabled = granted
+        if granted {
+            loggedTypes.remove("input-disabled")   // a later revoke explains itself again
+            log("info", "Accessibility (PostEvent) is granted now: touch input is on")
+        } else {
+            log("warn", "Accessibility (PostEvent) was revoked: touch input is off")
+        }
+        send(.inputState(inputEnabled: granted), to: conn)
     }
 
     private func emitStats(at t: TimeInterval) {

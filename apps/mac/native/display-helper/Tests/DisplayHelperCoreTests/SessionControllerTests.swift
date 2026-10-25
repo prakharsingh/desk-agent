@@ -1993,6 +1993,96 @@ final class Harness {
         #expect(h.sink.logs.count == 1)   // logged once, not per event
     }
 
+    // MARK: Accessibility (PostEvent) re-check mid-session
+
+    /// Keeps the watchdog fed while the clock moves `seconds` forward, then ticks.
+    private func live(_ h: Harness, _ id: ConnectionID, seconds: TimeInterval) {
+        var left = seconds
+        while left > 0 {
+            let step = min(1.0, left)
+            h.advance(step)
+            h.ctrl.receive(jsonFrame(#"{"t":"keepalive"}"#), on: id)
+            left -= step
+        }
+        h.ctrl.tick()
+    }
+
+    private func inputStates(_ c: FakeConnection) -> [Bool] {
+        c.json.filter { $0["t"] as? String == "inputState" }.compactMap { $0["inputEnabled"] as? Bool }
+    }
+
+    @Test func readyReportsMissingPostEventAccess() {
+        let h = Harness()
+        h.backend.postEvent = false
+        h.ready()
+        #expect(h.sink.events.first == .ready(displayId: 7, port: 8788, serialNum: 42, postEventMissing: true))
+    }
+
+    @Test func readyOmitsPostEventWhenGranted() {
+        let h = Harness().ready()
+        #expect(h.sink.events.first == .ready(displayId: 7, port: 8788, serialNum: 42, postEventMissing: false))
+    }
+
+    @Test func grantMidSessionTurnsInputOnAndTellsThePhone() {
+        let h = Harness()
+        h.backend.postEvent = false
+        let (c, id) = h.authed()
+        var got = 0
+        h.ctrl.onInput = { _ in got += 1 }
+        h.backend.postEvent = true
+        live(h, id, seconds: 1)
+        #expect(inputStates(c).isEmpty)   // not re-checked before the interval
+        live(h, id, seconds: 1)
+        #expect(inputStates(c) == [true])
+        h.ctrl.receive(jsonFrame(#"{"t":"input","e":"click","x":0.5,"y":0.5}"#), on: id)
+        #expect(got == 1)
+        #expect(h.sink.logs(level: "info").contains { $0.contains("touch input is on") })
+        #expect(h.ctrl.endedReason == nil)
+    }
+
+    @Test func revokeMidSessionTurnsInputOffAndTellsThePhone() {
+        let h = Harness()
+        let (c, id) = h.authed()
+        var got = 0
+        h.ctrl.onInput = { _ in got += 1 }
+        h.backend.postEvent = false
+        live(h, id, seconds: 2)
+        #expect(inputStates(c) == [false])
+        h.ctrl.receive(jsonFrame(#"{"t":"input","e":"click","x":0.5,"y":0.5}"#), on: id)
+        #expect(got == 0)
+        #expect(h.sink.logs(level: "warn").contains { $0.contains("touch input is off") })
+    }
+
+    @Test func unchangedAccessSendsNothing() {
+        let h = Harness()
+        h.backend.postEvent = false
+        let (c, id) = h.authed()
+        live(h, id, seconds: 6)
+        #expect(inputStates(c).isEmpty)
+        #expect(c.jsonTypes.filter { $0 == "inputState" }.isEmpty)
+    }
+
+    @Test func grantRevokeGrantSendsEachChangeOnce() {
+        let h = Harness()
+        h.backend.postEvent = false
+        let (c, id) = h.authed()
+        h.backend.postEvent = true
+        live(h, id, seconds: 2)
+        live(h, id, seconds: 2)
+        h.backend.postEvent = false
+        live(h, id, seconds: 2)
+        h.backend.postEvent = true
+        live(h, id, seconds: 2)
+        #expect(inputStates(c) == [true, false, true])
+    }
+
+    @Test func inputStateEncodesItsFlag() throws {
+        let data = try JSONEncoder().encode(HelperMessage.inputState(inputEnabled: true))
+        let obj = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(obj["t"] as? String == "inputState")
+        #expect(obj["inputEnabled"] as? Bool == true)
+    }
+
     @Test func inputAfterTheSessionEndedIsDropped() {
         let h = Harness()
         let (_, id) = h.authed()

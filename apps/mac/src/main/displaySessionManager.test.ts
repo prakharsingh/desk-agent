@@ -71,6 +71,41 @@ function setup(overrides: Partial<DisplaySessionManagerOptions> = {}, { autoSpaw
 const START = { w: 2340, h: 1080, orientation: 'landscape' as const, deviceSerial: 'abc123' };
 const sessionMsgs = (sent: ToCore[]) => sent.filter((m) => m.kind === 'displaySession');
 
+describe('DisplaySessionManager Accessibility notice', () => {
+  it('reports a ready without PostEvent access to onPostEventMissing', () => {
+    const onPostEventMissing = vi.fn();
+    const { mgr, hosts } = setup({ onPostEventMissing });
+    mgr.handleStartRequest(START);
+    hosts[0].emit({ evt: 'ready', displayId: 7, port: DISPLAY_VIDEO_PORT, serialNum: 1, postEvent: false });
+    expect(onPostEventMissing).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not report a ready with access granted, or from an older helper that does not say', () => {
+    const onPostEventMissing = vi.fn();
+    const { mgr, hosts } = setup({ onPostEventMissing });
+    mgr.handleStartRequest(START);
+    hosts[0].emit({ evt: 'ready', displayId: 7, port: DISPLAY_VIDEO_PORT, serialNum: 1 });
+    expect(onPostEventMissing).not.toHaveBeenCalled();
+  });
+
+  it('does not report a ready it ignores (a session main is already stopping)', () => {
+    const onPostEventMissing = vi.fn();
+    const { mgr, hosts } = setup({ onPostEventMissing });
+    mgr.handleStartRequest(START);
+    mgr.handleStopRequest({ sessionId: null, reason: 'user-exit' });
+    hosts[0].emit({ evt: 'ready', displayId: 7, port: DISPLAY_VIDEO_PORT, serialNum: 1, postEvent: false });
+    expect(onPostEventMissing).not.toHaveBeenCalled();
+  });
+
+  it('a throwing onPostEventMissing does not break the session', () => {
+    const { mgr, hosts, sent } = setup({ onPostEventMissing: () => { throw new Error('boom'); } });
+    mgr.handleStartRequest(START);
+    hosts[0].emit({ evt: 'ready', displayId: 7, port: DISPLAY_VIDEO_PORT, serialNum: 1, postEvent: false });
+    expect(mgr.isActive()).toBe(true);
+    expect(sessionMsgs(sent).at(-1)).toMatchObject({ kind: 'displaySession', active: true });
+  });
+});
+
 describe('DisplaySessionManager', () => {
   it('spawns the helper and sends the token to core before the session is active', () => {
     const { mgr, hosts, sent } = setup();

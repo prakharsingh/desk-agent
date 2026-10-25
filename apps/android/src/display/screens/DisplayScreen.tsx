@@ -17,6 +17,7 @@ import {
   type DisplayFlowState,
 } from '../displayFlow.js';
 import { DisplayView, displayNative, subscribeDisplayEvents } from '../displayNative.js';
+import { TOUCH_OFF_BANNER, touchBannerVisible } from '../displayOverlay.js';
 
 export interface DisplayScreenProps {
   lastSession: { payload: DisplaySessionPayload; seq: number } | null;
@@ -35,6 +36,25 @@ export interface DisplayScreenProps {
 }
 
 const TICK_MS = 1000;
+
+/**
+ * A fixed-size overlay slot over the live stream. Always mounted with the surface and shown by opacity only (see
+ * displayOverlay.ts: a view mounted later over the video is composited away, F1). Hidden, or without `onPress`,
+ * it passes every touch through to the surface (the Mac).
+ */
+function OverlaySlot({ testID, visible, style, children }: { testID: string; visible: boolean; style: object; children: React.ReactNode }) {
+  return (
+    <View
+      testID={testID}
+      collapsable={false}
+      pointerEvents="none"
+      style={[styles.slot, style, { opacity: visible ? 1 : 0 }]}
+      importantForAccessibility={visible ? 'auto' : 'no-hide-descendants'}
+    >
+      {children}
+    </View>
+  );
+}
 
 type NativeStateEvent = Extract<DisplayFlowEvent, { type: 'nativeState' }>;
 
@@ -251,6 +271,11 @@ export function DisplayScreen({ lastSession, seenSessionIds, getDisplaySeq, json
   return (
     <View style={styles.root}>
       <DisplayView style={StyleSheet.absoluteFill} />
+      <OverlaySlot testID="display-touch-banner" visible={touchBannerVisible(flow)} style={styles.touchBanner}>
+        <Text style={styles.slotText} numberOfLines={2}>
+          {TOUCH_OFF_BANNER}
+        </Text>
+      </OverlaySlot>
       {status !== null && (
         <View style={styles.status} pointerEvents="none">
           <Text style={styles.statusText}>{status}</Text>
@@ -277,7 +302,7 @@ export function DisplayScreen({ lastSession, seenSessionIds, getDisplaySeq, json
               <Toggle on={trackpad} onToggle={toggleTrackpad} label="Trackpad mode" />
             </View>
             {flow.phase === 'streaming' && !flow.inputEnabled && (
-              <Text style={styles.hint}>Touch is off — allow Accessibility for Desk Agent on your Mac</Text>
+              <Text style={styles.hint}>{TOUCH_OFF_BANNER}</Text>
             )}
             <View style={styles.dialogRow}>
               <Pressable onPress={() => setShowExit(false)} style={styles.button} accessibilityRole="button">
@@ -307,6 +332,19 @@ const styles = StyleSheet.create({
   failure: { fontSize: 16, color: theme.colors.text, fontFamily: theme.font.regular, textAlign: 'center' },
   status: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
   statusText: { fontSize: 14, color: theme.colors.textDim, fontFamily: theme.font.regular },
+  // Overlay slots: fixed boxes (their rectangle is what the window keeps composited), kept clear of the side
+  // edges (Android back gesture) and the bottom edge (home gesture).
+  slot: {
+    position: 'absolute',
+    backgroundColor: 'rgba(0,0,0,0.62)',
+    borderRadius: theme.radii.pill,
+    paddingHorizontal: theme.spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  slotText: { fontSize: 12, color: theme.colors.text, fontFamily: theme.font.regular, textAlign: 'center' },
+  // Bottom centre, one or two lines; the video above it stays visible.
+  touchBanner: { bottom: 28, alignSelf: 'center', width: 300, height: 48 },
   overlay: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
     backgroundColor: 'rgba(0,0,0,0.7)',

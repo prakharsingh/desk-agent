@@ -1,5 +1,5 @@
 import React from 'react';
-import { BackHandler, DeviceEventEmitter, NativeModules } from 'react-native';
+import { BackHandler, DeviceEventEmitter, NativeModules, StyleSheet } from 'react-native';
 import { render, screen, fireEvent, act } from '@testing-library/react-native';
 import { DisplayScreen, type DisplayScreenProps } from './DisplayScreen.js';
 import { AppShell, type AppShellProps } from '../AppShell.js';
@@ -374,7 +374,8 @@ function appSessions() {
   };
 }
 
-const TOUCH_OFF = 'Touch is off — allow Accessibility for Desk Agent on your Mac';
+// M6: the exit dialog uses the banner's wording.
+const TOUCH_OFF = "Touch is off — allow Desk Agent in Accessibility on the Mac, then reconnect if touch doesn't start";
 
 async function toStreaming(props: DisplayScreenProps, inputEnabled: boolean) {
   const r = await toStarting(props);
@@ -438,10 +439,11 @@ describe('DisplayScreen trackpad mode and touch hint (Task 4.4)', () => {
     expect(mod().setTrackpadMode).toHaveBeenCalledWith(true);
   });
 
-  it('shows the touch-off hint when input is disabled', async () => {
+  it('shows the touch-off hint when input is disabled, in the same words as the banner', async () => {
     await toStreaming(setup(), false);
     await openOverlay();
-    expect(screen.getByText(TOUCH_OFF)).toBeTruthy();
+    // The banner over the stream and the line in the exit dialog.
+    expect(screen.getAllByText(TOUCH_OFF)).toHaveLength(2);
   });
 
   it('hides the touch-off hint when input is enabled', async () => {
@@ -458,10 +460,11 @@ describe('DisplayScreen trackpad mode and touch hint (Task 4.4)', () => {
 // had been). The prompt must live in its own window: an RN Modal.
 describe('DisplayScreen exit prompt window (F1)', () => {
   type HostNode = { type: string; props: Record<string, unknown>; children: (HostNode | string)[] | null };
-  // The host ancestors (outermost first) of the node whose text is `text`.
-  function hostPath(text: string): HostNode[] | null {
+  // The host ancestors (outermost first) of the node whose text is `text`; with `inModal`, only a node inside a
+  // Modal counts (the touch-off line is also the banner's text, over the stream outside the Modal).
+  function hostPath(text: string, inModal = false): HostNode[] | null {
     const walk = (n: HostNode | string, path: HostNode[]): HostNode[] | null => {
-      if (typeof n === 'string') return n === text ? path : null;
+      if (typeof n === 'string') return n === text && (!inModal || path.some((p) => p.type === 'Modal')) ? path : null;
       for (const c of n.children ?? []) {
         const hit = walk(c, [...path, n]);
         if (hit) return hit;
@@ -480,7 +483,7 @@ describe('DisplayScreen exit prompt window (F1)', () => {
     await toStreaming(setup(), false);
     await openOverlay();
     for (const text of ['Exit display?', TOUCH_OFF, 'Trackpad mode', 'Stay', 'Exit']) {
-      const path = hostPath(text);
+      const path = hostPath(text, text === TOUCH_OFF);
       expect(path).not.toBeNull();
       const modal = path!.find((n) => n.type === 'Modal');
       expect(modal).toBeDefined();
@@ -637,5 +640,72 @@ describe('AppShell display screen', () => {
     expect(screen.queryByText('AGENT')).toBeNull();
     await render(<AppShell {...props} screenState={INITIAL_SCREEN_STATE} />);
     expect(screen.getByText('AGENT')).toBeTruthy();
+  });
+});
+
+// Overlays over the live stream live in fixed slots mounted with the surface (see displayOverlay.ts): they toggle
+// opacity, never mount later (F1), and pass touches through to the Mac unless they are a control.
+describe('DisplayScreen touch-off banner (user report 3)', () => {
+  const BANNER = TOUCH_OFF;
+  // Hidden slots are hidden from accessibility too, so the queries include hidden elements.
+  const slot = (testID: string) => screen.getByTestId(testID, { includeHiddenElements: true });
+  const opacity = (testID: string) => StyleSheet.flatten(slot(testID).props.style)?.opacity;
+  type HostNode = { type: string; props: Record<string, unknown>; children: (HostNode | string)[] | null };
+  // Whether the host node with `testID` sits inside a Modal (a separate window that would take every touch).
+  function inModal(testID: string): boolean | null {
+    const walk = (n: HostNode | string, modal: boolean): boolean | null => {
+      if (typeof n === 'string') return null;
+      const here = modal || n.type === 'Modal';
+      if (n.props.testID === testID) return here;
+      for (const c of n.children ?? []) {
+        const hit = walk(c, here);
+        if (hit !== null) return hit;
+      }
+      return null;
+    };
+    const json = screen.toJSON() as HostNode | HostNode[] | null;
+    for (const root of Array.isArray(json) ? json : json ? [json] : []) {
+      const hit = walk(root, false);
+      if (hit !== null) return hit;
+    }
+    return null;
+  }
+
+  it('is mounted from the first render, hidden, next to the surface and outside any Modal', async () => {
+    await render(<DisplayScreen {...setup()} />);
+    expect(surfaces()).toHaveLength(1);
+    expect(screen.getByText(BANNER, { includeHiddenElements: true })).toBeTruthy();
+    expect(screen.queryByText(BANNER)).toBeNull(); // not announced while hidden
+    expect(opacity('display-touch-banner')).toBe(0);
+    expect(slot('display-touch-banner').props.pointerEvents).toBe('none');
+    expect(inModal('display-touch-banner')).toBe(false);
+  });
+
+  it('shows while streaming with input off, and never takes touches', async () => {
+    await toStreaming(setup(), false);
+    expect(opacity('display-touch-banner')).toBe(1);
+    expect(screen.getByText(BANNER)).toBeTruthy();
+    expect(slot('display-touch-banner').props.pointerEvents).toBe('none');
+  });
+
+  it('stays hidden while input is on', async () => {
+    await toStreaming(setup(), true);
+    expect(opacity('display-touch-banner')).toBe(0);
+  });
+
+  it('hides as soon as input turns on mid-session, and returns when it is revoked', async () => {
+    await toStreaming(setup(), false);
+    await act(() => void DeviceEventEmitter.emit('DisplayState', { state: 'streaming', inputEnabled: true }));
+    expect(opacity('display-touch-banner')).toBe(0);
+    await act(() => void DeviceEventEmitter.emit('DisplayState', { state: 'streaming', inputEnabled: false }));
+    expect(opacity('display-touch-banner')).toBe(1);
+  });
+
+  it('the same banner node survives the whole session (it is never remounted)', async () => {
+    await render(<DisplayScreen {...setup()} />);
+    const before = slot('display-touch-banner');
+    await emitSize();
+    await act(() => void DeviceEventEmitter.emit('DisplayState', { state: 'streaming', inputEnabled: false }));
+    expect(slot('display-touch-banner')).toBe(before);
   });
 });

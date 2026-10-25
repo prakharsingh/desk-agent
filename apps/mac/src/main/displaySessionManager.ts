@@ -35,6 +35,8 @@ export interface DisplaySessionManagerOptions {
    * identity is still offered, it just is not remembered).
    */
   identityStore?: DisplayIdentityGenerations;
+  /** A session became ready without Accessibility (PostEvent): touch is off (see accessibilityNotice.ts). */
+  onPostEventMissing?: () => void;
 }
 
 export interface DisplayStartRequest {
@@ -232,6 +234,7 @@ export class DisplaySessionManager {
         this.sendActive(session);
         this.noteIdentity(session, e.serialNum, e.mirroredSkipped === true);
         this.changed();
+        if (e.postEvent === false) this.notePostEventMissing();
         break;
       case 'log':
         this.opts.onLog(e.level, e.message);
@@ -367,6 +370,14 @@ export class DisplaySessionManager {
     } catch (err) {
       this.opts.onLog('warn', `display identity generation ${next} could not be saved after display-offline (the next session ` +
         `escalates from generation ${identity.generation} again): ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  private notePostEventMissing(): void {
+    try {
+      this.opts.onPostEventMissing?.();
+    } catch (err) {
+      this.opts.onLog('warn', `Accessibility notice failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 

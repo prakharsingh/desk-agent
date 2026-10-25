@@ -8,6 +8,8 @@ fun orientationOf(w: Int, h: Int): String = if (w >= h) "landscape" else "portra
 
 sealed class HelperMessage {
     data class HelloAck(val inputEnabled: Boolean) : HelperMessage()
+    /** Additive: Accessibility was granted or revoked on the Mac mid-session (same flag as [HelloAck]). */
+    data class InputState(val inputEnabled: Boolean) : HelperMessage()
     data class StreamConfig(val w: Int, val h: Int) : HelperMessage()
     object Keepalive : HelperMessage()
     data class End(val reason: String) : HelperMessage()
@@ -78,6 +80,7 @@ object ControlMessages {
             val t = j.opt("t") as? String ?: throw ProtocolException("missing string t")
             return when (t) {
                 "helloAck" -> HelperMessage.HelloAck(j.getBoolean("inputEnabled"))
+                "inputState" -> HelperMessage.InputState(j.getBoolean("inputEnabled"))
                 "streamConfig" -> HelperMessage.StreamConfig(j.getInt("w"), j.getInt("h"))
                 "keepalive" -> HelperMessage.Keepalive
                 "end" -> HelperMessage.End(j.getString("reason"))

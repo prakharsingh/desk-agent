@@ -582,6 +582,31 @@ class DisplaySessionTest {
         assertTrue(inputs(l).isEmpty())
     }
 
+    @Test fun `an inputState grant mid-session starts sending touch input and tells JS`() {
+        val l = connect()
+        l.listener.onFrame(json("helloAck", "inputEnabled" to false))
+        exec.drain()
+        s.sendInput(SemanticEvent.Click(0.5f, 0.25f))
+        exec.drain()
+        assertTrue(inputs(l).isEmpty())
+        l.listener.onFrame(json("inputState", "inputEnabled" to true))
+        exec.drain()
+        assertEquals(mapOf<String, Any?>("state" to "streaming", "inputEnabled" to true), states().last())
+        s.sendInput(SemanticEvent.Click(0.5f, 0.25f))
+        exec.drain()
+        assertEquals(listOf("click"), inputs(l).map { it.getString("e") })
+    }
+
+    @Test fun `an inputState revoke mid-session stops sending touch input`() {
+        val l = streaming()
+        l.listener.onFrame(json("inputState", "inputEnabled" to false))
+        exec.drain()
+        assertEquals(mapOf<String, Any?>("state" to "streaming", "inputEnabled" to false), states().last())
+        s.sendInput(SemanticEvent.Click(0.5f, 0.25f))
+        exec.drain()
+        assertTrue(inputs(l).isEmpty())
+    }
+
     @Test fun `sendInput is dropped before helloAck and after the session ends`() {
         val l = connect()
         s.sendInput(SemanticEvent.Click(0.5f, 0.25f))

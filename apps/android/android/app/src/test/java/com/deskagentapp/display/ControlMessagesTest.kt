@@ -17,6 +17,11 @@ class ControlMessagesTest {
         assertEquals(HelperMessage.HelloAck(true), ControlMessages.parse("""{"t":"helloAck","inputEnabled":true,"future":1}"""))
     }
 
+    @Test fun `parses the additive inputState`() {
+        assertEquals(HelperMessage.InputState(true), ControlMessages.parse("""{"t":"inputState","inputEnabled":true}"""))
+        assertEquals(HelperMessage.InputState(false), ControlMessages.parse("""{"t":"inputState","inputEnabled":false}"""))
+    }
+
     @Test fun `hello carries token session size and h264`() {
         val j = JSONObject(ControlMessages.hello("tok", "s1", 2340, 1080, 4096, 2304, false))
         assertEquals("hello", j.getString("t")); assertEquals(1, j.getInt("v"))

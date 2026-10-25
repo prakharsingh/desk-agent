@@ -375,6 +375,10 @@ class DisplaySessionRunner(
                 }
                 when (msg) {
                     is HelperMessage.HelloAck -> feed(SessionInput.HelloAck(msg.inputEnabled))
+                    is HelperMessage.InputState -> {
+                        Log.i(TAG, "touch input ${if (msg.inputEnabled) "on" else "off"} (Accessibility on the Mac changed)")
+                        feed(SessionInput.InputAccess(msg.inputEnabled))
+                    }
                     is HelperMessage.End -> feed(SessionInput.HelperEnd(msg.reason))
                     is HelperMessage.StreamConfig -> {
                         streamW = msg.w; streamH = msg.h

@@ -96,7 +96,10 @@ public enum HelperEvent: Encodable, Equatable, Sendable {
     /// `mirroredSkipped`: this start dropped an identity because macOS restored a saved mirror set for it
     /// (F-mirror). Main then moves the phone to the next generation, so the next start does not re-mirror the
     /// user's other display just to drop it again. Encoded only when true (additive: an older main ignores it).
-    case ready(displayId: UInt32, port: UInt16, serialNum: UInt32, mirroredSkipped: Bool = false)
+    /// `postEventMissing`: Accessibility (PostEvent) is not granted at `ready`, so touch input is off. Encoded as
+    /// `"postEvent":false` only when true (additive: an older main ignores it); main then asks for the grant
+    /// once per launch (`--request-permissions`) and shows a notice.
+    case ready(displayId: UInt32, port: UInt16, serialNum: UInt32, mirroredSkipped: Bool = false, postEventMissing: Bool = false)
     case connected
     case paused
     case resumed
@@ -107,19 +110,20 @@ public enum HelperEvent: Encodable, Equatable, Sendable {
     case ended(EndReason, freshTried: Bool = false)
 
     enum CodingKeys: String, CodingKey {
-        case evt, displayId, port, serialNum, mirroredSkipped, level, message, reason, freshTried
+        case evt, displayId, port, serialNum, mirroredSkipped, postEvent, level, message, reason, freshTried
         case fps, kbps, unacked, ackP50Ms, ackP95Ms, phoneRendered, phoneDropped
     }
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case .ready(let id, let port, let serialNum, let mirroredSkipped):
+        case .ready(let id, let port, let serialNum, let mirroredSkipped, let postEventMissing):
             try c.encode("ready", forKey: .evt)
             try c.encode(id, forKey: .displayId)
             try c.encode(port, forKey: .port)
             try c.encode(serialNum, forKey: .serialNum)
             if mirroredSkipped { try c.encode(true, forKey: .mirroredSkipped) }
+            if postEventMissing { try c.encode(false, forKey: .postEvent) }
         case .connected: try c.encode("connected", forKey: .evt)
         case .paused: try c.encode("paused", forKey: .evt)
         case .resumed: try c.encode("resumed", forKey: .evt)

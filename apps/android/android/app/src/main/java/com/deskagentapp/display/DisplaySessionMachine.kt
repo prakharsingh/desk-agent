@@ -16,6 +16,8 @@ sealed class SessionInput {
     data class SurfaceResized(val w: Int, val h: Int) : SessionInput()
     object SurfaceLost : SessionInput()
     data class HelloAck(val inputEnabled: Boolean) : SessionInput()
+    /** The helper's `inputState`: touch input turned on or off mid-session (Accessibility granted/revoked). */
+    data class InputAccess(val enabled: Boolean) : SessionInput()
     data class LinkClosed(val reason: String) : SessionInput()
     data class HelperEnd(val reason: String) : SessionInput()
     /** No usable hardware decoder, or configure failed after all fallbacks. Per-frame decode errors are not this. */
@@ -94,6 +96,12 @@ class DisplaySessionMachine(private val tokenWaitMs: Long = 5000) {
                     state = SessionState.Streaming(s.sessionId, input.inputEnabled)
                     // A rotation between the hello and its ack: tell the helper now.
                     listOf(SessionAction.Emit("streaming", inputEnabled = input.inputEnabled)) + syncSize()
+                } else emptyList()
+            }
+            is SessionInput.InputAccess -> {
+                if (s is SessionState.Streaming && s.inputEnabled != input.enabled) {
+                    state = s.copy(inputEnabled = input.enabled)
+                    listOf(SessionAction.Emit("streaming", inputEnabled = input.enabled))
                 } else emptyList()
             }
             // The link itself is gone, so it is not closed again.

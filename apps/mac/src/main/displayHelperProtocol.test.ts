@@ -51,6 +51,15 @@ describe('displayHelperProtocol', () => {
       .toEqual({ evt: 'ready', displayId: 7, port: 8788 });
   });
 
+  it('keeps ready.postEvent only when it is literally false (Accessibility missing)', () => {
+    expect(parseHelperEventLine('{"evt":"ready","displayId":7,"port":8788,"serialNum":9,"postEvent":false}'))
+      .toEqual({ evt: 'ready', displayId: 7, port: 8788, serialNum: 9, postEvent: false });
+    expect(parseHelperEventLine('{"evt":"ready","displayId":7,"port":8788,"serialNum":9,"postEvent":true}'))
+      .toEqual({ evt: 'ready', displayId: 7, port: 8788, serialNum: 9 });
+    expect(parseHelperEventLine('{"evt":"ready","displayId":7,"port":8788,"serialNum":9,"postEvent":"false"}'))
+      .toEqual({ evt: 'ready', displayId: 7, port: 8788, serialNum: 9 });
+  });
+
   it('keeps ready.mirroredSkipped only when it is literally true', () => {
     expect(parseHelperEventLine('{"evt":"ready","displayId":7,"port":8788,"serialNum":9,"mirroredSkipped":true}'))
       .toEqual({ evt: 'ready', displayId: 7, port: 8788, serialNum: 9, mirroredSkipped: true });

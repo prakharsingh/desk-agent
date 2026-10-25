@@ -25,9 +25,10 @@ export interface HelperStartCommand {
 export type HelperEvent =
   /**
    * `serialNum`: the identity that came up (absent from an older helper). `mirroredSkipped` (additive, only when
-   * true): this start dropped an identity because macOS restored a saved mirror set for it (F-mirror).
+   * true): this start dropped an identity because macOS restored a saved mirror set for it (F-mirror). `postEvent`
+   * (additive, only when false): Accessibility (PostEvent) is not granted, so touch input is off.
    */
-  | { evt: 'ready'; displayId: number; port: number; serialNum?: number; mirroredSkipped?: true }
+  | { evt: 'ready'; displayId: number; port: number; serialNum?: number; mirroredSkipped?: true; postEvent?: false }
   | { evt: 'connected' }
   | { evt: 'paused' }
   | { evt: 'resumed' }
@@ -64,6 +65,7 @@ export function parseHelperEventLine(line: string): HelperEvent | null {
         evt: 'ready', displayId: r.displayId, port: r.port,
         ...(isNum(r.serialNum) ? { serialNum: r.serialNum } : {}),
         ...(r.mirroredSkipped === true ? { mirroredSkipped: true as const } : {}),
+        ...(r.postEvent === false ? { postEvent: false as const } : {}),
       };
     case 'connected':
     case 'paused':

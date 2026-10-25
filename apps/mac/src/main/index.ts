@@ -1,4 +1,5 @@
-import { app, BrowserWindow, ipcMain, nativeTheme, shell, systemPreferences } from 'electron';
+import { app, BrowserWindow, ipcMain, nativeTheme, Notification, shell, systemPreferences } from 'electron';
+import { execFile } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,6 +14,7 @@ import { DisplayHelperHost } from './displayHelperHost.js';
 import { packagedDisplayHelperPath } from './displayHelperPath.js';
 import { DisplaySessionManager } from './displaySessionManager.js';
 import { DisplayIdentityStore } from './displayIdentityStore.js';
+import { AccessibilityNotice, showTouchNotification, type TouchNotice } from './accessibilityNotice.js';
 import { debounce } from './debounce.js';
 import { LogBuffer } from './logBuffer.js';
 import { describePermissionStatus } from './permissionProbe.js';
@@ -295,6 +297,38 @@ if (!gotLock) {
     const helperPath = displayHelperPath();
     const pidfilePath = path.join(app.getPath('userData'), 'display-helper.pid');
     const devTokenEnv = process.env.DESK_AGENT_DISPLAY_DEV_TOKEN_FILE;
+    // Touch needs Accessibility: once per launch, ask through the helper (its own TCC request, so Desk Agent is the
+    // app macOS lists); our notice follows 3 s later only if the permission is still missing (accessibilityNotice.ts).
+    const accessibilityNotice = new AccessibilityNotice({
+      requestPermissions: () => {
+        execFile(helperPath, ['--request-permissions'], { timeout: 15000 }, (err, stdout) => {
+          if (err) recordDisplayLog('warn', `helper --request-permissions failed: ${err.message}`);
+          else recordDisplayLog('info', `helper --request-permissions: ${stdout.trim()}`);
+        });
+      },
+      checkPostEvent: (done) => {
+        execFile(helperPath, ['--check'], { timeout: 5000 }, (err, stdout) => {
+          if (err) {
+            recordDisplayLog('warn', `helper --check failed: ${err.message}`);
+            return done(null);
+          }
+          try {
+            const r = JSON.parse(stdout.trim()) as { postEvent?: unknown };
+            done(typeof r.postEvent === 'boolean' ? r.postEvent : null);
+          } catch {
+            done(null);
+          }
+        });
+      },
+      notify: (n: TouchNotice) =>
+        showTouchNotification(n, {
+          isSupported: () => Notification.isSupported(),
+          create: (opts) => new Notification(opts),
+          onLog: recordDisplayLog,
+        }),
+      openSettings: (url) => { void shell.openExternal(url); },
+      onLog: recordDisplayLog,
+    });
     sessionMgr = new DisplaySessionManager({
       createHost: (handlers) => new DisplayHelperHost({
         helperPath,
@@ -316,6 +350,7 @@ if (!gotLock) {
       devTokenFile: !app.isPackaged && devTokenEnv ? devTokenEnv : null,
       // Per-phone display-identity generation (Ruling P0-7), next to config.json.
       identityStore: new DisplayIdentityStore(path.join(path.dirname(configPath), 'display-identity.json')),
+      onPostEventMissing: () => accessibilityNotice.onPostEventMissing(),
     });
     // A helper left over from a crashed previous run would hold the virtual display and port 8788.
     new DisplayHelperHost({ helperPath, pidfilePath, onEvent: () => {}, onExit: () => {} }).killStale();

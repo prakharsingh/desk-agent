@@ -84,6 +84,32 @@ class DisplaySessionMachineTest {
         assertEquals(SessionState.Streaming("s1", true), m.state)
     }
 
+    @Test fun `input access granted mid-session turns input on and re-emits streaming`() {
+        val m = m().toConnecting()
+        m.handle(SessionInput.HelloAck(false))
+        val a = m.handle(SessionInput.InputAccess(true))
+        assertEquals(listOf<SessionAction>(Emit("streaming", inputEnabled = true)), a)
+        assertEquals(SessionState.Streaming("s1", true), m.state)
+    }
+
+    @Test fun `input access revoked mid-session turns input off`() {
+        val m = m().toStreaming()
+        assertEquals(listOf<SessionAction>(Emit("streaming", inputEnabled = false)), m.handle(SessionInput.InputAccess(false)))
+        assertEquals(SessionState.Streaming("s1", false), m.state)
+    }
+
+    @Test fun `unchanged input access does nothing`() {
+        val m = m().toStreaming()
+        assertEquals(emptyList<SessionAction>(), m.handle(SessionInput.InputAccess(true)))
+    }
+
+    @Test fun `input access outside streaming is ignored`() {
+        val connecting = m().toConnecting()
+        assertEquals(emptyList<SessionAction>(), connecting.handle(SessionInput.InputAccess(true)))
+        assertEquals(SessionState.Connecting("s1"), connecting.state)
+        assertEquals(emptyList<SessionAction>(), m().handle(SessionInput.InputAccess(true)))
+    }
+
     @Test fun `hello ack outside connecting is ignored`() {
         val idle = m()
         assertEquals(emptyList<SessionAction>(), idle.handle(SessionInput.HelloAck(true)))
