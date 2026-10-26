@@ -100,6 +100,41 @@ deliberate boundaries:
   the app writes config atomically and restarts the core (debounced),
   because the core reads config only at boot.
 
+## The phone as an extended display
+
+The phone can also be a second screen for the Mac. Three processes cooperate,
+and each owns one thing:
+
+```
+phone  --display.start-->  core (DisplayCoordinator)  --ControlChannel-->  Mac app
+                                                                              |
+                                          spawns desk-agent-display-helper (Swift)
+                                          CGVirtualDisplay -> ScreenCaptureKit -> H.264
+                                                                              |
+phone  <==H.264 on 127.0.0.1:8788, via `adb reverse`==========================
+phone  --touch input over the same socket--> helper --CGEvent--> Mac
+```
+
+- **The Mac app owns the helper process** and a per-session token. **The core
+  owns adb**: it delivers the token to the phone with `adb shell`, issues the
+  `adb reverse` for the video port, pauses the `sleep-on-absent` rule while the
+  session lives, and relays `display.session` state to the phone. The token is
+  never broadcast or logged, and the helper rejects a hello that doesn't carry
+  it. A standalone core has no app to own a helper and answers
+  `unsupported-host`.
+- **Video never touches the WebSocket.** It uses its own loopback socket
+  (`DISPLAY_VIDEO_PORT`, 8788); touch input returns over that same socket.
+- **The helper never changes display configuration.** macOS remembers a
+  display's arrangement and Control Center state by its vendor/product/serial
+  identity: a display once set to "Window or App" comes back switched off, and
+  one set to "Entire Screen" comes back mirrored. The helper only *detects*
+  both. A session then retries with a spare serial derived from the phone's
+  primary one, then with a fresh identity (the Mac app tracks a per-phone
+  generation in `~/.desk-agent/display-identity.json`). The primary identity is always tried
+  first, so the user's original arrangement wins if it's ever switched back on.
+- **Permissions**: Screen Recording for the picture, Accessibility for touch;
+  see [PERMISSIONS.md](https://github.com/prakharsingh/desk-agent/blob/main/packages/core/macos-notes/PERMISSIONS.md).
+
 ## Plugin isolation
 
 Plugins run in their own `worker_thread`, declare `id` + a `permissions`

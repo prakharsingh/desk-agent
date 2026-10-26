@@ -36,6 +36,12 @@ The Mac side runs either as a plain Node process or inside the native
 a settings window for config/plugins/widgets/automation, launch-at-login,
 and auto-start when the phone is docked — no terminal required.
 
+The docked phone can also act as an **extended display** for the Mac: tap
+**Display** on the phone's Home screen and Desk Agent creates a virtual
+display, streams it to the phone over the USB tunnel as H.264, and turns
+taps on the phone into mouse input on the Mac. It needs two macOS
+permissions — see [SETUP.md](SETUP.md#5-use-the-phone-as-an-extended-display).
+
 ## Screenshots
 
 **Phone app**
@@ -66,6 +72,7 @@ and auto-start when the phone is docked — no terminal required.
 | **1b** | ✅ shipped | Real camera presence detection, hysteresis-guarded auto-sleep, honest `sensor.*` protocol |
 | **1c** | ✅ shipped | Programmatic wake of the external HDMI monitor when presence returns (no physical keypress), `caffeinate -u -t 2`. Hardware-verified on a OnePlus 6T + target Mac/monitor. `presence.wakeEnabled: false` disables it independently of auto-sleep. |
 | **1d** | ✅ shipped | Designed multi-screen phone dashboard, live camera preview + face-box overlay on the Presence screen, Open-Meteo weather rework, and the Chin Light fullscreen fill-light widget |
+| — | 🚧 unreleased | Phone as a Mac extended display: a virtual display streamed to the phone, with touch and trackpad input (Screen Recording + Accessibility on the Mac) |
 | — | 🚧 on `main`, unreleased | macOS menu-bar app (Electron) that runs and supervises the core, widget-visibility sync from the Mac, auto-launch of the phone app on USB dock, phone screensaver on/off + duration controls, and a display visual-polish pass |
 
 See [CHANGELOG.md](CHANGELOG.md) for what shipped in each slice.
@@ -88,9 +95,13 @@ Grab both apps from the
 [latest release](https://github.com/prakharsingh/desk-agent/releases/latest).
 
 **Mac (menu-bar app)** — download `DeskAgent-<version>-mac-arm64.dmg`, drag
-to Applications. It's ad-hoc signed (free & open source — no Apple Developer
-membership), so on first launch **right-click the app → Open** to get past
-Gatekeeper, once. Or use Homebrew:
+to Applications. It's signed with a self-signed certificate (free & open
+source — no Apple Developer membership, so it isn't notarized): on first
+launch macOS shows an "unidentified developer" warning. Click **Done**, then
+open **System Settings › Privacy & Security** and choose **Open Anyway**
+next to Desk Agent, once. The stable signature is what lets your Screen
+Recording and Accessibility grants survive updates
+([details](packaging/MAC_SIGNING.md)). Or use Homebrew:
 
     brew tap prakharsingh/tap
     brew install --cask desk-agent

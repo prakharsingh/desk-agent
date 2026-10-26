@@ -79,21 +79,54 @@ Releases are automated by [semantic-release](https://semantic-release.gitbook.io
 release all derive from conventional commit messages on `main` — `feat:` is
 a minor bump (a slice), `fix:` is a patch.
 
-1. Run the **release** workflow (Actions → release → Run workflow). Tick
-   *dry run* first if you want to preview the computed version and notes
-   without releasing anything.
-2. The workflow runs the full test suite, then semantic-release: bumps
+**One-time setup**
+
+- Six repository secrets: `MAC_SIGN_P12_B64`, `MAC_SIGN_P12_PASSWORD`
+  ([packaging/MAC_SIGNING.md](packaging/MAC_SIGNING.md)) and
+  `ANDROID_KEYSTORE_B64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`,
+  `ANDROID_KEY_PASSWORD` ([packaging/ANDROID_SIGNING.md](packaging/ANDROID_SIGNING.md)).
+  A real (non-dry) run fails if any is missing (the check runs after the tests
+  and the DMG build, so a missing secret fails late).
+- The baseline tags `v0.1.0` and `v0.2.0` on the remote
+  (`git push origin v0.1.0 v0.2.0`). Without a `v*` tag the workflow's guard
+  fails, because semantic-release would otherwise release the whole history
+  as `v1.0.0`.
+
+**Each release**
+
+1. Run the **release** workflow from `main` (Actions → release → Run workflow).
+   Tick *dry run* first if you want to preview the computed version and notes
+   without releasing anything; a dry run still builds and tests everything but
+   needs no secrets and packs ad-hoc.
+2. The workflow runs the full test suite (Vitest, the phone's Jest component
+   and JUnit tests, the Swift display-helper tests), packs the DMG and runs
+   the packaged e2e smoke test, then semantic-release: bumps
    `apps/mac/package.json` and the Android `versionName`/`versionCode`,
    prepends the new section to `CHANGELOG.md`, commits those back to `main`,
-   tags `vX.Y.Z`, and creates a **draft** GitHub release with the DMG and
-   signed APK attached. Nothing publishes on a red build.
-3. Verify the draft: install the DMG on a Mac, sideload the APK on the
-   reference phone (an upgrade over the previous version must not force an
-   uninstall — if it does, the signing keystore changed: stop and
-   investigate before publishing).
+   tags `vX.Y.Z`, and creates a **draft** GitHub release with the DMG, its
+   blockmap and the signed APK attached. The DMG is signed with the stable
+   self-signed identity, and the build fails if it isn't. Nothing publishes
+   on a red build.
+3. Verify the draft: install the DMG on a Mac (the first launch needs
+   Privacy & Security › **Open Anyway**, since the app isn't notarized),
+   sideload the APK on the reference phone (an upgrade over the previous
+   version must not force an uninstall — if it does, the signing keystore
+   changed: stop and investigate before publishing). Run the extended-display
+   checklist in [SETUP.md](SETUP.md); an upgrade over the previous DMG must
+   not ask for Screen Recording or Accessibility again — if it does, the Mac
+   signing identity changed.
 4. Publish the draft.
 5. Update the Homebrew cask per `packaging/homebrew/README.md` (new
    `version` + `sha256`).
+
+To build a stably signed DMG locally (packaging steps and the signing identity
+are in [packaging/MAC_SIGNING.md](packaging/MAC_SIGNING.md)):
+
+```bash
+pnpm build    # first: `pack` fails to resolve @desk-agent/protocol without it
+DESK_AGENT_MAC_SIGN_IDENTITY=<sha1> pnpm --filter @desk-agent/mac run pack
+node scripts/mac-signing/assert-signed.mjs "apps/mac/release/mac-arm64/Desk Agent.app"
+```
 
 Hand-written changelog entries are no longer needed (or picked up) for new
 releases — write it in the commit message instead. Sections for v0.4.0 and

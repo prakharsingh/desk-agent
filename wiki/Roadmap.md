@@ -57,6 +57,10 @@ CHANGELOG's Unreleased section for detail):
 - **Phone screensaver controls** — on/off + duration, from the phone's
   Settings screen or the Mac Device pane; first core→phone command channel.
 - A phone-display visual-polish pass.
+- **Phone as a Mac extended display** (branch `feat/extended-display`) — a
+  virtual display streamed to the phone as H.264 over the USB tunnel, with
+  touch and trackpad input, rotate, and identity fallback for macOS's
+  remembered display state. Needs Screen Recording and Accessibility.
 
 ## Planned
 

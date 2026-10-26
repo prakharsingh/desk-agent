@@ -17,6 +17,7 @@ dashboard/sensor app).
 | Core agent | macOS, Node.js ≥ 20, pnpm 9+ (`corepack enable`, or `npm i -g pnpm`) |
 | Now Playing widget (optional) | `brew install nowplaying-cli` — without it the System Stats widget shows `nowPlaying: unavailable`, everything else works |
 | React Native app | JDK 17 (React Native 0.86's floor), Android SDK + platform tools (`adb` on `PATH`), an Android device with USB debugging enabled |
+| Phone as extended display (Mac app) | macOS 14+, and Swift 6 (Xcode 16+ or its Command Line Tools) to build the display helper |
 | Everything | `git` |
 
 The phone side is Android-only — there's no iOS project in this repo (the
@@ -68,7 +69,7 @@ Two ways to run the Mac side — pick one:
 
 ```bash
 pnpm --filter @desk-agent/mac dev    # development, live reload
-pnpm --filter @desk-agent/mac pack   # unsigned arm64 .app → apps/mac/release/
+pnpm --filter @desk-agent/mac pack   # arm64 .app + DMG → apps/mac/release/ (also builds the display helper)
 ```
 
 The app runs and supervises the core for you (crash-restart included) and
@@ -89,6 +90,12 @@ Reads config from `DESK_AGENT_CONFIG_PATH` if set, else `./config.json`. On
 first run it spawns one `worker_thread` per plugin in `enabledPlugins`, starts
 the WebSocket gateway (`wsPort`, default `8787`), and starts the tunnel
 supervisor.
+
+`pack` signs ad-hoc unless you give it a signing identity, and an ad-hoc
+build loses its macOS permission grants on every rebuild. For a stable
+signature see **[packaging/MAC_SIGNING.md](packaging/MAC_SIGNING.md)**. The
+phone display (section 5) runs only in the menu-bar app: with a standalone
+core the phone just shows "Display ended".
 
 Either way, install `nowplaying-cli` (`brew install nowplaying-cli`) if you
 want the Now Playing widget — it reads macOS's system-wide MediaRemote
@@ -123,6 +130,44 @@ disabling battery optimization for the app and enabling OEM
 autostart/protected-app allowlisting. Neither can be set from code; skipping
 them means the OS can silently kill the app and you'll only find out via the
 Mac-side watchdog.
+
+## 5. Use the phone as an extended display
+
+With the menu-bar app running and the phone docked, tap **Display** on the
+phone's Home screen. Desk Agent creates a virtual display called "Desk Agent
+Phone", streams it to the phone, and — while it's live — pauses
+sleep-on-absent. The video reaches the phone through the same `adb reverse`
+tunnel (port `8788`, loopback only, one-time session token).
+
+**Grant two permissions to Desk Agent** (System Settings › Privacy & Security):
+
+| Permission | Needed for | If it's missing |
+|---|---|---|
+| Screen & System Audio Recording | the picture | the phone says "Allow Screen Recording for Desk Agent on your Mac" |
+| Accessibility | touch | the display works, but the phone shows a "Touch is off" banner |
+
+Desk Agent re-checks Accessibility every 2 seconds, so touch starts as soon as
+you allow it — reconnect the display only if it doesn't. On **macOS 27** the
+Accessibility pane is renamed **Device Control and Data Access** (Privacy &
+Security › Device Control and Data Access); Desk Agent's "Open Settings"
+notice still opens it. Running from a terminal with `pnpm --filter
+@desk-agent/mac dev` grants the permissions to the terminal, not to Desk Agent.
+
+Using it:
+
+- **Move a window onto the phone** by dragging it off the screen edge where the
+  phone display sits in your arrangement; the phone shows which edge for a few
+  seconds when the stream starts. Rearrange it in System Settings › Displays.
+- **Touch mode** (default): a tap clicks where you tap. The Mac cursor is not
+  drawn on the phone.
+- **Trackpad mode**: drag to move the pointer; the cursor is drawn. Press
+  **Back** on the phone to open **Exit display?** and flip the **Trackpad
+  mode** toggle there; **Exit** ends the session.
+- **Rotate**: the ⟳ button pins portrait or landscape for the rest of the
+  session. Rotating the phone itself also renegotiates the stream.
+
+If the phone says macOS has the display "switched off", tap **Try again**; see
+[Troubleshooting](https://github.com/prakharsingh/desk-agent/wiki/Troubleshooting#phone-as-an-extended-display).
 
 ## Manual E2E checklist
 
@@ -176,6 +221,26 @@ were required.
       absent→present edge may).
 - [x] Set `presence.wakeEnabled: false`, restart the core, return from a real
       absence → display stays asleep until a keypress (auto-sleep unaffected).
+
+**Phone as extended display** (needs the packaged or `dev` menu-bar app, a
+phone on USB, Screen Recording and Accessibility granted):
+- [ ] Tap Display → the Mac gains a "Desk Agent Phone" display and the phone
+      shows live video; the placement hint names a screen edge.
+- [ ] Drag a window across that edge → it appears on the phone.
+- [ ] Touch mode: a tap clicks where you tap; the Mac cursor is not drawn on
+      the phone. A long press right-clicks.
+- [ ] Back → **Exit display?** → turn **Trackpad mode** on → Stay: dragging moves
+      the pointer and the cursor is drawn.
+- [ ] Tap ⟳ → the stream switches orientation; physically rotating the phone
+      also renegotiates it.
+- [ ] With Accessibility revoked, the "Touch is off" banner shows; granting it
+      turns touch on (re-checked every 2 s), without reconnecting.
+- [ ] Exit, then tap Display again → comes back without "switched off" or a
+      mirrored desktop (see Troubleshooting if it does).
+- [ ] Unplug the USB cable mid-session → the session ends; after replugging,
+      tapping Display starts a new one.
+- [ ] While the display is live and you're away from the camera, the Mac
+      display does not auto-sleep.
 
 ## Troubleshooting
 

@@ -50,6 +50,49 @@
   ACKs aren't reaching the Mac (see the tunnel section above), the watchdog
   will keep forcing `present` even during a real absence.
 
+## Phone as an extended display
+
+**"Not supported on this Mac"**
+- The private `CGVirtualDisplay` API refused to start on this macOS
+  (reason `unsupported`).
+
+**"Display ended" straight away**
+- The display runs only in the menu-bar app. A standalone terminal core has no
+  helper to spawn, answers `unsupported-host`, and the phone shows the generic
+  "Display ended".
+
+**The phone says "Allow Screen Recording for Desk Agent on your Mac"**
+- Allow Desk Agent in System Settings › Privacy & Security › Screen & System
+  Audio Recording, then tap Try again. If you run the app from a terminal
+  (`pnpm --filter @desk-agent/mac dev`), the grant belongs to the terminal.
+
+**The picture works but touch doesn't ("Touch is off" banner)**
+- Allow Desk Agent under Privacy & Security › Accessibility. On macOS 27 that
+  pane is called **Device Control and Data Access**. The helper re-checks every
+  2 seconds, so touch should start on its own; if not, exit and reopen the
+  display. After a signing-identity change, remove the stale Desk Agent entry
+  and add it again.
+
+**"macOS has Desk Agent Phone switched off on the Mac"**
+- macOS remembers a display's state by its identity, and a display you once set
+  to "Window or App" in Control Center comes back switched off. Press **Try
+  again**: Desk Agent falls back to a spare identity, then a fresh one. If it
+  still fails repeatedly, quit and reopen Desk Agent on the Mac, then try again.
+- To reset the remembered identities, quit Desk Agent and delete
+  `~/.desk-agent/display-identity.json`. It only records which identity
+  generation to try per phone; a missing or unreadable file means generation 0,
+  and Desk Agent recreates it. Your display arrangement is macOS's, not this
+  file's.
+
+**The phone display mirrors my Mac instead of extending it**
+- That's a remembered "Entire Screen" choice for the display's identity. Desk
+  Agent detects it and falls back to another identity the same way; it never
+  changes your display settings itself.
+
+**I can't find how to move a window to the phone**
+- Drag it off the screen edge where the phone sits in System Settings ›
+  Displays. The phone names the edge for a few seconds when the stream starts.
+
 ## Android / OEM background-kill
 
 **App gets killed in the background after a while**

@@ -76,6 +76,22 @@ the OS releases the capture session (green dot off) — never just a
 stop-processing mute. `sensor.camera_state` reports `active | released |
 error` so the Mac can fail safe.
 
+### Extended display
+
+The **Display** Home tile turns the phone into a Mac extended display
+(`src/display/displayFlow.ts` is the pure state machine, `screens/DisplayScreen.tsx`
+the UI, `displayOverlay.ts` the hints, banner and rotate logic). Native side:
+`android/app/src/main/java/com/deskagentapp/display/` — `DisplaySession`
+connects to the Mac's loopback video socket (port `8788`, through `adb
+reverse`) with a per-session token the Mac pushes over `adb shell`,
+`HardwareDecoder` decodes the H.264 stream onto a `SurfaceView`, and
+`GestureRecognizer` turns touches into clicks, drags and scrolls sent back to
+the Mac. A tap clicks where you tap and the Mac cursor isn't drawn; in
+**trackpad mode** (toggle in the **Exit display?** dialog, opened with Back) a
+drag moves the pointer and the cursor is drawn. The ⟳ button pins portrait or
+landscape for the session. The Mac side needs Screen Recording and
+Accessibility — see [SETUP.md](../../SETUP.md#5-use-the-phone-as-an-extended-display).
+
 ### Screensaver
 
 On by default with a 2-minute grace; configurable (on/off + 1/2/5/10/30 min)
