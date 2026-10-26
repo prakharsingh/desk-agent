@@ -26,9 +26,43 @@ export function findBinary(name: string, candidateDirs: string[] = DEFAULT_CANDI
   return null;
 }
 
-export function checkBinaries(candidateDirs: string[] = DEFAULT_CANDIDATE_DIRS): BinaryStatus {
+function isExecutableFile(file: string): boolean {
+  try {
+    if (!fs.statSync(file).isFile()) return false;
+    fs.accessSync(file, fs.constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export interface ResolvedAdb {
+  path: string;
+  source: 'user' | 'bundled';
+}
+
+// The one adb every Desk Agent component uses (core via DESK_AGENT_ADB, the
+// dock-watch LaunchAgent via its baked script). The user's own adb wins so we
+// never run a second adb server of a different version against their phone;
+// the bundled copy is only the fallback.
+export function resolveAdb(opts: { candidateDirs?: string[]; pathEnv?: string; bundledPath: string | null }): ResolvedAdb | null {
+  const dirs = [...(opts.candidateDirs ?? DEFAULT_CANDIDATE_DIRS), ...(opts.pathEnv ?? process.env.PATH ?? '').split(':').filter(Boolean)];
+  for (const dir of dirs) {
+    const candidate = path.join(dir, 'adb');
+    if (isExecutableFile(candidate)) return { path: candidate, source: 'user' };
+  }
+  if (opts.bundledPath && isExecutableFile(opts.bundledPath)) return { path: opts.bundledPath, source: 'bundled' };
+  return null;
+}
+
+export function checkBinaries(
+  candidateDirs: string[] = DEFAULT_CANDIDATE_DIRS,
+  adb: ResolvedAdb | null = resolveAdb({ candidateDirs, bundledPath: null }),
+): BinaryStatus {
   return {
-    adb: findBinary('adb', candidateDirs) !== null,
+    adb: adb !== null,
+    adbPath: adb?.path ?? null,
+    adbSource: adb?.source ?? null,
     nowplayingCli: findBinary('nowplaying-cli', candidateDirs) !== null,
   };
 }

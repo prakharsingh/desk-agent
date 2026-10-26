@@ -1,10 +1,46 @@
 import { describe, it, expect } from 'vitest';
 import { parseFrame, parseWidget, createFrame, PROTOCOL_VERSION, parseSensorEvent, WIDGET_IDS } from './index.js';
+import { DISPLAY_VIDEO_PORT, DISPLAY_REASONS } from './schema.js';
 import { parseScreensaverConfig, parseCameraConfig, parseWakeEnabled, CAMERA_CONFIG_EVENT, WAKE_ENABLED_EVENT, PHONE_DISPLAY_PLUGIN_ID, SET_CAMERA_ENABLED_ACTION, SET_WAKE_ENABLED_ACTION } from './schema.js';
 
 describe('WIDGET_IDS', () => {
   it('is the single source of truth for known widget ids, shared by the Mac config schema and the phone app', () => {
-    expect(WIDGET_IDS).toEqual(['clock', 'system', 'weather', 'presence', 'playing', 'light']);
+    expect(WIDGET_IDS).toEqual(['clock', 'system', 'weather', 'presence', 'playing', 'light', 'display']);
+  });
+});
+
+describe('display frames', () => {
+  const base = { v: 1, id: 'd1', ts: 1 };
+  const start = { w: 2340, h: 1080, orientation: 'landscape' } as const;
+
+  it('exposes the display constants and leaves PROTOCOL_VERSION alone', () => {
+    expect(DISPLAY_VIDEO_PORT).toBe(8788);
+    expect(PROTOCOL_VERSION).toBe(1);
+    expect(DISPLAY_REASONS).toEqual(expect.arrayContaining(['version-mismatch', 'protocol-error', 'capture-unavailable', 'display-offline', 'mac-asleep']));
+  });
+
+  it('accepts display.start, with or without dpi', () => {
+    expect(parseFrame(createFrame('display.start', start)).ok).toBe(true);
+    expect(parseFrame(createFrame('display.start', { ...start, dpi: 402 })).ok).toBe(true);
+  });
+
+  it('rejects display.start with an undersized dimension, a bad orientation or a non-positive dpi', () => {
+    expect(parseFrame({ ...base, type: 'display.start', payload: { ...start, w: 100 } }).ok).toBe(false);
+    expect(parseFrame({ ...base, type: 'display.start', payload: { ...start, orientation: 'square' } }).ok).toBe(false);
+    expect(parseFrame({ ...base, type: 'display.start', payload: { ...start, dpi: 0 } }).ok).toBe(false);
+    expect(parseFrame({ ...base, type: 'display.start', payload: { ...start, h: 9000 } }).ok).toBe(false);
+  });
+
+  it('accepts display.session ready and error, and rejects an unknown state', () => {
+    expect(parseFrame(createFrame('display.session', { state: 'ready', sessionId: 's1', videoPort: 8788 })).ok).toBe(true);
+    expect(parseFrame(createFrame('display.session', { state: 'error', sessionId: null, reason: 'no-device' })).ok).toBe(true);
+    expect(parseFrame({ ...base, type: 'display.session', payload: { state: 'bogus', sessionId: null } }).ok).toBe(false);
+    expect(parseFrame({ ...base, type: 'display.session', payload: { state: 'ready', sessionId: '' } }).ok).toBe(false);
+  });
+
+  it('accepts display.stop with a null sessionId and an optional reason', () => {
+    expect(parseFrame(createFrame('display.stop', { sessionId: null })).ok).toBe(true);
+    expect(parseFrame(createFrame('display.stop', { sessionId: null, reason: 'reply-timeout' })).ok).toBe(true);
   });
 });
 

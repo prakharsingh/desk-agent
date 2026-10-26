@@ -6,12 +6,14 @@ import {
   PHONE_DISPLAY_PLUGIN_ID,
   SET_CAMERA_ENABLED_ACTION,
   SET_WAKE_ENABLED_ACTION,
+  type DisplaySessionPayload,
   type Frame,
   type ScreensaverConfig,
   type Widget,
 } from '@desk-agent/protocol';
 import { WsClient, type ConnectionState } from './wsClient.js';
 import { AppShell } from './display/AppShell.js';
+import { noteDisplaySessionSeen, type SeenDisplaySessions } from './display/displayFlow.js';
 import { INITIAL_SCREEN_STATE, STANDBY_DECK, STANDBY_VOICE, back, goTo, goToStandby, sleep, wake } from './display/screens.js';
 import { UNKNOWN_SENSOR_FRAME, mergeSensorFrame, resetSensorFrame, type SensorFrame } from './display/sensorFrame.js';
 import { DEFAULT_SCREENSAVER_CONFIG, loadScreensaverConfig, saveScreensaverConfig } from './display/screensaverConfig.js';
@@ -32,6 +34,13 @@ export default function App() {
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
   const [sensorFrame, setSensorFrame] = useState<SensorFrame>(UNKNOWN_SENSOR_FRAME);
   const [screenState, setScreenState] = useState(INITIAL_SCREEN_STATE);
+  const [lastDisplaySession, setLastDisplaySession] = useState<{ payload: DisplaySessionPayload; seq: number } | null>(null);
+  const [displayUnsupported, setDisplayUnsupported] = useState(false);
+  // App-lifetime record of every display sessionId seen (and the seq of the
+  // frame that first carried it), kept across DisplayScreen visits so a retry
+  // can tell a previous session's late reply from the answer to its own start.
+  const seenDisplaySessionsRef = useRef<SeenDisplaySessions>(new Map());
+  const displaySeqRef = useRef(0);
   const [now, setNow] = useState(() => Date.now());
   // null until the AsyncStorage load below resolves; AppShell/SettingsScreen
   // always receive DEFAULT_SCREENSAVER_CONFIG as a fallback in the meantime
@@ -83,6 +92,13 @@ export default function App() {
               setScreensaverConfig(result.value);
               saveScreensaverConfig(result.value).catch((err: unknown) => console.warn('[App] saveScreensaverConfig failed:', err));
             }
+            return;
+          }
+          if (frame.type === 'display.session') {
+            const payload = frame.payload;
+            const seq = ++displaySeqRef.current;
+            noteDisplaySessionSeen(seenDisplaySessionsRef.current, payload.sessionId, seq);
+            setLastDisplaySession({ payload, seq });
             return;
           }
           if (frame.type !== 'widget.update') return;
@@ -202,6 +218,10 @@ export default function App() {
   const onGoVoice = useCallback(() => setScreenState((s) => goToStandby(s, STANDBY_VOICE)), []);
   const onGoDeck = useCallback(() => setScreenState((s) => goToStandby(s, STANDBY_DECK)), []);
   const onGoLight = useCallback(() => setScreenState((s) => goTo(s, 'light')), []);
+  const onGoDisplay = useCallback(() => setScreenState((s) => goTo(s, 'display')), []);
+  const getDisplaySeq = useCallback(() => displaySeqRef.current, []);
+  const onDisplayUnsupported = useCallback(() => setDisplayUnsupported(true), []);
+  const onDisplaySupported = useCallback(() => setDisplayUnsupported(false), []);
   const onBack = useCallback(() => setScreenState(back), []);
   const onSleep = useCallback(() => setScreenState(sleep), []);
   const onWake = useCallback(() => setScreenState(wake), []);
@@ -235,6 +255,13 @@ export default function App() {
       onGoVoice={onGoVoice}
       onGoDeck={onGoDeck}
       onGoLight={onGoLight}
+      onGoDisplay={onGoDisplay}
+      displayUnsupported={displayUnsupported}
+      lastDisplaySession={lastDisplaySession}
+      seenDisplaySessions={seenDisplaySessionsRef.current}
+      getDisplaySeq={getDisplaySeq}
+      onDisplayUnsupported={onDisplayUnsupported}
+      onDisplaySupported={onDisplaySupported}
       onGoSettings={onGoSettings}
       onBack={onBack}
       onSleep={onSleep}

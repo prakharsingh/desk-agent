@@ -2,7 +2,7 @@ import type { LogLevel, Permission } from '@desk-agent/plugin-sdk';
 import type { PresenceState } from './presenceEngine.js';
 import type { AutomationRuleView } from './automationEngine.js';
 import type { TunnelStatusSnapshot } from './tunnelSupervisor.js';
-import type { ScreensaverConfig, CameraConfig } from '@desk-agent/protocol';
+import type { ScreensaverConfig, CameraConfig, DisplayOrientation, DisplayReason } from '@desk-agent/protocol';
 import type { WakeChangeSource } from './wakeSetting.js';
 
 export interface LogEntry {
@@ -34,7 +34,11 @@ export type ToApp =
   // Core applied a Monitor wake change (from the phone OR the Mac -- core is
   // the serialization point, see wakeSetting.ts). The Mac main process
   // persists core's latest reported value to config.json (no core restart).
-  | { kind: 'wakeEnabledChanged'; enabled: boolean; source: WakeChangeSource };
+  | { kind: 'wakeEnabledChanged'; enabled: boolean; source: WakeChangeSource }
+  // Extended display (Contract B): the phone asked to start/stop a session.
+  // Main owns the helper process; core only relays.
+  | { kind: 'displayStartRequest'; w: number; h: number; orientation: DisplayOrientation; deviceSerial: string; dpi?: number }
+  | { kind: 'displayStopRequest'; sessionId: string | null; reason: DisplayReason };
 
 // Deliberately narrower than the Phase 0 contract's original draft: it also
 // listed `setConfig`/`setPluginEnabled`, written before Phase 2 existed.
@@ -56,7 +60,12 @@ export type ToCore =
   // Live wake toggle: main has persisted it optimistically; core applies it
   // in memory (no restart), pushes it to the phone, and reports it back
   // (ToApp wakeEnabledChanged) so main converges on core's apply order.
-  | { kind: 'setWakeEnabled'; enabled: boolean };
+  | { kind: 'setWakeEnabled'; enabled: boolean }
+  // Extended display (Contract B). active:false WITH a reason = the session
+  // ended (core broadcasts ended/error); WITHOUT one = a silent clear.
+  | { kind: 'displaySession'; active: boolean; sessionId: string | null; videoPort: number | null; reason?: DisplayReason }
+  // The session token, for core to deliver over adb. Never logged or broadcast.
+  | { kind: 'displayToken'; sessionId: string; token: string };
 
 export interface ControlTransport {
   postMessage(msg: ToApp): void;
@@ -80,6 +89,13 @@ interface CameraLike {
 
 interface WakeSettingLike {
   set(enabled: boolean, source: WakeChangeSource): void;
+}
+
+// Named extendedDisplay, not phoneDisplay: that dep is the unrelated
+// dashboard/screensaver path (PHONE_DISPLAY_PLUGIN_ID).
+interface ExtendedDisplayLike {
+  onDisplaySession(msg: Omit<Extract<ToCore, { kind: 'displaySession' }>, 'kind'>): unknown;
+  onDisplayToken(msg: Omit<Extract<ToCore, { kind: 'displayToken' }>, 'kind'>): unknown;
 }
 
 interface TunnelLike {
@@ -110,6 +126,8 @@ export interface ControlChannelDeps {
   phoneDisplay: PhoneDisplayLike;
   camera: CameraLike;
   wakeSetting: WakeSettingLike;
+  /** The DisplayCoordinator; absent leaves display messages ignored. */
+  extendedDisplay?: ExtendedDisplayLike;
   wsPort: number;
   watchdogTimeoutMs: number;
   /** The full known plugin registry's permission grants, not just the enabled subset -- a disabled plugin's chips should still be visible. */
@@ -156,6 +174,14 @@ export class ControlChannel {
     this.deps.transport.postMessage({ kind: 'wakeEnabledChanged', enabled, source });
   }
 
+  notifyDisplayStartRequest(req: Omit<Extract<ToApp, { kind: 'displayStartRequest' }>, 'kind'>) {
+    this.deps.transport.postMessage({ kind: 'displayStartRequest', ...req });
+  }
+
+  notifyDisplayStopRequest(req: { sessionId: string | null; reason: DisplayReason }) {
+    this.deps.transport.postMessage({ kind: 'displayStopRequest', sessionId: req.sessionId, reason: req.reason });
+  }
+
   private handleToCore(msg: ToCore) {
     if (msg.kind === 'getSnapshot') {
       this.pushSnapshot();
@@ -180,6 +206,11 @@ export class ControlChannel {
       this.deps.gateway.sendCameraEnabled(msg.enabled);
     } else if (msg.kind === 'setWakeEnabled') {
       this.deps.wakeSetting.set(msg.enabled, 'mac');
+    } else if (msg.kind === 'displaySession') {
+      const { kind: _kind, ...session } = msg;
+      void this.deps.extendedDisplay?.onDisplaySession(session);
+    } else if (msg.kind === 'displayToken') {
+      void this.deps.extendedDisplay?.onDisplayToken({ sessionId: msg.sessionId, token: msg.token });
     }
   }
 

@@ -7,12 +7,14 @@
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
-    "dev": "electron-vite dev",
+    "dev": "pnpm build:native && electron-vite dev",
     "build": "electron-vite build",
+    "build:native": "bash scripts/build-native.sh",
+    "test:native": "bash native/display-helper/scripts/test.sh",
     "preview": "electron-vite preview",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "pack": "pnpm build && electron-builder --mac"
+    "pack": "pnpm build && pnpm build:native && electron-builder --mac"
   },
   "dependencies": {
     "@desk-agent/config-schema": "workspace:*",
@@ -37,6 +39,7 @@
     "appId": "com.deskagent.mac",
     "productName": "Desk Agent",
     "asar": true,
+    "afterPack": "../../scripts/mac-signing/afterPack.mjs",
     "directories": {
       "output": "release"
     },
@@ -48,6 +51,15 @@
       {
         "from": "resources",
         "to": "resources"
+      }
+    ],
+    "extraFiles": [
+      {
+        "from": "native-bin",
+        "to": "Helpers",
+        "filter": [
+          "desk-agent-display-helper"
+        ]
       }
     ],
     "mac": {

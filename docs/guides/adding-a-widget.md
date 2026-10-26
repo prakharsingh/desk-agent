@@ -26,11 +26,19 @@ invent it.
 
 `WIDGET_IDS` in `packages/protocol/src/schema.ts` is the single source of
 truth for Home-screen tiles (`clock`, `system`, `weather`, `presence`,
-`playing`, `light`). Add your id there. That automatically:
+`playing`, `light`, `display`). Add your id there. That automatically:
 
-- includes it in `visibleWidgets`' default (the config-schema seeds from
-  `WIDGET_IDS`), and
+- includes it in `visibleWidgets`' default for fresh installs (the config-schema
+  seeds from `WIDGET_IDS`, and `knownWidgets` defaults to the same list),
+- switches it on **once** for existing installs: `reconcileWidgets`
+  (`packages/config-schema`) appends every id in `WIDGET_IDS` that is missing
+  from the stored `knownWidgets` to `visibleWidgets`, and the Mac app applies it
+  to `config.json` at startup. Tiles the user already hid stay hidden, and
+  nothing is switched on a second time, and
 - makes it toggleable from the Mac app's Widgets pane.
+
+Never remove an id from `LEGACY_KNOWN_WIDGETS` — it is the set that pre-dates
+`knownWidgets`, and shrinking it would re-enable tiles users hid.
 
 Adding a widget id/type is **additive** — do not bump `PROTOCOL_VERSION`.
 

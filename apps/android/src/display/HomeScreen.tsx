@@ -40,6 +40,10 @@ export interface HomeScreenProps {
   onGoVoice: () => void;
   onGoDeck: () => void;
   onGoLight: () => void;
+  onGoDisplay: () => void;
+  // The Mac reported it cannot host an extended display. Informational only:
+  // the tile stays tappable (the Mac may have been updated since).
+  displayUnsupported?: boolean;
 }
 
 export function HomeScreen({
@@ -60,6 +64,8 @@ export function HomeScreen({
   onGoVoice,
   onGoDeck,
   onGoLight,
+  onGoDisplay,
+  displayUnsupported = false,
 }: HomeScreenProps) {
   const { timeHHMM, timeSS } = formatClock(now);
   const dateStr = formatDate(now);
@@ -185,6 +191,16 @@ export function HomeScreen({
             </Card>
           )}
         </View>
+      )}
+
+      {isVisible('display') && (
+        <Card onPress={onGoDisplay} accent>
+          <View style={styles.labelRow}>
+            <IconChip kind="display" />
+            <Text style={styles.sectionLabelAccent}>DISPLAY</Text>
+          </View>
+          {displayUnsupported && <Badge label="Not supported on this Mac" tone="warn" style={styles.displayBadge} />}
+        </Card>
       )}
 
       {/* Voice + Steam Deck standby row -- roadmap variant: dashed, dimmed,
@@ -374,6 +390,9 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     color: theme.colors.textFaint,
     fontFamily: theme.font.regular,
+  },
+  displayBadge: {
+    marginTop: theme.spacing.sm,
   },
   roadmapBadge: {
     marginTop: theme.spacing.sm,

@@ -29,6 +29,10 @@ export class AutomationEngine {
   private debounceTimers = new Map<string, NodeJS.Timeout>();
   private enabled = true;
   private disabledRuleIds = new Set<string>();
+  // Session-scoped suppression (e.g. while the phone is an extended display).
+  // Deliberately separate from disabledRuleIds: it is never shown as the
+  // user's toggle and never persisted, so it cannot clobber the user's choice.
+  private suppressedRuleIds = new Set<string>();
 
   constructor(
     private rules: AutomationRule[],
@@ -73,6 +77,23 @@ export class AutomationEngine {
     }
   }
 
+  setSuppressed(ruleId: string, suppressed: boolean) {
+    if (!suppressed) {
+      this.suppressedRuleIds.delete(ruleId);
+      return;
+    }
+    this.suppressedRuleIds.add(ruleId);
+    const existing = this.debounceTimers.get(ruleId);
+    if (existing) {
+      clearTimeout(existing);
+      this.debounceTimers.delete(ruleId);
+    }
+  }
+
+  isSuppressed(ruleId: string): boolean {
+    return this.suppressedRuleIds.has(ruleId);
+  }
+
   handleEvent(eventName: string, data: Record<string, unknown>) {
     if (!this.enabled) return;
     for (const rule of this.rules) {
@@ -82,7 +103,7 @@ export class AutomationEngine {
   }
 
   private evaluateRule(rule: AutomationRule, data: Record<string, unknown>) {
-    if (this.disabledRuleIds.has(rule.id)) return;
+    if (this.disabledRuleIds.has(rule.id) || this.suppressedRuleIds.has(rule.id)) return;
     try {
       const conditionHolds = rule.condition(data);
       if (!conditionHolds) {
@@ -96,6 +117,7 @@ export class AutomationEngine {
       if (this.debounceTimers.has(rule.id)) return;
       const timer = setTimeout(() => {
         this.debounceTimers.delete(rule.id);
+        if (this.suppressedRuleIds.has(rule.id)) return;
         try {
           this.invoker.invoke(rule.action.pluginId, rule.action.action, rule.action.args);
         } catch (err) {

@@ -42,4 +42,10 @@ describe('screens reducer', () => {
   it('goTo navigates to the settings screen', () => {
     expect(goTo(INITIAL_SCREEN_STATE, 'settings').screen).toBe('settings');
   });
+
+  it('goTo navigates to the display screen and back returns home', () => {
+    const d = goTo(INITIAL_SCREEN_STATE, 'display');
+    expect(d.screen).toBe('display');
+    expect(back(d).screen).toBe('home');
+  });
 });

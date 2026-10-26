@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react-native';
+import { render, screen, fireEvent } from '@testing-library/react-native';
 import { HomeScreen } from './HomeScreen.js';
 import { theme } from './theme.js';
 import type { SystemStatsView, WeatherView } from './widgetReaders.js';
@@ -50,6 +50,7 @@ const BASE_PROPS = {
   onGoVoice: NOOP,
   onGoDeck: NOOP,
   onGoLight: NOOP,
+  onGoDisplay: NOOP,
 };
 
 describe('HomeScreen', () => {
@@ -123,6 +124,29 @@ describe('HomeScreen', () => {
     it('never hides the roadmap tiles (Voice, Steam Deck) -- they are not in WIDGET_IDS and are never toggleable', async () => {
       await render(<HomeScreen {...BASE_PROPS} stats={STATS} visibleWidgets={['clock']} />);
       expect(screen.getAllByText('ROADMAP').length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('Display tile', () => {
+    it('shows the Display tile and opens it', async () => {
+      const onGoDisplay = jest.fn();
+      await render(<HomeScreen {...BASE_PROPS} stats={STATS} onGoDisplay={onGoDisplay} />);
+      expect(screen.queryByText('Not supported on this Mac')).toBeNull();
+      await fireEvent.press(screen.getByText('DISPLAY'));
+      expect(onGoDisplay).toHaveBeenCalledTimes(1);
+    });
+
+    it('marks the tile Not supported on this Mac and keeps it tappable', async () => {
+      const onGoDisplay = jest.fn();
+      await render(<HomeScreen {...BASE_PROPS} stats={STATS} onGoDisplay={onGoDisplay} displayUnsupported />);
+      expect(screen.getByText('Not supported on this Mac')).toBeTruthy();
+      await fireEvent.press(screen.getByText('DISPLAY'));
+      expect(onGoDisplay).toHaveBeenCalledTimes(1);
+    });
+
+    it('hides the Display tile when display is not in visibleWidgets', async () => {
+      await render(<HomeScreen {...BASE_PROPS} stats={STATS} visibleWidgets={['clock']} />);
+      expect(screen.queryByText('DISPLAY')).toBeNull();
     });
   });
 });

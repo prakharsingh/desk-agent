@@ -111,4 +111,71 @@ describe('AutomationEngine', () => {
       expect(invoke).toHaveBeenCalledWith('energy-saver', 'sleep-display', undefined);
     });
   });
+
+  describe('session-scoped suppression (extended display)', () => {
+    it('a suppressed rule never fires', () => {
+      const invoke = vi.fn();
+      const engine = new AutomationEngine([sleepRule], { invoke }, vi.fn());
+      engine.setSuppressed('sleep-on-absent', true);
+      engine.handleEvent('person_present', { present: false });
+      vi.advanceTimersByTime(5000);
+      expect(invoke).not.toHaveBeenCalled();
+      expect(engine.isSuppressed('sleep-on-absent')).toBe(true);
+    });
+
+    it('suppressing cancels an already-armed debounce', () => {
+      const invoke = vi.fn();
+      const engine = new AutomationEngine([sleepRule], { invoke }, vi.fn());
+      engine.handleEvent('person_present', { present: false });
+      engine.setSuppressed('sleep-on-absent', true);
+      vi.advanceTimersByTime(5000);
+      expect(invoke).not.toHaveBeenCalled();
+    });
+
+    it('suppression does not change the user-visible enabled flag', () => {
+      const engine = new AutomationEngine([sleepRule], { invoke: vi.fn() }, vi.fn());
+      engine.setSuppressed('sleep-on-absent', true);
+      expect(engine.getRules()[0].enabled).toBe(true);
+    });
+
+    it('suppression and setRuleEnabled are independent', () => {
+      const invoke = vi.fn();
+      const engine = new AutomationEngine([sleepRule], { invoke }, vi.fn());
+      engine.setRuleEnabled('sleep-on-absent', false);
+      engine.setSuppressed('sleep-on-absent', true);
+      engine.setSuppressed('sleep-on-absent', false);
+      expect(engine.getRules()[0].enabled).toBe(false);
+      engine.handleEvent('person_present', { present: false });
+      vi.advanceTimersByTime(5000);
+      expect(invoke).not.toHaveBeenCalled();
+      // and the reverse: re-enabling does not lift an active suppression
+      engine.setSuppressed('sleep-on-absent', true);
+      engine.setRuleEnabled('sleep-on-absent', true);
+      expect(engine.isSuppressed('sleep-on-absent')).toBe(true);
+      engine.handleEvent('person_present', { present: false });
+      vi.advanceTimersByTime(5000);
+      expect(invoke).not.toHaveBeenCalled();
+    });
+
+    it('fires normally on a fresh event after unsuppressing', () => {
+      const invoke = vi.fn();
+      const engine = new AutomationEngine([sleepRule], { invoke }, vi.fn());
+      engine.setSuppressed('sleep-on-absent', true);
+      engine.setSuppressed('sleep-on-absent', false);
+      expect(engine.isSuppressed('sleep-on-absent')).toBe(false);
+      engine.handleEvent('person_present', { present: false });
+      vi.advanceTimersByTime(1000);
+      expect(invoke).toHaveBeenCalledWith('energy-saver', 'sleep-display', undefined);
+    });
+
+    it('the debounce callback re-checks suppression before invoking', () => {
+      const invoke = vi.fn();
+      const engine = new AutomationEngine([sleepRule], { invoke }, vi.fn());
+      engine.handleEvent('person_present', { present: false });
+      // Simulate a timer that survives the cancel (e.g. already dequeued).
+      (engine as unknown as { suppressedRuleIds: Set<string> }).suppressedRuleIds.add('sleep-on-absent');
+      vi.advanceTimersByTime(1000);
+      expect(invoke).not.toHaveBeenCalled();
+    });
+  });
 });

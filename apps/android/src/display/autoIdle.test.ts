@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { shouldAutoIdle, shouldAutoIdleWithConfig } from './autoIdle.js';
+import { shouldAutoIdle, shouldAutoIdleWithConfig, isAutoIdleExempt } from './autoIdle.js';
 
 describe('shouldAutoIdle', () => {
   it('false before the grace window elapses', () => {
@@ -21,5 +21,14 @@ describe('shouldAutoIdleWithConfig', () => {
   it('behaves like shouldAutoIdle when enabled', () => {
     expect(shouldAutoIdleWithConfig(59_999, { enabled: true, graceMs: 60_000 })).toBe(false);
     expect(shouldAutoIdleWithConfig(60_000, { enabled: true, graceMs: 60_000 })).toBe(true);
+  });
+});
+
+describe('isAutoIdleExempt', () => {
+  it('exempts only the display screen from auto-idle', () => {
+    expect(isAutoIdleExempt('display')).toBe(true);
+    for (const s of ['idle', 'home', 'system', 'weather', 'playing', 'presence', 'clock', 'standby', 'light', 'settings'] as const) {
+      expect(isAutoIdleExempt(s)).toBe(false);
+    }
   });
 });

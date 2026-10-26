@@ -1,0 +1,97 @@
+package com.deskagentapp.display
+
+import org.json.JSONArray
+import org.json.JSONException
+import org.json.JSONObject
+
+fun orientationOf(w: Int, h: Int): String = if (w >= h) "landscape" else "portrait"
+
+sealed class HelperMessage {
+    /** [side]: additive, where Desk Agent Phone sits relative to the Mac's main display (left/right/above/below). */
+    data class HelloAck(val inputEnabled: Boolean, val side: String? = null) : HelperMessage()
+    /** Additive: Accessibility was granted or revoked on the Mac mid-session (same flag as [HelloAck]). */
+    data class InputState(val inputEnabled: Boolean) : HelperMessage()
+    data class StreamConfig(val w: Int, val h: Int) : HelperMessage()
+    object Keepalive : HelperMessage()
+    data class End(val reason: String) : HelperMessage()
+    data class Unknown(val t: String) : HelperMessage()
+}
+
+/** Contract D JSON messages (phone -> helper builders, helper -> phone parser). */
+object ControlMessages {
+    /** `helloAck.side` values; anything else is ignored (forward compatible). */
+    val SIDES = setOf("left", "right", "above", "below")
+
+    private fun msg(t: String, build: JSONObject.() -> Unit = {}): String =
+        JSONObject().apply { put("t", t); build() }.toString()
+
+    fun hello(token: String, sessionId: String, surfaceW: Int, surfaceH: Int, maxW: Int, maxH: Int, trackpad: Boolean) =
+        msg("hello") {
+            put("v", 1); put("token", token); put("sessionId", sessionId)
+            put("surfaceW", surfaceW); put("surfaceH", surfaceH)
+            put("orientation", orientationOf(surfaceW, surfaceH))
+            put("codecs", JSONArray().put("h264"))
+            put("maxW", maxW); put("maxH", maxH); put("trackpad", trackpad)
+        }
+
+    fun keepalive() = msg("keepalive")
+    /** [seq] is cumulative: the highest seq finished with, rendered or dropped. */
+    fun ack(seq: Long) = msg("ack") { put("seq", seq) }
+    fun requestIdr() = msg("requestIdr")
+    fun resize(w: Int, h: Int) = msg("resize") {
+        put("surfaceW", w); put("surfaceH", h); put("orientation", orientationOf(w, h))
+    }
+    fun pause() = msg("pause")
+    fun resume() = msg("resume")
+    fun setTrackpad(enabled: Boolean) = msg("setTrackpad") { put("enabled", enabled) }
+    /** `x,y` in [0,1] of the view; `dx,dy` as fractions of view width/height; null keys omitted. */
+    fun input(e: SemanticEvent): String {
+        val (name, x, y, dx, dy) = when (e) {
+            is SemanticEvent.Click -> InputFields("click", e.x, e.y)
+            is SemanticEvent.RightClick -> InputFields("rightClick", e.x, e.y)
+            is SemanticEvent.DragStart -> InputFields("dragStart", e.x, e.y)
+            is SemanticEvent.DragMove -> InputFields("dragMove", e.x, e.y)
+            is SemanticEvent.DragEnd -> InputFields("dragEnd", e.x, e.y)
+            is SemanticEvent.Scroll -> InputFields("scroll", e.x, e.y, e.dx, e.dy)
+            is SemanticEvent.Move -> InputFields("move", dx = e.dx, dy = e.dy)
+        }
+        return msg("input") {
+            put("e", name)
+            x?.let { put("x", it.toDouble()) }
+            y?.let { put("y", it.toDouble()) }
+            dx?.let { put("dx", it.toDouble()) }
+            dy?.let { put("dy", it.toDouble()) }
+        }
+    }
+
+    private data class InputFields(
+        val name: String,
+        val x: Float? = null,
+        val y: Float? = null,
+        val dx: Float? = null,
+        val dy: Float? = null,
+    )
+
+    fun stats(rendered: Long, dropped: Long, decodeMsAvg: Double) = msg("stats") {
+        put("rendered", rendered); put("dropped", dropped); put("decodeMsAvg", if (decodeMsAvg.isFinite()) decodeMsAvg else 0.0)
+    }
+    fun bye(reason: String) = msg("bye") { put("reason", reason) }
+
+    /** Unknown `t` -> Unknown; unknown fields ignored; bad JSON / no string `t` / missing required field -> ProtocolException. */
+    fun parse(text: String): HelperMessage {
+        try {
+            val j = JSONObject(text)
+            val t = j.opt("t") as? String ?: throw ProtocolException("missing string t")
+            return when (t) {
+                "helloAck" -> HelperMessage.HelloAck(j.getBoolean("inputEnabled"), (j.opt("side") as? String)?.takeIf { it in SIDES })
+                "inputState" -> HelperMessage.InputState(j.getBoolean("inputEnabled"))
+                "streamConfig" -> HelperMessage.StreamConfig(j.getInt("w"), j.getInt("h"))
+                "keepalive" -> HelperMessage.Keepalive
+                "end" -> HelperMessage.End(j.getString("reason"))
+                else -> HelperMessage.Unknown(t)
+            }
+        } catch (e: JSONException) {
+            throw ProtocolException("bad control message: ${e.message}")
+        }
+    }
+}

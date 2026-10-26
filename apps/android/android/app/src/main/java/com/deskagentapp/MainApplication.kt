@@ -1,6 +1,7 @@
 package com.deskagentapp
 
 import android.app.Application
+import com.deskagentapp.display.DisplayPackage
 import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
 import com.facebook.react.ReactHost
@@ -18,6 +19,7 @@ class MainApplication : Application(), ReactApplication {
           // add(MyReactNativePackage())
           add(PresencePackage())
           add(BrightnessPackage())
+          add(DisplayPackage())
         },
     )
   }

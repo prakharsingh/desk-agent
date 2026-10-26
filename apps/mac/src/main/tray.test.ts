@@ -27,14 +27,22 @@ vi.mock('electron', () => {
       this.image = image;
       trays.push(this);
     }
+    destroyed = false;
     setToolTip() {}
     setImage(image: FakeImage) {
+      if (this.destroyed) throw new Error('Tray is destroyed');
       this.image = image;
     }
     setContextMenu(menu: Electron.MenuItemConstructorOptions[]) {
+      if (this.destroyed) throw new Error('Tray is destroyed');
       this.menu = menu;
     }
-    destroy() {}
+    isDestroyed() {
+      return this.destroyed;
+    }
+    destroy() {
+      this.destroyed = true;
+    }
   }
   return {
     Tray,
@@ -248,5 +256,84 @@ describe('Paired phone label', () => {
     const labels = trays[trays.length - 1].menu.map((i) => i.label);
     expect(labels).toContain('Paired phone: OnePlus 6T');
     expect(labels).not.toContain('Paired phone: abc123');
+  });
+});
+
+describe('Disconnect phone display', () => {
+  beforeEach(() => {
+    trays.length = 0;
+  });
+
+  const connected = {
+    device: { serial: 'abc123', tunnelStatus: 'reissued' },
+    clients: { connected: 1, lastHelloAt: null },
+    presence: { state: 'present' },
+    automation: { enabled: true },
+  } as unknown as StatusSnapshot;
+  const disconnected = { ...connected, clients: { connected: 0, lastHelloAt: null } } as unknown as StatusSnapshot;
+
+  const labels = () => trays[trays.length - 1].menu.map((i) => i.label);
+
+  it.each([
+    ['a snapshot', connected],
+    ['no snapshot', null],
+    ['the phone JSON link down', disconnected],
+  ] as const)('shows Disconnect phone display only while a session is active (%s)', (_name, snapshot) => {
+    let active = false;
+    const controller = new TrayController({
+      resourcesPath,
+      getHealth: () => 'running',
+      getSnapshot: () => snapshot,
+      onOpenSettings: () => {},
+      onToggleAutomation: () => {},
+      getDisplayActive: () => active,
+      onDisconnectDisplay: () => {},
+      onQuit: () => {},
+    });
+    expect(labels()).not.toContain('Disconnect phone display');
+
+    active = true;
+    controller.refresh();
+    const menu = trays[trays.length - 1].menu;
+    const idx = menu.findIndex((i) => i.label === 'Disconnect phone display');
+    expect(idx).toBeGreaterThan(0);
+    // before the final separator + Settings/Quit
+    expect(menu[idx + 1].type).toBe('separator');
+    expect(menu[idx + 2].label).toBe('Settings…');
+    // the status/automation block above stays intact
+    if (snapshot) expect(menu.findIndex((i) => i.label?.startsWith('Phone app:'))).toBeLessThan(idx);
+
+    active = false;
+    controller.refresh();
+    expect(labels()).not.toContain('Disconnect phone display');
+  });
+
+  it('Disconnect phone display calls onDisconnectDisplay', () => {
+    const onDisconnectDisplay = vi.fn();
+    new TrayController({
+      resourcesPath,
+      getHealth: () => 'running',
+      getDisplayActive: () => true,
+      onDisconnectDisplay,
+      onOpenSettings: () => {},
+      onQuit: () => {},
+    });
+    const item = trays[trays.length - 1].menu.find((i) => i.label === 'Disconnect phone display');
+    (item?.click as () => void)();
+    expect(onDisconnectDisplay).toHaveBeenCalledOnce();
+  });
+});
+
+describe('TrayController after destroy', () => {
+  it('refresh() after destroy() is a no-op, not a "Tray is destroyed" throw', () => {
+    const controller = new TrayController({
+      resourcesPath,
+      getHealth: () => 'running',
+      onOpenSettings: () => {},
+      onQuit: () => {},
+    });
+    controller.destroy();
+    expect(() => controller.refresh()).not.toThrow();
+    expect(() => controller.destroy()).not.toThrow();
   });
 });

@@ -9,6 +9,9 @@ import type { Config } from '@desk-agent/config-schema';
 
 export interface BinaryStatus {
   adb: boolean;
+  /** The single adb every component uses (see resolveAdb), or null. */
+  adbPath: string | null;
+  adbSource: 'user' | 'bundled' | null;
   nowplayingCli: boolean;
 }
 

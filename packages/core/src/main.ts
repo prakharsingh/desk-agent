@@ -14,6 +14,7 @@ import { ControlChannel, type ControlTransport } from './controlChannel.js';
 import { ScreensaverConfigStore } from './screensaverConfigStore.js';
 import { CameraConfigStore } from './cameraConfigStore.js';
 import { WakeSetting } from './wakeSetting.js';
+import { DisplayCoordinator } from './displayCoordinator.js';
 
 const require = createRequire(import.meta.url);
 
@@ -43,6 +44,9 @@ export function run(opts: RunOptions = {}) {
   // runtime, by which point controlChannel has been assigned -- same pattern
   // this file already used for workerHost/gateway forward references.
   let controlChannel: ControlChannel | undefined;
+  // Same forward-reference pattern: the gateway/control-channel closures that
+  // reach it only run at runtime, after it is assigned below.
+  let displayCoordinator: DisplayCoordinator | undefined;
 
   const log = (pluginId: string, level: 'info' | 'warn' | 'error', message: string) => {
     console.log(`[${level}] ${pluginId}: ${message}`);
@@ -110,6 +114,9 @@ export function run(opts: RunOptions = {}) {
     },
     getVisibleWidgets: () => config.visibleWidgets,
     getWakeEnabled: () => wakeSetting.get(),
+    getDisplaySession: () => displayCoordinator?.getCurrentPayload() ?? null,
+    onDisplayStart: (p) => displayCoordinator?.onPhoneStart(p),
+    onDisplayStop: (p) => displayCoordinator?.onPhoneStop(p),
     // The phone owns the camera setting; with no phone connected there is no
     // owner, so drop the mirror rather than show a stale value to whichever
     // (possibly older, non-reporting) phone app connects next.
@@ -129,7 +136,12 @@ export function run(opts: RunOptions = {}) {
   });
 
   const tunnelLog = (level: 'info' | 'warn' | 'error', message: string) => log('tunnel', level, message);
-  const tunnelSupervisor = new TunnelSupervisor(createRealAdbRunner(tunnelLog), config.wsPort, tunnelLog, config.launchAppOnDock);
+  // One runner for both the tunnel and display-token delivery (core owns adb).
+  const adbRunner = createRealAdbRunner(tunnelLog, process.env.DESK_AGENT_ADB ?? 'adb');
+  // displayCoordinator is assigned below; after a core restart it learns the active session from main's
+  // resync (sent on core's first snapshot, which precedes boot() and so tunnelSupervisor.start()).
+  const tunnelSupervisor = new TunnelSupervisor(adbRunner, config.wsPort, tunnelLog, config.launchAppOnDock,
+    () => displayCoordinator?.getActiveSessionId() != null);
 
   if (opts.transport) {
     const pluginPermissions = Object.fromEntries(Object.entries(pluginRegistry).map(([id, entry]) => [id, entry.permissions]));
@@ -142,12 +154,33 @@ export function run(opts: RunOptions = {}) {
       phoneDisplay: screensaverConfigStore,
       camera: cameraConfigStore,
       wakeSetting,
+      extendedDisplay: {
+        onDisplaySession: (msg) => displayCoordinator?.onDisplaySession(msg),
+        onDisplayToken: (msg) => displayCoordinator?.onDisplayToken(msg),
+      },
       wsPort: config.wsPort,
       watchdogTimeoutMs: config.watchdogTimeoutMs,
       pluginPermissions,
       enabledPlugins: config.enabledPlugins,
     });
   }
+
+  // Built even standalone: with no control channel it answers display.start
+  // with error/unsupported-host.
+  displayCoordinator = new DisplayCoordinator({
+    toApp: controlChannel ?? null,
+    broadcast: (payload) => gateway.broadcastDisplaySession(payload),
+    getSerial: () => tunnelSupervisor.getSerial(),
+    tunnel: tunnelSupervisor,
+    deliverToken: (serial, sessionId, token) => adbRunner.deliverDisplayToken(serial, sessionId, token),
+    setSleepSuppressed: (suppressed) => automationEngine.setSuppressed('sleep-on-absent', suppressed),
+    // Re-arm sleep-on-absent if the user walked away during the session (the
+    // suppressed rule ignored that person_present edge).
+    recheckPresence: () => {
+      if (presenceEngine.getState() === 'absent') automationEngine.handleEvent('person_present', { present: false });
+    },
+    onLog: (level, message) => log('display', level, message),
+  });
 
   workerHost.start().then(() => boot({
     workerHost, gateway, tunnelSupervisor, eventBus, automationEngine, watchdog, presenceEngine,

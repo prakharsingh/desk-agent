@@ -1,0 +1,248 @@
+import Testing
+@testable import DisplayHelperCore
+
+@Suite struct ModeActivationTests {
+    let applied = DisplayModes.modes(surfaceW: 2340, surfaceH: 1080)
+    // macOS 27 refuses to desktop-activate small point sizes: 936x432 is NOT usable, 1170x540 and 1560x720 are.
+    let hi936 = DisplayModeInfo(widthPoints: 936, heightPoints: 432, pixelWidth: 1872, pixelHeight: 864, usableForDesktop: false)
+    let hi1170 = DisplayModeInfo(widthPoints: 1170, heightPoints: 540, pixelWidth: 2340, pixelHeight: 1080)
+    let hi1560 = DisplayModeInfo(widthPoints: 1560, heightPoints: 720, pixelWidth: 3120, pixelHeight: 1440)
+    let lowRes1872 = DisplayModeInfo(widthPoints: 1872, heightPoints: 864, pixelWidth: 1872, pixelHeight: 864)
+    let lowRes936 = DisplayModeInfo(widthPoints: 936, heightPoints: 432, pixelWidth: 936, pixelHeight: 432, usableForDesktop: false)
+
+    var available: [DisplayModeInfo] { [lowRes1872, lowRes936, hi1560, hi1170, hi936] }
+
+    @Test func activatesFirstUsableAppliedHiDPIModeWhenCurrentIsLowRes() {
+        // applied order: 936, 780, 1170, 1560, 2340 -> 936 unusable, 780 absent, 1170 wins.
+        #expect(ModeActivation.decide(current: lowRes1872, available: available, applied: applied) == .activate(hi1170))
+    }
+
+    @Test func keepsThePreferredHiDPIModeWhenAlreadyActive() {
+        #expect(ModeActivation.decide(current: hi1170, available: available, applied: applied) == .keep(hi1170))
+    }
+
+    @Test func switchesAwayFromAnotherAppliedHiDPIModeThatMacOSRestored() {
+        // F2: macOS restored the HiDPI variant of a later applied spec (1560, divisor 1.5) while the
+        // preferred usable one (1170, divisor 2.0) is listed: switch, do not keep.
+        #expect(ModeActivation.decide(current: hi1560, available: available, applied: applied) == .activate(hi1170))
+    }
+
+    @Test func keepsTheFirstAppliedModeWhenItIsUsableAndActive() {
+        // Preferred divisor first (as after a rotation at the user's 1.5 scale): 1560 leads and is kept.
+        let at15 = DisplayModes.modes(surfaceW: 2340, surfaceH: 1080, preferredDivisor: 1.5)
+        #expect(ModeActivation.decide(current: hi1560, available: available, applied: at15) == .keep(hi1560))
+        #expect(ModeActivation.decide(current: hi1170, available: available, applied: at15) == .activate(hi1560))
+    }
+
+    @Test func doesNotKeepAnUnusablePreferredSpecsVariant() {
+        // The current mode is 936x432@2x (2.5, unusable): the first USABLE spec (1170) is the target.
+        #expect(ModeActivation.decide(current: hi936, available: available, applied: applied) == .activate(hi1170))
+    }
+
+    @Test func activatesWhenNoCurrentMode() {
+        #expect(ModeActivation.decide(current: nil, available: available, applied: applied) == .activate(hi1170))
+    }
+
+    @Test func emptyModeListIsNoneAvailable() {
+        #expect(ModeActivation.decide(current: lowRes1872, available: [], applied: applied) == .noneAvailable)
+    }
+
+    @Test func laggingListBecomesAvailableOnALaterPoll() {
+        // First poll: macOS has not published our modes yet. Later poll: the same call now succeeds.
+        #expect(ModeActivation.decide(current: lowRes1872, available: [lowRes1872], applied: applied) == .noneAvailable)
+        #expect(ModeActivation.decide(current: lowRes1872, available: available, applied: applied) == .activate(hi1170))
+    }
+
+    @Test func noneAvailableWhenOnlyUnusableOrLowResVariantsExist() {
+        #expect(ModeActivation.decide(current: lowRes1872, available: [lowRes1872, lowRes936, hi936], applied: applied) == .noneAvailable)
+    }
+
+    @Test func doesNotKeepAHiDPIModeThatIsNotOurs() {
+        let foreign = DisplayModeInfo(widthPoints: 800, heightPoints: 600, pixelWidth: 1600, pixelHeight: 1200)
+        #expect(ModeActivation.decide(current: foreign, available: available + [foreign], applied: applied) == .activate(hi1170))
+    }
+
+    @Test func keepRequiresMatchingHeightNotJustWidth() {
+        // Same point width as an applied mode (1170) but a different height: not ours, so activate.
+        let sameWidthOtherHeight = DisplayModeInfo(widthPoints: 1170, heightPoints: 700, pixelWidth: 2340, pixelHeight: 1400)
+        #expect(ModeActivation.decide(current: sameWidthOtherHeight, available: available, applied: applied) == .activate(hi1170))
+    }
+
+    @Test func keepRequiresHiDPIPixelScale() {
+        // 1x mode with an applied point size is not a HiDPI mode of ours.
+        let oneX1170 = DisplayModeInfo(widthPoints: 1170, heightPoints: 540, pixelWidth: 1170, pixelHeight: 540)
+        #expect(ModeActivation.decide(current: oneX1170, available: available, applied: applied) == .activate(hi1170))
+    }
+}
+
+/// The retry/give-up bookkeeping of the asynchronous activation poll (VirtualDisplayController).
+@Suite struct ActivationPollTests {
+    @Test func budgetIsThirtyAttemptsOver3s() {
+        #expect(ActivationPoll.maxAttempts == 30)
+        #expect(abs(Double(ActivationPoll.maxAttempts) * ActivationPoll.interval - 3.0) < 1e-9)
+    }
+
+    @Test func aMirroredDisplayFailsAtOnceWithoutAnyConfiguration() {
+        // Checked before any configure call: a mirrored set is never mode-switched (fix round 1, I2).
+        var p = ActivationPoll()
+        #expect(p.record(.mirrored("CGDisplayIsInMirrorSet(0x000000c3)=1")) == .failed(.displayMirrored("CGDisplayIsInMirrorSet(0x000000c3)=1")))
+        var q = ActivationPoll()
+        #expect(q.record(.notListed) == .retry)
+        #expect(q.record(.mirrored("x")) == .failed(.displayMirrored("x")))
+    }
+
+    // MARK: the pre-configure guard (F-M1)
+
+    @Test func theGuardReportsAnOfflineDisplayFirst() {
+        #expect(ActivationPoll.preconfigureGuard(online: 0, mirror: { .mirrored("x") }) == .offline)
+    }
+
+    @Test func theGuardStopsAGenuinelyMirroredDisplayWithTheQueryThatFired() {
+        #expect(ActivationPoll.preconfigureGuard(online: 1, mirror: { .mirrored("CGDisplayIsInMirrorSet(0x000000c3)=1") })
+                == .mirrored("CGDisplayIsInMirrorSet(0x000000c3)=1"))
+    }
+
+    @Test func theGuardRetriesAnOnlineDisplayWhoseMirrorStateIsUnknown() {
+        // Online for real (1) but the mirror answers are error values: retried like a lagging mode list.
+        let attempt = ActivationPoll.preconfigureGuard(online: 1, mirror: { .unknown })
+        #expect(attempt == .notListed)
+        var p = ActivationPoll()
+        #expect(p.record(attempt!) == .retry)
+    }
+
+    @Test func theGuardReportsUnknownWhileCGAnswersTheOnlineQueryWithAnError() {
+        // F-M1 / review M1: CGDisplayIsOnline = -1 for a display this process does not list yet.
+        #expect(ActivationPoll.preconfigureGuard(online: -1, mirror: { .unknown }) == .unknown)
+        #expect(ActivationPoll.preconfigureGuard(online: -1, mirror: { .notMirrored }) == .unknown)
+    }
+
+    @Test func aListedDisplayNamingOursIsEvidenceEvenWhileOnlineIsUnknown() {
+        #expect(ActivationPoll.preconfigureGuard(online: -1, mirror: { .mirrored("CGDisplayMirrorsDisplay(0x00000001)=0x000000c7") })
+                == .mirrored("CGDisplayMirrorsDisplay(0x00000001)=0x000000c7"))
+    }
+
+    @Test func theGuardLetsAnUnmirroredDisplayThrough() {
+        #expect(ActivationPoll.preconfigureGuard(online: 1, mirror: { .notMirrored }) == nil)
+    }
+
+    @Test func theGuardSkipsTheMirrorQueriesForAnOfflineDisplay() {
+        var asked = false
+        _ = ActivationPoll.preconfigureGuard(online: 0, mirror: { asked = true; return .notMirrored })
+        #expect(!asked)
+    }
+
+    // MARK: unknown attempts (review M1): never online, never break an offline streak
+
+    @Test func unknownForTheWholePollEndsDisplayOffline() {
+        // Never seen online: like a display that never left "switched off", so the identity chain goes on.
+        var p = ActivationPoll()
+        for _ in 1..<ActivationPoll.maxAttempts { #expect(p.record(.unknown) == .retry) }
+        #expect(p.record(.unknown) == .failed(.displayOffline))
+    }
+
+    @Test func unknownThenOfflineEndsDisplayOfflineAfterTheUsualStreak() {
+        // A switched-off identity created during the CG lag: the 1 s offline streak starts when CG catches up.
+        var p = ActivationPoll()
+        for _ in 0..<12 { #expect(p.record(.unknown) == .retry) }
+        for _ in 1..<ActivationPoll.offlineGiveUpAttempts { #expect(p.record(.offline) == .retry) }
+        #expect(p.record(.offline) == .failed(.displayOffline))
+    }
+
+    @Test func anUnknownAttemptDoesNotResetTheOfflineStreak() {
+        var p = ActivationPoll()
+        for _ in 0..<5 { _ = p.record(.offline) }
+        #expect(p.record(.unknown) == .retry)
+        for _ in 0..<4 { #expect(p.record(.offline) == .retry) }
+        #expect(p.record(.offline) == .failed(.displayOffline))
+    }
+
+    @Test func unknownThenKeptFinishes() {
+        var p = ActivationPoll()
+        #expect(p.record(.unknown) == .retry)
+        #expect(p.record(.unknown) == .retry)
+        #expect(p.record(.kept) == .finished)
+    }
+
+    @Test func unknownAttemptsAreCounted() {
+        var p = ActivationPoll()
+        _ = p.record(.unknown); _ = p.record(.notListed); _ = p.record(.unknown)
+        #expect(p.unknownAttempts == 2)
+    }
+
+    @Test func anUnknownRunAfterAnOnlineAttemptStillEndsLikeAnUnlistedMode() {
+        var p = ActivationPoll()
+        #expect(p.record(.notListed) == .retry)
+        for _ in 2..<ActivationPoll.maxAttempts { _ = p.record(.unknown) }
+        #expect(p.record(.unknown) == .failed(.modeUnavailable))
+    }
+
+    @Test func keptOrSwitchedFinishesAtOnce() {
+        var a = ActivationPoll()
+        #expect(a.record(.kept) == .finished)
+        var b = ActivationPoll()
+        #expect(b.record(.switchSucceeded) == .finished)
+    }
+
+    @Test func nothingListedRetriesThenFailsUnavailableOnTheLastAttempt() {
+        var p = ActivationPoll()
+        for _ in 1..<ActivationPoll.maxAttempts { #expect(p.record(.notListed) == .retry) }
+        #expect(p.record(.notListed) == .failed(.modeUnavailable))
+    }
+
+    @Test func aFailedSwitchIsReportedWithTheLastError() {
+        var p = ActivationPoll()
+        #expect(p.record(.switchFailed(-1)) == .retry)
+        #expect(p.record(.switchFailed(1001)) == .retry)
+        for _ in 3..<ActivationPoll.maxAttempts { #expect(p.record(.notListed) == .retry) }
+        #expect(p.record(.notListed) == .failed(.modeSwitchFailed(1001)))
+    }
+
+    /// F1: macOS kept the display out of the desktop (Control Center "independent output" persisted
+    /// for this vendor/product/serial). Ten offline attempts in a row (1 s) give up early, so the
+    /// session can still try the spare identity inside the phone's 12 s reply timeout.
+    @Test func offlineForASecondFailsDisplayOfflineEarly() {
+        #expect(ActivationPoll.offlineGiveUpAttempts == 10)
+        #expect(abs(Double(ActivationPoll.offlineGiveUpAttempts) * ActivationPoll.interval - 1.0) < 1e-9)
+        var p = ActivationPoll()
+        for _ in 1..<ActivationPoll.offlineGiveUpAttempts { #expect(p.record(.offline) == .retry) }
+        #expect(p.record(.offline) == .failed(.displayOffline))
+        #expect(p.attempts == ActivationPoll.offlineGiveUpAttempts)
+    }
+
+    /// ControlCenter re-asserts independent output ~0.15 s after the display appears, so it can be
+    /// online (modes not listed yet) for an attempt before it goes offline for good.
+    @Test func onlineOnceThenOfflineForASecondFailsDisplayOffline() {
+        var p = ActivationPoll()
+        #expect(p.record(.notListed) == .retry)
+        for _ in 1..<ActivationPoll.offlineGiveUpAttempts { #expect(p.record(.offline) == .retry) }
+        #expect(p.record(.offline) == .failed(.displayOffline))
+    }
+
+    @Test func anOnlineAttemptResetsTheOfflineStreak() {
+        var p = ActivationPoll()
+        for _ in 1..<ActivationPoll.offlineGiveUpAttempts { #expect(p.record(.offline) == .retry) }
+        #expect(p.record(.notListed) == .retry)
+        for _ in 1..<ActivationPoll.offlineGiveUpAttempts { #expect(p.record(.offline) == .retry) }
+        #expect(p.record(.offline) == .failed(.displayOffline))
+        #expect(p.attempts == 2 * ActivationPoll.offlineGiveUpAttempts)
+    }
+
+    @Test func flappingOnlineNeverListedStillFailsModeUnavailable() {
+        var p = ActivationPoll()
+        for i in 1..<ActivationPoll.maxAttempts { #expect(p.record(i % 2 == 0 ? .notListed : .offline) == .retry) }
+        #expect(p.record(.notListed) == .failed(.modeUnavailable))
+    }
+
+    @Test func offlineThenOnlineAndSwitchedFinishes() {
+        var p = ActivationPoll()
+        for _ in 0..<5 { #expect(p.record(.offline) == .retry) }
+        #expect(p.record(.switchSucceeded) == .finished)
+    }
+
+    @Test func aLateSuccessFinishes() {
+        var p = ActivationPoll()
+        for _ in 0..<10 { #expect(p.record(.notListed) == .retry) }
+        #expect(p.record(.switchFailed(1001)) == .retry)
+        #expect(p.record(.switchSucceeded) == .finished)
+    }
+}

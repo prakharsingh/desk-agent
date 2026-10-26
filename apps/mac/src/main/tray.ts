@@ -66,6 +66,9 @@ export interface TrayControllerOptions {
   /** Non-intrusive update surfacing per the release-distribution spec: a menu item, never a dialog. */
   getUpdateAvailable?: () => ReleaseInfo | null;
   onOpenUpdate?: (url: string) => void;
+  /** Phone extended display: whether a session is active, and the menu's way to end it (reason 'mac-disconnect'). */
+  getDisplayActive?: () => boolean;
+  onDisconnectDisplay?: () => void;
   onQuit: () => void;
 }
 
@@ -80,11 +83,14 @@ export class TrayController {
 
   /** Call after core health OR snapshot changes so the icon, status dot and menu content stay honest. */
   refresh() {
+    // A late refresh (e.g. a display helper exiting after quit) must not touch a destroyed Tray.
+    if (this.tray.isDestroyed()) return;
     this.tray.setImage(iconForHealth(this.opts.getHealth(), this.opts.resourcesPath));
     this.rebuildMenu();
   }
 
   destroy() {
+    if (this.tray.isDestroyed()) return;
     this.tray.destroy();
   }
 
@@ -110,6 +116,8 @@ export class TrayController {
         click: () => this.opts.onOpenUpdate?.(update.url),
       });
     }
+    // True while the last item is an action (not read-only status), so a following action needs no separator.
+    let inActionGroup = false;
     if (snapshot) {
       items.push(
         { type: 'separator' },
@@ -130,7 +138,14 @@ export class TrayController {
           label: enabled ? 'Pause automation' : 'Resume automation',
           click: () => this.opts.onToggleAutomation?.(!enabled),
         });
+        inActionGroup = true;
       }
+    }
+    // Independent of the snapshot: the phone's JSON link may be down mid-session (core restart) while the
+    // video session still runs, and this must stay reachable.
+    if (this.opts.getDisplayActive?.() === true) {
+      if (!inActionGroup) items.push({ type: 'separator' });
+      items.push({ label: 'Disconnect phone display', click: () => this.opts.onDisconnectDisplay?.() });
     }
     items.push(
       { type: 'separator' },

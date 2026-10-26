@@ -2,7 +2,7 @@ import React from 'react';
 import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
 import { theme } from '../theme.js';
 
-export type SectionIconKind = 'clock' | 'system' | 'presence' | 'playing' | 'voice' | 'deck' | 'light';
+export type SectionIconKind = 'clock' | 'system' | 'presence' | 'playing' | 'voice' | 'deck' | 'light' | 'display';
 
 export function SectionIcon({ kind, size = 14, color }: { kind: SectionIconKind; size?: number; color?: string }) {
   const accent = color ?? theme.colors.accent;
@@ -75,6 +75,14 @@ export function SectionIcon({ kind, size = 14, color }: { kind: SectionIconKind;
           ].map(([x1, y1, x2, y2], i) => (
             <Line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke={accent} strokeWidth={1.4} strokeLinecap="round" />
           ))}
+        </Svg>
+      );
+    case 'display':
+      return (
+        <Svg width={size} height={size} viewBox="0 0 20 20">
+          <Rect x={2} y={3.5} width={16} height={10} rx={1.5} stroke={accent} strokeWidth={1.4} fill="none" />
+          <Line x1={10} y1={13.5} x2={10} y2={17} stroke={accent} strokeWidth={1.4} strokeLinecap="round" />
+          <Line x1={6.5} y1={17} x2={13.5} y2={17} stroke={accent} strokeWidth={1.4} strokeLinecap="round" />
         </Svg>
       );
     default:

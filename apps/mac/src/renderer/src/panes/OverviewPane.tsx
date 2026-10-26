@@ -131,7 +131,7 @@ export function OverviewPane({
         <Group>
           <Row
             label="adb"
-            value={binaries === null ? '…' : binaries.adb ? 'found' : 'not found'}
+            value={binaries === null ? '…' : binaries.adbPath ? `${binaries.adbPath} (${binaries.adbSource})` : 'not found'}
             dot={binaries === null ? off : binaries.adb ? green : off}
           />
           <Row

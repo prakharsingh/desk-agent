@@ -63,6 +63,16 @@ jobs:
         working-directory: apps/android/android
         run: ./gradlew :app:testDebugUnitTest
 
+      - name: Test — Swift display helper
+        run: pnpm --filter @desk-agent/mac run test:native
+
+      - name: Import mac signing cert
+        if: ${{ !inputs.dry_run }}
+        run: scripts/mac-signing/ci-import-cert.sh
+        env:
+          MAC_SIGN_P12_B64: ${{ secrets.MAC_SIGN_P12_B64 }}
+          MAC_SIGN_P12_PASSWORD: ${{ secrets.MAC_SIGN_P12_PASSWORD }}
+
       - name: Pack mac DMG (pre-release verification build)
         run: pnpm --filter @desk-agent/mac run pack
 
@@ -72,14 +82,16 @@ jobs:
       - name: Guard — all signing secrets present
         if: ${{ !inputs.dry_run }}
         run: |
-          for s in ANDROID_KEYSTORE_B64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
-            [ -n "${!s}" ] || { echo "::error::secret $s is not set — see packaging/ANDROID_SIGNING.md"; exit 1; }
+          for s in ANDROID_KEYSTORE_B64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD MAC_SIGN_P12_B64 MAC_SIGN_P12_PASSWORD; do
+            [ -n "${!s}" ] || { echo "::error::secret $s is not set — see packaging/ANDROID_SIGNING.md / packaging/MAC_SIGNING.md"; exit 1; }
           done
         env:
           ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          MAC_SIGN_P12_B64: ${{ secrets.MAC_SIGN_P12_B64 }}
+          MAC_SIGN_P12_PASSWORD: ${{ secrets.MAC_SIGN_P12_PASSWORD }}
 
       - name: Decode Android keystore
         if: ${{ !inputs.dry_run }}
@@ -95,3 +107,11 @@ jobs:
           DESK_AGENT_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           DESK_AGENT_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           DESK_AGENT_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          # build-release-artifacts.sh asserts a stable designated requirement when set.
+          DESK_AGENT_REQUIRE_SIGNED: ${{ !inputs.dry_run && '1' || '' }}
+
+      - name: Delete mac signing keychain
+        if: always()
+        run: |
+          KC="${DESK_AGENT_MAC_SIGN_KEYCHAIN:-$RUNNER_TEMP/desk-agent-signing.keychain-db}"
+          [ ! -e "$KC" ] || security delete-keychain "$KC"

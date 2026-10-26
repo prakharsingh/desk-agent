@@ -26,6 +26,24 @@ payload shape together.
 | `action.invoke` | phone → Mac, and Mac → phone | `{ pluginId, action, args? }` | Phone-initiated action call into a plugin (e.g. media transport → `system-stats`). Also the Mac→phone command channel: an `action.invoke` with the sentinel `pluginId: 'phone-display'` and `action: 'setScreensaverConfig'` (payload validated by `ScreensaverConfigSchema`, `{ enabled, graceMs }`) is handled by the app itself and never reaches a plugin worker. |
 | `event.publish` | either direction | `{ eventName, data }` | Generic typed event envelope — carries the `sensor.*` events below, `person_present`/`automation.override`, and `screensaver.config` (the phone reporting its applied screensaver config back; the phone is the source of truth, the Mac mirrors it). |
 
+## Display frames (phone as extended display)
+
+Dedicated frame types, not routed through the plugin `action.invoke` path.
+Additive, so `PROTOCOL_VERSION` stays `1`. The video itself is **not** a
+WebSocket frame: it is H.264 on a separate loopback socket (`DISPLAY_VIDEO_PORT`,
+`8788`), reached through `adb reverse`, and authenticated with a per-session
+token the core hands to the phone over `adb shell` (see
+[Architecture](Architecture)).
+
+| `type` | Direction | Payload | Purpose |
+|---|---|---|---|
+| `display.start` | phone → Mac | `{ w, h, orientation: 'portrait' \| 'landscape', dpi? }` | Asks for a session. `w`/`h` are the phone's physical pixels (320–8192); `dpi` only sizes the virtual display's physical size. |
+| `display.stop` | phone → Mac | `{ sessionId: string \| null, reason?: string }` | Ends the session (or cancels a pending start when `sessionId` is `null`). |
+| `display.session` | Mac → phone | `{ state: 'ready' \| 'ended' \| 'error', sessionId, videoPort?, reason? }` | Session state. `reason` is a free string on the wire; producers use the `DISPLAY_REASONS` values (for example `permission-screen-recording`, `display-offline`, `unsupported-host`, `no-device`). |
+
+`'display'` is also a valid `visibleWidgets` id (`WIDGET_IDS`), which controls
+the Home-screen Display tile.
+
 ## Sensor events (Slice 1b, carried inside `event.publish`)
 
 Honest, edge-triggered signals only — emitted on transition, not per frame,
