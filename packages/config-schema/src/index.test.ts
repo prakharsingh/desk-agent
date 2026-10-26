@@ -4,7 +4,7 @@ import { parseConfig, ConfigSchema } from './index.js';
 describe('ConfigSchema', () => {
   it('parses a fully empty object into a fully-defaulted, valid config (needed for first-run bootstrap)', () => {
     const config = parseConfig({});
-    expect(config.enabledPlugins).toEqual(['system-stats', 'weather', 'energy-saver']);
+    expect(config.enabledPlugins).toEqual(['system-stats', 'weather', 'energy-saver', 'deck']);
     expect(config.weather.location).toBe('Seattle');
     expect(config.wsPort).toBe(8787);
     expect(config.presenceDebounceMs).toBe(30000);
@@ -42,7 +42,7 @@ describe('ConfigSchema', () => {
 
   it('defaults visibleWidgets to every known widget id, sourced from @desk-agent/protocol\'s WIDGET_IDS', () => {
     const config = parseConfig({});
-    expect(config.visibleWidgets).toEqual(['clock', 'system', 'weather', 'presence', 'playing', 'light']);
+    expect(config.visibleWidgets).toEqual(['clock', 'system', 'weather', 'presence', 'playing', 'light', 'deck']);
   });
 
   it('accepts an explicit, narrower visibleWidgets list', () => {
@@ -77,6 +77,48 @@ describe('ConfigSchema', () => {
     it('accepts the default 30000 and other sane in-range values', () => {
       expect(parseConfig({}).watchdogTimeoutMs).toBe(30000);
       expect(parseConfig({ weather: {}, watchdogTimeoutMs: 60000 }).watchdogTimeoutMs).toBe(60000);
+    });
+  });
+
+  describe('deck config', () => {
+    it('defaults to an empty button list and enables the deck plugin', () => {
+      const config = parseConfig({});
+      expect(config.deck.buttons).toEqual([]);
+      expect(config.enabledPlugins).toContain('deck');
+    });
+
+    it('accepts each button kind', () => {
+      const config = parseConfig({
+        deck: {
+          buttons: [
+            { id: 'focus', label: 'Focus Mode', kind: 'shortcut', shortcutName: 'Focus Mode' },
+            { id: 'figma', label: 'Open Figma', kind: 'open', openTarget: 'Figma' },
+            { id: 'sleep', label: 'Sleep Display', kind: 'builtin', pluginId: 'energy-saver', action: 'sleep-display' },
+          ],
+          grid: { rows: 4, cols: 3 },
+        },
+      });
+      expect(config.deck.buttons).toHaveLength(3);
+      expect(config.deck.grid).toEqual({ rows: 4, cols: 3 });
+    });
+
+    it('rejects duplicate button ids with a clear message', () => {
+      expect(() =>
+        parseConfig({
+          deck: {
+            buttons: [
+              { id: 'a', label: 'One', kind: 'open', openTarget: 'Safari' },
+              { id: 'a', label: 'Two', kind: 'open', openTarget: 'Notes' },
+            ],
+          },
+        }),
+      ).toThrow(/duplicate deck button id/i);
+    });
+
+    it('rejects unknown kinds', () => {
+      expect(() =>
+        parseConfig({ deck: { buttons: [{ id: 'x', label: 'X', kind: 'shell', command: 'rm' }] } }),
+      ).toThrow();
     });
   });
 });

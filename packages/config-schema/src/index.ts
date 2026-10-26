@@ -38,11 +38,50 @@ export const EnergySaverConfigSchema = z.object({
   idleAction: z.string().default('displaysleepnow'),
 });
 
+const DeckButtonBase = {
+  id: z.string().min(1),
+  label: z.string().min(1),
+  glyph: z.string().optional(),
+  color: z.string().optional(),
+};
+
+export const DeckButtonSchema = z.discriminatedUnion('kind', [
+  z.object({ ...DeckButtonBase, kind: z.literal('shortcut'), shortcutName: z.string().min(1) }),
+  z.object({ ...DeckButtonBase, kind: z.literal('open'), openTarget: z.string().min(1) }),
+  z.object({
+    ...DeckButtonBase,
+    kind: z.literal('builtin'),
+    pluginId: z.string().min(1),
+    action: z.string().min(1),
+    args: z.record(z.unknown()).optional(),
+  }),
+]);
+export type DeckButtonConfig = z.infer<typeof DeckButtonSchema>;
+
+export const DeckConfigSchema = z
+  .object({
+    buttons: z.array(DeckButtonSchema).default([]),
+    grid: z.object({ rows: z.number().int().positive(), cols: z.number().int().positive() }).optional(),
+  })
+  .superRefine((deck, ctx) => {
+    const seen = new Set<string>();
+    for (const button of deck.buttons) {
+      if (seen.has(button.id)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `duplicate deck button id "${button.id}"` });
+      }
+      seen.add(button.id);
+    }
+  });
+
 export const ConfigSchema = z.object({
-  enabledPlugins: z.array(z.string()).default(['system-stats', 'weather', 'energy-saver']),
+  enabledPlugins: z.array(z.string()).default(['system-stats', 'weather', 'energy-saver', 'deck']),
   weather: WeatherConfigSchema.default({}),
   systemStats: SystemStatsConfigSchema.default({}),
   energySaver: EnergySaverConfigSchema.default({}),
+  // Phone-as-stream-deck button grid (spec: 2026-07-16-phone-deck-design.md).
+  // Passed straight through to createDeckPlugin() via the registry's
+  // configKey: 'deck', same pattern as `weather` above.
+  deck: DeckConfigSchema.default({}),
   presenceDebounceMs: z.number().default(30000),
   wsPort: z.number().default(8787),
   presence: PresenceConfigSchema.default({}),
@@ -71,8 +110,8 @@ export const ConfigSchema = z.object({
   // phone in the hello-reply's widget.update frame (see
   // packages/core/src/wsGateway.ts); app/src/display/HomeScreen.tsx
   // conditionally renders each tile against this list. Roadmap-only tiles
-  // (Voice, Steam Deck) aren't in WIDGET_IDS at all -- they're always shown,
-  // always disabled, never toggleable.
+  // (Voice, the Valve Steam Deck companion — not the 'deck' button grid) aren't
+  // in WIDGET_IDS at all -- they're always shown, always disabled, never toggleable.
   visibleWidgets: z.array(z.string()).default([...WIDGET_IDS]),
 });
 

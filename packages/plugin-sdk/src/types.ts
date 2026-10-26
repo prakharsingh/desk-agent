@@ -1,6 +1,12 @@
 import type { Widget } from '@desk-agent/protocol';
 
-export type Permission = 'net:api.weather' | 'sys:read-stats' | 'sys:control-display' | 'sys:control-media';
+export type Permission =
+  | 'net:api.weather'
+  | 'sys:read-stats'
+  | 'sys:control-display'
+  | 'sys:control-media'
+  | 'sys:run-shortcuts'
+  | 'sys:open';
 
 export type LogLevel = 'info' | 'warn' | 'error';
 

@@ -2,7 +2,7 @@ import React from 'react';
 import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
 import { theme } from '../theme.js';
 
-export type SectionIconKind = 'clock' | 'system' | 'presence' | 'playing' | 'voice' | 'deck' | 'light';
+export type SectionIconKind = 'clock' | 'system' | 'presence' | 'playing' | 'voice' | 'steamdeck' | 'light' | 'deck';
 
 export function SectionIcon({ kind, size = 14, color }: { kind: SectionIconKind; size?: number; color?: string }) {
   const accent = color ?? theme.colors.accent;
@@ -50,7 +50,7 @@ export function SectionIcon({ kind, size = 14, color }: { kind: SectionIconKind;
           <Line x1={10} y1={16} x2={10} y2={18.5} stroke={accent} strokeWidth={1.4} strokeLinecap="round" />
         </Svg>
       );
-    case 'deck':
+    case 'steamdeck':
       return (
         <Svg width={size} height={size} viewBox="0 0 20 20">
           <Rect x={1.5} y={6.5} width={17} height={9} rx={4} stroke={accent} strokeWidth={1.4} fill="none" />
@@ -59,6 +59,17 @@ export function SectionIcon({ kind, size = 14, color }: { kind: SectionIconKind;
           <Line x1={5.5} y1={9.5} x2={5.5} y2={12.5} stroke={accent} strokeWidth={1.4} strokeLinecap="round" />
           <Circle cx={14.5} cy={9.5} r={1.1} fill={accent} />
           <Circle cx={16.5} cy={11.5} r={1.1} fill={accent} />
+        </Svg>
+      );
+    case 'deck':
+      // Grid glyph (mirrors the design spec's ▦ button-grid symbol) --
+      // 2x2 squares standing in for the Deck screen's button grid.
+      return (
+        <Svg width={size} height={size} viewBox="0 0 20 20">
+          <Rect x={2} y={2} width={7} height={7} rx={1.2} stroke={accent} strokeWidth={1.4} fill="none" />
+          <Rect x={11} y={2} width={7} height={7} rx={1.2} stroke={accent} strokeWidth={1.4} fill="none" />
+          <Rect x={2} y={11} width={7} height={7} rx={1.2} stroke={accent} strokeWidth={1.4} fill="none" />
+          <Rect x={11} y={11} width={7} height={7} rx={1.2} stroke={accent} strokeWidth={1.4} fill="none" />
         </Svg>
       );
     case 'light':

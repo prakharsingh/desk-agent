@@ -48,8 +48,9 @@ const BASE_PROPS = {
   onGoPresence: NOOP,
   onGoClock: NOOP,
   onGoVoice: NOOP,
-  onGoDeck: NOOP,
+  onGoSteamDeck: NOOP,
   onGoLight: NOOP,
+  onGoDeck: NOOP,
 };
 
 describe('HomeScreen', () => {
@@ -103,6 +104,7 @@ describe('HomeScreen', () => {
       expect(screen.getByText('WEATHER')).toBeTruthy();
       expect(screen.getByText('NOW PLAYING')).toBeTruthy();
       expect(screen.getByText('CHIN LIGHT')).toBeTruthy();
+      expect(screen.getByText('DECK')).toBeTruthy();
     });
 
     it('hides a tile whose id is absent from visibleWidgets', async () => {
@@ -118,6 +120,7 @@ describe('HomeScreen', () => {
       expect(screen.queryByText('WEATHER')).toBeNull();
       expect(screen.queryByText('NOW PLAYING')).toBeNull();
       expect(screen.queryByText('CHIN LIGHT')).toBeNull();
+      expect(screen.queryByText('DECK')).toBeNull();
     });
 
     it('never hides the roadmap tiles (Voice, Steam Deck) -- they are not in WIDGET_IDS and are never toggleable', async () => {

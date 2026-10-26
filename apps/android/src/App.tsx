@@ -1,11 +1,12 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { parseScreensaverConfig, type Frame, type ScreensaverConfig, type Widget } from '@desk-agent/protocol';
 import { WsClient, type ConnectionState } from './wsClient.js';
 import { AppShell } from './display/AppShell.js';
 import { INITIAL_SCREEN_STATE, STANDBY_DECK, STANDBY_VOICE, back, goTo, goToStandby, sleep, wake } from './display/screens.js';
 import { UNKNOWN_SENSOR_FRAME, mergeSensorFrame, resetSensorFrame, type SensorFrame } from './display/sensorFrame.js';
 import { DEFAULT_SCREENSAVER_CONFIG, loadScreensaverConfig, saveScreensaverConfig } from './display/screensaverConfig.js';
-import { buildMediaActionFrame, buildOverrideFrame, buildScreensaverConfigFrame } from './presenceEvents.js';
+import { buildMediaActionFrame, buildOverrideFrame, buildScreensaverConfigFrame, buildDeckPressFrame, buildDeckBuiltinFrame } from './presenceEvents.js';
+import type { DeckButtonView } from './display/widgetReaders.js';
 
 const WS_URL = 'ws://localhost:8787';
 const HEARTBEAT_TIMEOUT_MS = 15000;
@@ -144,6 +145,38 @@ export default function App() {
     sendFrame(JSON.stringify(buildMediaActionFrame('previous')));
   }, [sendFrame]);
 
+  // Deck button presses: `builtin` buttons target a plugin's own action
+  // directly (system-stats media actions, energy-saver sleep/wake) and are
+  // fire-and-forget -- no seq tracking, pressed-blip only, so this returns
+  // null and DeckScreen never enters the ack/timeout state machine for them.
+  // Everything else (shortcut/open) goes through the deck plugin's press
+  // action with a locally incrementing seq DeckScreen uses to match the
+  // eventual widget-republish ack (see deckPress.ts).
+  // Seeded from the clock (not 0) so seqs stay strictly increasing across
+  // app relaunches: the deck plugin keeps a newest-seq high-water mark for
+  // the *core's* lifetime (packages/plugins/deck/src/index.ts), which
+  // outlives any single phone-app session. A counter that resets to 0 on
+  // relaunch would replay seqs the plugin has already seen as "newest",
+  // so every post-relaunch ack gets silently suppressed by the >= guard --
+  // producing false error blips on presses that actually succeeded on the Mac.
+  const deckSeqRef = useRef(Date.now());
+  const onPressDeckButton = useCallback(
+    (button: DeckButtonView): number | null => {
+      const t0 = Date.now();
+      if (button.kind === 'builtin') {
+        sendFrame(JSON.stringify(buildDeckBuiltinFrame(button.pluginId!, button.action!, button.args)));
+        return null;
+      }
+      const seq = ++deckSeqRef.current;
+      sendFrame(JSON.stringify(buildDeckPressFrame(button.id, seq)));
+      // Phone-clock latency segment #1 (spec hard requirement): press ->
+      // send, single clock, no cross-device comparison.
+      if (__DEV__) console.log('[deck] press->send', button.id, 'seq', seq, Date.now() - t0, 'ms');
+      return seq;
+    },
+    [sendFrame],
+  );
+
   const setCameraEnabledAndReset = useCallback((enabled: boolean) => {
     setCameraEnabled(enabled);
     if (!enabled) setSensorFrame(resetSensorFrame());
@@ -160,8 +193,9 @@ export default function App() {
   const onGoPresence = useCallback(() => setScreenState((s) => goTo(s, 'presence')), []);
   const onGoClock = useCallback(() => setScreenState((s) => goTo(s, 'clock')), []);
   const onGoVoice = useCallback(() => setScreenState((s) => goToStandby(s, STANDBY_VOICE)), []);
-  const onGoDeck = useCallback(() => setScreenState((s) => goToStandby(s, STANDBY_DECK)), []);
+  const onGoSteamDeck = useCallback(() => setScreenState((s) => goToStandby(s, STANDBY_DECK)), []);
   const onGoLight = useCallback(() => setScreenState((s) => goTo(s, 'light')), []);
+  const onGoDeck = useCallback(() => setScreenState((s) => goTo(s, 'deck')), []);
   const onBack = useCallback(() => setScreenState(back), []);
   const onSleep = useCallback(() => setScreenState(sleep), []);
   const onWake = useCallback(() => setScreenState(wake), []);
@@ -179,6 +213,7 @@ export default function App() {
       onTogglePlayPause={onTogglePlayPause}
       onNextTrack={onNextTrack}
       onPreviousTrack={onPreviousTrack}
+      onPressDeckButton={onPressDeckButton}
       sendFrame={sendFrame}
       connectionEpoch={connectionEpoch}
       onSensor={onSensor}
@@ -191,8 +226,9 @@ export default function App() {
       onGoPresence={onGoPresence}
       onGoClock={onGoClock}
       onGoVoice={onGoVoice}
-      onGoDeck={onGoDeck}
+      onGoSteamDeck={onGoSteamDeck}
       onGoLight={onGoLight}
+      onGoDeck={onGoDeck}
       onGoSettings={onGoSettings}
       onBack={onBack}
       onSleep={onSleep}

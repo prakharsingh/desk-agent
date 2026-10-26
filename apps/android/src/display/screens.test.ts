@@ -42,4 +42,8 @@ describe('screens reducer', () => {
   it('goTo navigates to the settings screen', () => {
     expect(goTo(INITIAL_SCREEN_STATE, 'settings').screen).toBe('settings');
   });
+
+  it('goTo navigates to the deck screen', () => {
+    expect(goTo(INITIAL_SCREEN_STATE, 'deck').screen).toBe('deck');
+  });
 });

@@ -13,6 +13,7 @@ const LABELS: Record<(typeof WIDGET_IDS)[number], string> = {
   presence: 'Presence',
   playing: 'Now Playing',
   light: 'Chin Light',
+  deck: 'Deck',
 };
 
 const SUBLABELS: Record<(typeof WIDGET_IDS)[number], string> = {
@@ -22,11 +23,12 @@ const SUBLABELS: Record<(typeof WIDGET_IDS)[number], string> = {
   presence: 'Status badge · sensor readout',
   playing: 'Track · transport controls',
   light: 'Warm/white · brightness · 30 min timeout',
+  deck: 'Phone button grid',
 };
 
 const ROADMAP_ITEMS = [
   { label: 'Voice', sublabel: 'Assistant module' },
-  { label: 'Steam Deck', sublabel: 'Companion module' },
+  { label: 'Steam Deck (companion)', sublabel: 'Companion module' },
 ];
 
 function RoadmapBadge() {

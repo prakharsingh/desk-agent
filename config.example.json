@@ -1,6 +1,13 @@
 {
-  "enabledPlugins": ["system-stats", "weather", "energy-saver"],
+  "enabledPlugins": ["system-stats", "weather", "energy-saver", "deck"],
   "weather": { "location": "Seattle" },
   "presenceDebounceMs": 10000,
-  "wsPort": 8787
+  "wsPort": 8787,
+  "deck": {
+    "buttons": [
+      { "id": "focus", "label": "Focus Mode", "kind": "shortcut", "shortcutName": "Focus Mode" },
+      { "id": "figma", "label": "Open Figma", "kind": "open", "openTarget": "Figma", "glyph": "◨" },
+      { "id": "sleep", "label": "Sleep Display", "kind": "builtin", "pluginId": "energy-saver", "action": "sleep-display", "glyph": "☾" }
+    ]
+  }
 }

@@ -38,8 +38,9 @@ export interface HomeScreenProps {
   onGoPresence: () => void;
   onGoClock: () => void;
   onGoVoice: () => void;
-  onGoDeck: () => void;
+  onGoSteamDeck: () => void;
   onGoLight: () => void;
+  onGoDeck: () => void;
 }
 
 export function HomeScreen({
@@ -58,8 +59,9 @@ export function HomeScreen({
   onGoPresence,
   onGoClock,
   onGoVoice,
-  onGoDeck,
+  onGoSteamDeck,
   onGoLight,
+  onGoDeck,
 }: HomeScreenProps) {
   const { timeHHMM, timeSS } = formatClock(now);
   const dateStr = formatDate(now);
@@ -187,6 +189,21 @@ export function HomeScreen({
         </View>
       )}
 
+      {/* Deck card -- real, isVisible-gated tile for the phone-as-stream-deck
+          button grid (config.json's deck.buttons), same real-module treatment
+          as System/Weather/Now Playing above. */}
+      {isVisible('deck') && (
+        <Card onPress={onGoDeck} accent>
+          <View style={styles.cardHeaderRow}>
+            <View style={styles.labelRow}>
+              <IconChip kind="deck" />
+              <Text style={styles.sectionLabelAccent}>DECK</Text>
+            </View>
+            <Text style={styles.chevron}>›</Text>
+          </View>
+        </Card>
+      )}
+
       {/* Voice + Steam Deck standby row -- roadmap variant: dashed, dimmed,
           honest ROADMAP / MODULE STANDBY / NOT LINKED copy, never a
           fabricated feature description. */}
@@ -199,9 +216,9 @@ export function HomeScreen({
           <Badge label="ROADMAP" tone="neutral" style={styles.roadmapBadge} />
           <Text style={styles.standbyCaption}>MODULE STANDBY</Text>
         </Card>
-        <Card onPress={onGoDeck} variant="roadmap" style={styles.halfCard}>
+        <Card onPress={onGoSteamDeck} variant="roadmap" style={styles.halfCard}>
           <View style={styles.labelRow}>
-            <IconChip kind="deck" tone="dim" />
+            <IconChip kind="steamdeck" tone="dim" />
             <Text style={styles.standbyLabel}>STEAM DECK</Text>
           </View>
           <Badge label="ROADMAP" tone="neutral" style={styles.roadmapBadge} />

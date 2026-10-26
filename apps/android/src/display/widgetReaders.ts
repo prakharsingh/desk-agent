@@ -50,6 +50,63 @@ export function readSystemStats(widgets: Record<string, Widget>): SystemStatsVie
   };
 }
 
+export interface DeckButtonView {
+  id: string;
+  label: string;
+  glyph?: string;
+  color?: string;
+  kind: 'shortcut' | 'open' | 'builtin';
+  pluginId?: string;
+  action?: string;
+  args?: Record<string, unknown>;
+}
+
+export interface DeckAckView {
+  seq: number;
+  buttonId: string;
+  state: 'pending' | 'ok' | 'error';
+}
+
+export interface DeckView {
+  buttons: DeckButtonView[];
+  grid?: { rows: number; cols: number };
+  lastPress?: DeckAckView;
+}
+
+function readDeckButton(raw: unknown): DeckButtonView | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.id !== 'string' || typeof r.label !== 'string') return null;
+  if (r.kind !== 'shortcut' && r.kind !== 'open' && r.kind !== 'builtin') return null;
+  return {
+    id: r.id,
+    label: r.label,
+    kind: r.kind,
+    ...(typeof r.glyph === 'string' ? { glyph: r.glyph } : {}),
+    ...(typeof r.color === 'string' ? { color: r.color } : {}),
+    ...(typeof r.pluginId === 'string' ? { pluginId: r.pluginId } : {}),
+    ...(typeof r.action === 'string' ? { action: r.action } : {}),
+    ...(r.args && typeof r.args === 'object' ? { args: r.args as Record<string, unknown> } : {}),
+  };
+}
+
+export function readDeck(widgets: Record<string, Widget>): DeckView {
+  const w = findWidget(widgets, 'deck');
+  const props = (w?.props ?? {}) as Record<string, unknown>;
+  const buttons = Array.isArray(props.buttons)
+    ? props.buttons.map(readDeckButton).filter((b): b is DeckButtonView => b !== null)
+    : [];
+  const grid =
+    typeof props.grid === 'object' && props.grid !== null
+      ? (props.grid as { rows: number; cols: number })
+      : undefined;
+  const lastPress =
+    typeof props.lastPress === 'object' && props.lastPress !== null
+      ? (props.lastPress as DeckAckView)
+      : undefined;
+  return { buttons, ...(grid ? { grid } : {}), ...(lastPress ? { lastPress } : {}) };
+}
+
 export function readWeather(widgets: Record<string, Widget>): WeatherView {
   const w = findWidget(widgets, 'weather');
   const props = (w?.props ?? {}) as Record<string, unknown>;
